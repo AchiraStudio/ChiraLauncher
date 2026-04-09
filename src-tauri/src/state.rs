@@ -45,6 +45,7 @@ pub enum GameDbWrite {
         game_id: String,
         cover_path: Option<String>,
         background_path: Option<String>,
+        logo_path: Option<String>, // NEW
     },
     UpdateRunAsAdmin {
         game_id: String,
@@ -131,7 +132,7 @@ pub struct ExtensionInfo {
     pub id: String,
     pub name: String,
     pub version: String,
-    pub kind: String, // "theme" | "plugin"
+    pub kind: String,
     pub checksum: String,
     pub enabled: bool,
     pub consent_given: bool,

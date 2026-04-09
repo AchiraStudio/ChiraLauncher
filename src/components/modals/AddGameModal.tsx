@@ -41,6 +41,7 @@ export function AddGameModal() {
     const [description, setDescription] = useState("");
     const [coverPath, setCoverPath] = useState<string | null>(null);
     const [backgroundPath, setBackgroundPath] = useState<string | null>(null);
+    const [logoPath, setLogoPath] = useState<string | null>(null);
     const [developer, setDeveloper] = useState("");
     const [publisher, setPublisher] = useState("");
     const [releaseDate, setReleaseDate] = useState("");
@@ -66,6 +67,7 @@ export function AddGameModal() {
         setDescription("");
         setCoverPath(null);
         setBackgroundPath(null);
+        setLogoPath(null);
         setDeveloper("");
         setPublisher("");
         setReleaseDate("");
@@ -138,11 +140,12 @@ export function AddGameModal() {
             setDeveloper(data.developers?.[0] || "");
             setPublisher(data.publishers?.[0] || "");
             setReleaseDate(parseSteamDate(data.release_date?.date));
-            setGenre(data.genres?.map(g => g.description).join(", ") || "");
+            setGenre(data.genres?.map((g: any) => g.description).join(", ") || "");
 
             const bgPref = localStorage.getItem("steam_bg_pref") || "hero";
             setCoverPath(`https://cdn.cloudflare.steamstatic.com/steam/apps/${detectedAppId}/library_600x900.jpg`);
             setBackgroundPath(bgPref === "hero" ? `https://cdn.cloudflare.steamstatic.com/steam/apps/${detectedAppId}/library_hero.jpg` : data.header_image);
+            setLogoPath(`https://cdn.cloudflare.steamstatic.com/steam/apps/${detectedAppId}/logo_2x.png`);
         } catch (error) {
             toast.error("Could not fetch Steam metadata");
         } finally {
@@ -155,12 +158,26 @@ export function AddGameModal() {
 
         setIsImporting(true);
         try {
+            const processUrl = async (url: string | null, type: string) => {
+                if (!url || !url.startsWith("http")) return url;
+                try {
+                    return await invoke<string>("download_url_to_cache", { url, imageType: type });
+                } catch {
+                    return url;
+                }
+            };
+
+            const finalCover = applySteamData ? await processUrl(coverPath, "cover") : null;
+            const finalBg = applySteamData ? await processUrl(backgroundPath, "background") : null;
+            const finalLogo = applySteamData ? await processUrl(logoPath, "logo") : null;
+
             const newGame: NewGame = {
                 id: uuidv4(),
                 title: applySteamData && steamData ? steamData.name : title,
                 executable_path: exePath,
-                cover_path: applySteamData ? coverPath : null,
-                background_path: applySteamData ? backgroundPath : null,
+                cover_path: finalCover,
+                background_path: finalBg,
+                logo_path: finalLogo,
                 description: applySteamData ? description : null,
                 developer: applySteamData ? developer : null,
                 publisher: applySteamData ? publisher : null,
@@ -325,7 +342,7 @@ export function AddGameModal() {
                                             </div>
                                         </div>
 
-                                        <div className="flex items-center justify-between pt-4 border-t border-white/5">
+                                        <div className="flex items-center justify-between pt-4 border-t border-white/5 mt-auto">
                                             <button onClick={() => setStep("PICK_FILE")} className="flex items-center gap-2 px-6 py-2 rounded-xl text-white/40 hover:text-white font-black transition-all text-xs tracking-widest uppercase">
                                                 <ChevronLeft size={16} /> Reselect
                                             </button>
@@ -363,7 +380,7 @@ export function AddGameModal() {
 
                                         {steamData && (
                                             <div className={cn("grid grid-cols-3 gap-6 transition-opacity", !applySteamData && "opacity-30 pointer-events-none")}>
-                                                <div className="col-span-1 space-y-2">
+                                                <div className="col-span-1 space-y-4">
                                                     <div className="w-full aspect-[2/3] rounded-xl overflow-hidden border border-white/10 relative">
                                                         <img src={coverPath!} className="w-full h-full object-cover" />
                                                         <div className="absolute top-2 left-2 bg-black/80 px-2 py-1 rounded text-[9px] font-bold text-white/50 uppercase border border-white/10">Cover Preview</div>
@@ -373,6 +390,10 @@ export function AddGameModal() {
                                                     <div className="w-full h-32 rounded-xl overflow-hidden border border-white/10 relative">
                                                         <img src={backgroundPath!} className="w-full h-full object-cover" />
                                                         <div className="absolute top-2 left-2 bg-black/80 px-2 py-1 rounded text-[9px] font-bold text-white/50 uppercase border border-white/10">Hero Preview</div>
+                                                    </div>
+                                                    <div className="w-full h-16 rounded-xl overflow-hidden border border-white/10 relative bg-black/40 flex items-center justify-center p-2">
+                                                        <img src={logoPath!} className="w-auto h-full object-contain" />
+                                                        <div className="absolute top-2 left-2 bg-black/80 px-2 py-1 rounded text-[9px] font-bold text-white/50 uppercase border border-white/10">Logo Preview</div>
                                                     </div>
                                                     <div className="bg-black/40 p-4 rounded-xl border border-white/5 space-y-2 text-xs text-white/70">
                                                         <p><strong className="text-white/40">Title:</strong> {title}</p>
@@ -405,7 +426,11 @@ export function AddGameModal() {
                                                 <Gamepad2 size={32} />
                                             </div>
                                         )}
-                                        <span className="font-black text-white text-sm leading-tight uppercase tracking-tighter relative z-10 drop-shadow-md">{title}</span>
+                                        {applySteamData && logoPath ? (
+                                            <img src={logoPath} className="relative z-10 w-full object-contain" />
+                                        ) : (
+                                            <span className="font-black text-white text-sm leading-tight uppercase tracking-tighter relative z-10 drop-shadow-md">{title}</span>
+                                        )}
                                     </div>
                                     <div className="absolute inset-0 bg-accent/20 blur-[80px] opacity-0 group-hover:opacity-40 transition-opacity duration-700" />
                                 </div>

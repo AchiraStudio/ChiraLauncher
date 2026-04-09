@@ -404,8 +404,13 @@ fn looks_like_goldberg_save(path: &Path) -> bool {
                 arr.first().map_or(false, |e| {
                     e.get("achieved").is_some() || e.get("earned").is_some()
                 })
+            } else if let Some(obj) = v.as_object() {
+                // Better validation for the dictionary/object format
+                obj.values().next().map_or(false, |e| {
+                    e.get("earned").is_some() || e.get("achieved").is_some()
+                })
             } else {
-                v.is_object()
+                false
             }
         })
         .unwrap_or(false)
@@ -435,7 +440,12 @@ pub fn read_goldberg_earned(path: &Path) -> HashMap<String, u64> {
                     || item
                         .get("earned")
                         .and_then(|v| v.as_bool())
+                        .unwrap_or(false)
+                    || item
+                        .get("achieved")
+                        .and_then(|v| v.as_bool())
                         .unwrap_or(false);
+
                 if achieved {
                     if let Some(n) = item.get("name").and_then(|v| v.as_str()) {
                         let earned_time = item
@@ -448,7 +458,18 @@ pub fn read_goldberg_earned(path: &Path) -> HashMap<String, u64> {
             }
         } else if let Some(obj) = json.as_object() {
             for (k, v) in obj {
-                let achieved = v.get("earned").and_then(|e| e.as_bool()).unwrap_or(false);
+                // Safely handle true/false OR 1/0
+                let achieved = v.get("earned").and_then(|e| e.as_bool()).unwrap_or(false)
+                    || v.get("achieved").and_then(|e| e.as_bool()).unwrap_or(false)
+                    || v.get("earned")
+                        .and_then(|e| e.as_u64())
+                        .map(|u| u == 1)
+                        .unwrap_or(false)
+                    || v.get("achieved")
+                        .and_then(|e| e.as_u64())
+                        .map(|u| u == 1)
+                        .unwrap_or(false);
+
                 if achieved {
                     let time = v.get("earned_time").and_then(|t| t.as_u64()).unwrap_or(0);
                     unlocked.insert(k.clone(), time);

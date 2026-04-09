@@ -13,7 +13,7 @@ import {
 import { cn } from "../../lib/utils";
 import { useLocalImage } from "../../hooks/useLocalImage";
 
-function ImagePreview({ path, aspect, placeholder }: { path: string; aspect: string; placeholder: string }) {
+function ImagePreview({ path, aspect, placeholder, isLogo = false }: { path: string; aspect: string; placeholder: string; isLogo?: boolean }) {
     const { src, error } = useLocalImage(path);
     const [, focalStr] = path.split("?pos=");
     const objectPosition = focalStr?.replace("-", " ") || "center";
@@ -21,7 +21,7 @@ function ImagePreview({ path, aspect, placeholder }: { path: string; aspect: str
     return (
         <div className={cn("rounded-xl bg-black/40 border border-white/5 overflow-hidden flex items-center justify-center text-white/10 shrink-0 relative", aspect)}>
             {src && !error ? (
-                <img src={src} alt="" className="absolute inset-0 w-full h-full object-cover" style={{ objectPosition }} />
+                <img src={src} alt="" className={cn("absolute inset-0 w-full h-full", isLogo ? "object-contain p-2" : "object-cover")} style={{ objectPosition }} />
             ) : (
                 <span className="relative z-10 text-2xl select-none">{placeholder}</span>
             )}
@@ -48,6 +48,7 @@ export function EditGameModal() {
     const [exePath, setExePath] = useState("");
     const [coverPath, setCoverPath] = useState("");
     const [backgroundPath, setBackgroundPath] = useState("");
+    const [logoPath, setLogoPath] = useState("");
     const [focalPoint, setFocalPoint] = useState("center");
     const [developer, setDeveloper] = useState("");
     const [publisher, setPublisher] = useState("");
@@ -66,6 +67,7 @@ export function EditGameModal() {
             setTitle(gameToEdit.title || "");
             setExePath(gameToEdit.executable_path || "");
             setCoverPath(gameToEdit.cover_image_path || (gameToEdit as any).cover_path || "");
+            setLogoPath(gameToEdit.logo_path || "");
 
             const rawBg = gameToEdit.background_image_path || (gameToEdit as any).background_path || "";
             const [urlPart, posPart] = rawBg.split("?pos=");
@@ -97,27 +99,27 @@ export function EditGameModal() {
     const handleSave = async () => {
         setIsSaving(true);
         try {
-            let finalCover = coverPath;
-            let finalBgRaw = backgroundPath;
-
             const originalCover = gameToEdit.cover_image_path || (gameToEdit as any).cover_path || "";
             const originalBg = (gameToEdit.background_image_path || (gameToEdit as any).background_path || "").split("?pos=")[0];
+            const originalLogo = gameToEdit.logo_path || "";
 
-            if (finalCover && finalCover !== originalCover && !finalCover.startsWith("http") && !finalCover.startsWith("data:")) {
+            const processImage = async (current: string, original: string, type: string) => {
+                if (!current || current === original || current.startsWith("data:")) return current;
                 try {
-                    finalCover = await invoke("upload_custom_cover", { gameId: gameToEdit.id, filePath: finalCover });
+                    if (current.startsWith("http")) {
+                        return await invoke<string>("download_url_to_cache", { url: current, imageType: type });
+                    } else {
+                        return await invoke<string>(`upload_custom_${type}`, { gameId: gameToEdit.id, filePath: current });
+                    }
                 } catch (e) {
-                    console.error("Cover processing failed", e);
+                    console.error(`Failed to process ${type}:`, e);
+                    return current;
                 }
-            }
+            };
 
-            if (finalBgRaw && finalBgRaw !== originalBg && !finalBgRaw.startsWith("http") && !finalBgRaw.startsWith("data:")) {
-                try {
-                    finalBgRaw = await invoke("upload_custom_background", { gameId: gameToEdit.id, filePath: finalBgRaw });
-                } catch (e) {
-                    console.error("Background processing failed", e);
-                }
-            }
+            const finalCover = await processImage(coverPath, originalCover, "cover");
+            const finalBgRaw = await processImage(backgroundPath, originalBg, "background");
+            const finalLogo = await processImage(logoPath, originalLogo, "logo");
 
             const finalBg = finalBgRaw ? `${finalBgRaw}?pos=${focalPoint}` : null;
 
@@ -127,6 +129,7 @@ export function EditGameModal() {
                 executable_path: exePath,
                 cover_image_path: finalCover || null,
                 background_image_path: finalBg || null,
+                logo_path: finalLogo || null,
                 cover_path: finalCover || null,
                 background_path: finalBg || null,
                 developer: developer || null,
@@ -169,7 +172,7 @@ export function EditGameModal() {
     const applySteamData = async () => {
         if (!steamDataToImport) return;
         const data = steamDataToImport;
-        
+
         if (importOptions.title && data.name) {
             setTitle(data.name);
         }
@@ -186,24 +189,24 @@ export function EditGameModal() {
             const bgPref = localStorage.getItem("steam_bg_pref") || "hero";
             setCoverPath(`https://cdn.cloudflare.steamstatic.com/steam/apps/${appIdInput}/library_600x900.jpg`);
             setBackgroundPath(bgPref === "hero" ? `https://cdn.cloudflare.steamstatic.com/steam/apps/${appIdInput}/library_hero.jpg` : data.header_image);
+            setLogoPath(`https://cdn.cloudflare.steamstatic.com/steam/apps/${appIdInput}/logo_2x.png`);
             setFocalPoint("center");
         }
-        
-        // Patch local JSON achievement rarity
+
         try {
             const pcts = await fetchSteamAchievementPercentages(appIdInput);
             if (Object.keys(pcts).length > 0 && gameToEdit) {
-                await invoke("patch_achievement_percentages", { 
-                    gameId: gameToEdit.id, 
-                    percentages: pcts 
+                await invoke("patch_achievement_percentages", {
+                    gameId: gameToEdit.id,
+                    percentages: pcts
                 });
             }
         } catch (e) {
             console.error("Failed to patch achievement rarity:", e);
         }
-        
+
         setSteamDataToImport(null);
-        toast.success("Metadata Placed", { description: "Review and save your changes. Achievement rarities mapped." });
+        toast.success("Metadata Placed", { description: "Review and save your changes." });
     };
 
     const handlePickExe = async () => {
@@ -211,11 +214,12 @@ export function EditGameModal() {
         if (selected && typeof selected === "string") setExePath(selected);
     };
 
-    const handlePickImage = async (type: "cover" | "bg") => {
+    const handlePickImage = async (type: "cover" | "bg" | "logo") => {
         const selected = await openDialog({ multiple: false, filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "gif"] }] });
         if (selected && typeof selected === "string") {
             if (type === "cover") setCoverPath(selected);
-            else setBackgroundPath(selected);
+            else if (type === "bg") setBackgroundPath(selected);
+            else setLogoPath(selected);
         }
     };
 
@@ -300,7 +304,7 @@ export function EditGameModal() {
                                             </label>
                                             <label className="flex items-center gap-3 p-3 bg-white/5 rounded-xl border border-transparent hover:border-white/10 cursor-pointer transition-colors">
                                                 <input type="checkbox" checked={importOptions.images} onChange={(e) => setImportOptions(o => ({ ...o, images: e.target.checked }))} className="w-4 h-4 accent-accent" />
-                                                <span className="text-sm font-bold text-white">Assets (Cover & Background)</span>
+                                                <span className="text-sm font-bold text-white">Assets (Cover, Hero, & Logo)</span>
                                             </label>
                                         </div>
                                     </div>
@@ -326,121 +330,125 @@ export function EditGameModal() {
                                                     </button>
                                                 </div>
                                             </div>
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <div>
-                                                <Label>Steam App ID</Label>
-                                                <div className="relative">
-                                                    <Hash size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/20" />
-                                                    <input type="number" value={appIdInput} onChange={(e) => setAppIdInput(e.target.value)} className={cn(inputCls, "pl-9 font-mono")} placeholder="e.g. 123456" />
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div>
+                                                    <Label>Steam App ID</Label>
+                                                    <div className="relative">
+                                                        <Hash size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/20" />
+                                                        <input type="number" value={appIdInput} onChange={(e) => setAppIdInput(e.target.value)} className={cn(inputCls, "pl-9 font-mono")} placeholder="e.g. 123456" />
+                                                    </div>
+                                                </div>
+                                                <div>
+                                                    <Label>Developer</Label>
+                                                    <div className="relative">
+                                                        <User2 size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/20" />
+                                                        <input type="text" value={developer} onChange={(e) => setDeveloper(e.target.value)} className={cn(inputCls, "pl-9")} />
+                                                    </div>
                                                 </div>
                                             </div>
-                                            <div>
-                                                <Label>Developer</Label>
-                                                <div className="relative">
-                                                    <User2 size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/20" />
-                                                    <input type="text" value={developer} onChange={(e) => setDeveloper(e.target.value)} className={cn(inputCls, "pl-9")} />
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div>
+                                                    <Label>Release Date</Label>
+                                                    <div className="relative">
+                                                        <Calendar size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/20" />
+                                                        <input type="date" value={releaseDate} onChange={(e) => setReleaseDate(e.target.value)} className={cn(inputCls, "pl-9 [color-scheme:dark]")} />
+                                                    </div>
+                                                </div>
+                                                <div>
+                                                    <Label>Genre / Publisher</Label>
+                                                    <div className="relative">
+                                                        <Monitor size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/20" />
+                                                        <input type="text" value={genre} onChange={(e) => setGenre(e.target.value)} className={cn(inputCls, "pl-9")} />
+                                                    </div>
                                                 </div>
                                             </div>
-                                        </div>
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <div>
-                                                <Label>Release Date</Label>
-                                                <div className="relative">
-                                                    <Calendar size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/20" />
-                                                    <input type="date" value={releaseDate} onChange={(e) => setReleaseDate(e.target.value)} className={cn(inputCls, "pl-9 [color-scheme:dark]")} />
-                                                </div>
-                                            </div>
-                                            <div>
-                                                <Label>Genre / Publisher</Label>
-                                                <div className="relative">
-                                                    <Monitor size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/20" />
-                                                    <input type="text" value={genre} onChange={(e) => setGenre(e.target.value)} className={cn(inputCls, "pl-9")} />
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </motion.div>
-                                )}
+                                        </motion.div>
+                                    )}
 
-                                {tab === "images" && (
-                                    <motion.div key="images" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }} className="space-y-6">
-                                        <div className="flex gap-5 items-start">
-                                            <ImagePreview path={coverPath} aspect="w-20 h-28" placeholder="🖼️" />
-                                            <div className="flex-1 space-y-2">
-                                                <Label>Cover Image</Label>
-                                                <p className="text-white/25 text-[10px] mb-3">Enter an HTTPS URL or pick a local file.</p>
-                                                <div className="flex gap-2">
-                                                    <input
-                                                        type="text"
-                                                        value={coverPath}
-                                                        onChange={(e) => setCoverPath(e.target.value)}
-                                                        className={cn(inputCls, "flex-1 text-xs font-mono")}
-                                                    />
-                                                    <button onClick={() => handlePickImage("cover")} className="shrink-0 bg-white/5 hover:bg-white/10 text-white/60 hover:text-white px-3 rounded-xl font-bold text-xs transition-all border border-white/10 flex items-center gap-1.5">
-                                                        <FolderOpen size={13} /> Browse
-                                                    </button>
+                                    {tab === "images" && (
+                                        <motion.div key="images" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }} className="space-y-6">
+                                            <div className="flex gap-5 items-start">
+                                                <ImagePreview path={coverPath} aspect="w-20 h-28" placeholder="🖼️" />
+                                                <div className="flex-1 space-y-2">
+                                                    <Label>Cover Image</Label>
+                                                    <div className="flex gap-2">
+                                                        <input type="text" value={coverPath} onChange={(e) => setCoverPath(e.target.value)} className={cn(inputCls, "flex-1 text-xs font-mono")} />
+                                                        <button onClick={() => handlePickImage("cover")} className="shrink-0 bg-white/5 hover:bg-white/10 text-white/60 hover:text-white px-3 rounded-xl font-bold text-xs transition-all border border-white/10 flex items-center gap-1.5">
+                                                            <FolderOpen size={13} />
+                                                        </button>
+                                                    </div>
+                                                    {coverPath && (
+                                                        <button onClick={() => setCoverPath("")} className="text-red-400/60 hover:text-red-400 text-xs font-semibold transition-colors flex items-center gap-1">
+                                                            <X size={11} /> Clear
+                                                        </button>
+                                                    )}
                                                 </div>
-                                                {coverPath && (
-                                                    <button onClick={() => setCoverPath("")} className="text-red-400/60 hover:text-red-400 text-xs font-semibold transition-colors flex items-center gap-1">
-                                                        <X size={11} /> Clear image
-                                                    </button>
-                                                )}
                                             </div>
-                                        </div>
-                                        <div className="border-t border-white/5" />
-                                        <div className="flex gap-5 items-start">
-                                            <ImagePreview path={backgroundPath ? `${backgroundPath}?pos=${focalPoint}` : ""} aspect="w-32 h-20" placeholder="🌄" />
-                                            <div className="flex-1 space-y-2">
-                                                <div className="flex items-center justify-between">
-                                                    <Label>Background / Hero Image</Label>
-                                                    <select value={focalPoint} onChange={(e) => setFocalPoint(e.target.value)} className="bg-white/5 border border-white/10 text-[9px] font-bold uppercase tracking-widest px-2 py-1 rounded outline-none text-white/60 focus:text-white">
-                                                        <option value="center">Center</option>
-                                                        <option value="top">Top</option>
-                                                        <option value="bottom">Bottom</option>
-                                                        <option value="left">Left</option>
-                                                        <option value="right">Right</option>
-                                                    </select>
+                                            <div className="border-t border-white/5" />
+                                            <div className="flex gap-5 items-start">
+                                                <ImagePreview path={backgroundPath ? `${backgroundPath}?pos=${focalPoint}` : ""} aspect="w-32 h-20" placeholder="🌄" />
+                                                <div className="flex-1 space-y-2">
+                                                    <div className="flex items-center justify-between">
+                                                        <Label>Background / Hero Image</Label>
+                                                        <select value={focalPoint} onChange={(e) => setFocalPoint(e.target.value)} className="bg-white/5 border border-white/10 text-[9px] font-bold uppercase tracking-widest px-2 py-1 rounded outline-none text-white/60">
+                                                            <option value="center">Center</option>
+                                                            <option value="top">Top</option>
+                                                            <option value="bottom">Bottom</option>
+                                                        </select>
+                                                    </div>
+                                                    <div className="flex gap-2">
+                                                        <input type="text" value={backgroundPath} onChange={(e) => setBackgroundPath(e.target.value)} className={cn(inputCls, "flex-1 text-xs font-mono")} />
+                                                        <button onClick={() => handlePickImage("bg")} className="shrink-0 bg-white/5 hover:bg-white/10 text-white/60 hover:text-white px-3 rounded-xl font-bold text-xs transition-all border border-white/10 flex items-center gap-1.5">
+                                                            <FolderOpen size={13} />
+                                                        </button>
+                                                    </div>
+                                                    {backgroundPath && (
+                                                        <button onClick={() => setBackgroundPath("")} className="text-red-400/60 hover:text-red-400 text-xs font-semibold transition-colors flex items-center gap-1">
+                                                            <X size={11} /> Clear
+                                                        </button>
+                                                    )}
                                                 </div>
-                                                <p className="text-white/25 text-[10px] mb-3">Adjust the focal point if the main subject is cropped.</p>
-                                                <div className="flex gap-2">
-                                                    <input
-                                                        type="text"
-                                                        value={backgroundPath}
-                                                        onChange={(e) => setBackgroundPath(e.target.value)}
-                                                        className={cn(inputCls, "flex-1 text-xs font-mono")}
-                                                    />
-                                                    <button onClick={() => handlePickImage("bg")} className="shrink-0 bg-white/5 hover:bg-white/10 text-white/60 hover:text-white px-3 rounded-xl font-bold text-xs transition-all border border-white/10 flex items-center gap-1.5">
-                                                        <FolderOpen size={13} /> Browse
-                                                    </button>
-                                                </div>
-                                                {backgroundPath && (
-                                                    <button onClick={() => setBackgroundPath("")} className="text-red-400/60 hover:text-red-400 text-xs font-semibold transition-colors flex items-center gap-1">
-                                                        <X size={11} /> Clear image
-                                                    </button>
-                                                )}
                                             </div>
-                                        </div>
-                                    </motion.div>
-                                )}
+                                            <div className="border-t border-white/5" />
+                                            <div className="flex gap-5 items-start">
+                                                <ImagePreview path={logoPath} aspect="w-32 h-16" placeholder="✨" isLogo />
+                                                <div className="flex-1 space-y-2">
+                                                    <Label>Transparent Logo (Optional)</Label>
+                                                    <div className="flex gap-2">
+                                                        <input type="text" value={logoPath} onChange={(e) => setLogoPath(e.target.value)} className={cn(inputCls, "flex-1 text-xs font-mono")} />
+                                                        <button onClick={() => handlePickImage("logo")} className="shrink-0 bg-white/5 hover:bg-white/10 text-white/60 hover:text-white px-3 rounded-xl font-bold text-xs transition-all border border-white/10 flex items-center gap-1.5">
+                                                            <FolderOpen size={13} />
+                                                        </button>
+                                                    </div>
+                                                    {logoPath && (
+                                                        <button onClick={() => setLogoPath("")} className="text-red-400/60 hover:text-red-400 text-xs font-semibold transition-colors flex items-center gap-1">
+                                                            <X size={11} /> Clear
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </motion.div>
+                                    )}
 
-                                {tab === "extra" && (
-                                    <motion.div key="extra" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }} className="space-y-5">
-                                        <div>
-                                            <Label>Description / Summary</Label>
-                                            <div className="relative">
-                                                <FileText size={14} className="absolute left-3.5 top-3.5 text-white/20" />
-                                                <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={5} className={cn(inputCls, "pl-9 resize-none")} />
+                                    {tab === "extra" && (
+                                        <motion.div key="extra" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }} className="space-y-5">
+                                            <div>
+                                                <Label>Description / Summary</Label>
+                                                <div className="relative">
+                                                    <FileText size={14} className="absolute left-3.5 top-3.5 text-white/20" />
+                                                    <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={5} className={cn(inputCls, "pl-9 resize-none")} />
+                                                </div>
                                             </div>
-                                        </div>
-                                        <div>
-                                            <Label>Personal Notes</Label>
-                                            <div className="relative">
-                                                <StickyNote size={14} className="absolute left-3.5 top-3.5 text-white/20" />
-                                                <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={4} className={cn(inputCls, "pl-9 resize-none")} />
+                                            <div>
+                                                <Label>Personal Notes</Label>
+                                                <div className="relative">
+                                                    <StickyNote size={14} className="absolute left-3.5 top-3.5 text-white/20" />
+                                                    <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={4} className={cn(inputCls, "pl-9 resize-none")} />
+                                                </div>
                                             </div>
-                                        </div>
-                                    </motion.div>
-                                )}
-                            </AnimatePresence>
+                                        </motion.div>
+                                    )}
+                                </AnimatePresence>
                             )}
                         </div>
 

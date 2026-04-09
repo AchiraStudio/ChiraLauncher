@@ -6,8 +6,6 @@ use tokio::sync::mpsc;
 
 pub async fn run_db_writer(db_path: PathBuf, mut rx: mpsc::UnboundedReceiver<DbWrite>) {
     let mut conn = Connection::open(&db_path).expect("DB writer failed to open connection");
-
-    // WAL mode: readers never block on this writer
     conn.execute_batch("PRAGMA journal_mode=WAL;").unwrap();
 
     while let Some(write) = rx.recv().await {
@@ -23,7 +21,7 @@ pub async fn run_db_writer(db_path: PathBuf, mut rx: mpsc::UnboundedReceiver<DbW
             DbWrite::Game(GameDbWrite::InsertGame(game)) => queries::insert_game_conn(&conn, game),
             DbWrite::Game(GameDbWrite::DeleteGame { game_id }) => queries::delete_game_conn(&conn, &game_id),
             DbWrite::Game(GameDbWrite::UpdateGame { game }) => queries::update_game_conn(&conn, game),
-            DbWrite::Game(GameDbWrite::UpdateAssets { game_id, cover_path, background_path }) => queries::update_assets_conn(&conn, &game_id, cover_path, background_path),
+            DbWrite::Game(GameDbWrite::UpdateAssets { game_id, cover_path, background_path, logo_path }) => queries::update_assets_conn(&conn, &game_id, cover_path, background_path, logo_path),
             DbWrite::Game(GameDbWrite::UpdateSteamAppId { game_id, steam_app_id }) => conn.execute(
                 "UPDATE games SET steam_app_id = ?1 WHERE id = ?2",
                 rusqlite::params![steam_app_id, game_id],
@@ -42,7 +40,6 @@ pub async fn run_db_writer(db_path: PathBuf, mut rx: mpsc::UnboundedReceiver<DbW
             ),
             DbWrite::Game(GameDbWrite::UpdateDetectedAchievementPaths { game_id, metadata, earned_state }) => 
                 queries::update_detected_achievement_paths_conn(&conn, &game_id, metadata, earned_state),
-            
             DbWrite::Profile(ProfileDbWrite::UnlockAchievement { game_id, api_name, title, desc, unlock_time }) => conn.execute(
                 "INSERT INTO achievements (game_id, api_name, title, description, unlocked, unlock_time) 
                  VALUES (?1, ?2, ?3, ?4, 1, ?5) 
@@ -73,20 +70,14 @@ pub async fn run_db_writer(db_path: PathBuf, mut rx: mpsc::UnboundedReceiver<DbW
                         }
                     }
                     if total_new_xp > 0 {
-                        tx.execute(
-                            "UPDATE profiles SET xp = xp + ?1 WHERE is_default = 1",
-                            rusqlite::params![total_new_xp],
-                        )?;
+                        tx.execute("UPDATE profiles SET xp = xp + ?1 WHERE is_default = 1", rusqlite::params![total_new_xp])?;
                     }
                     tx.commit()?;
                     Ok(0)
                 })();
                 res
             },
-            DbWrite::Profile(ProfileDbWrite::AddXp(amount)) => conn.execute(
-                "UPDATE profiles SET xp = xp + ?1 WHERE is_default = 1",
-                rusqlite::params![amount],
-            ),
+            DbWrite::Profile(ProfileDbWrite::AddXp(amount)) => conn.execute("UPDATE profiles SET xp = xp + ?1 WHERE is_default = 1", rusqlite::params![amount]),
             DbWrite::Profile(ProfileDbWrite::UpdateProfile(profile)) => conn.execute(
                 "INSERT INTO profiles (id, username, steam_id, avatar_url, is_default, xp) VALUES (?1, ?2, ?3, ?4, ?5, ?6) 
                  ON CONFLICT(id) DO UPDATE SET username = excluded.username, steam_id = excluded.steam_id, avatar_url = excluded.avatar_url, is_default = excluded.is_default",
@@ -106,28 +97,15 @@ pub async fn run_db_writer(db_path: PathBuf, mut rx: mpsc::UnboundedReceiver<DbW
                  has_desktop_shortcut = excluded.has_desktop_shortcut, 
                  has_start_menu_shortcut = excluded.has_start_menu_shortcut, 
                  has_registry_entry = excluded.has_registry_entry",
-                rusqlite::params![
-                    integration.game_id, 
-                    integration.has_desktop_shortcut as i32, 
-                    integration.has_start_menu_shortcut as i32, 
-                    integration.has_registry_entry as i32
-                ],
+                rusqlite::params![integration.game_id, integration.has_desktop_shortcut as i32, integration.has_start_menu_shortcut as i32, integration.has_registry_entry as i32],
             ),
             DbWrite::Extensions(ExtensionDbWrite::UpdateExtension(ext)) => conn.execute(
                 "INSERT INTO extensions (id, name, version, kind, checksum, enabled, consent_given, permissions) 
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) 
                  ON CONFLICT(id) DO UPDATE SET 
-                 name = excluded.name, 
-                 version = excluded.version, 
-                 checksum = excluded.checksum, 
-                 enabled = excluded.enabled, 
-                 consent_given = excluded.consent_given, 
-                 permissions = excluded.permissions",
-                rusqlite::params![
-                    ext.id, ext.name, ext.version, ext.kind, ext.checksum, 
-                    ext.enabled as i32, ext.consent_given as i32, 
-                    serde_json::to_string(&ext.permissions).unwrap_or_default()
-                ],
+                 name = excluded.name, version = excluded.version, checksum = excluded.checksum, 
+                 enabled = excluded.enabled, consent_given = excluded.consent_given, permissions = excluded.permissions",
+                rusqlite::params![ext.id, ext.name, ext.version, ext.kind, ext.checksum, ext.enabled as i32, ext.consent_given as i32, serde_json::to_string(&ext.permissions).unwrap_or_default()],
             ),
         };
 

@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Link, useNavigate } from "react-router-dom";
 import { Play, Clock, Gamepad2, ChevronRight, Star, HardDriveDownload, Square } from "lucide-react";
@@ -9,11 +9,33 @@ import { launchGame, forceStopGame } from "./services/gameService";
 import type { Game } from "./types/game";
 import { useLocalImage } from "./hooks/useLocalImage";
 
+/** Strip HTML tags and decode basic entities for plain-text previews */
+function stripHtml(html: string): string {
+    return html
+        .replace(/<[^>]*>/g, " ")          // remove all tags
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&nbsp;/g, " ")
+        .replace(/\s+/g, " ")              // collapse whitespace
+        .trim();
+}
+
 function HeroFeaturedGame({ game }: { game: Game }) {
     const navigate = useNavigate();
     const runningInfo = useProcessStore((s) => s.running[game.id]);
     const isRunning = !!runningInfo;
+
     const { src: bgUrl } = useLocalImage(game.background_image_path || (game as any).background_path || game.cover_image_path || (game as any).cover_path);
+
+    // Robust logo resolving via the backend cache/http handler
+    const { src: logoSrc, error: logoErr } = useLocalImage(game.logo_path);
+    const [logoFailed, setLogoFailed] = useState(false);
+
+    // Assume logo is valid if path exists, unless explicitly proven otherwise
+    const isLogoValid = Boolean(game.logo_path && !logoErr && !logoFailed);
 
     const handleAction = async (e: React.MouseEvent) => {
         e.preventDefault();
@@ -27,7 +49,7 @@ function HeroFeaturedGame({ game }: { game: Game }) {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             className="relative w-full h-[500px] rounded-[2rem] overflow-hidden group cursor-pointer border border-white/10 shadow-[0_20px_50px_rgba(0,0,0,0.5)]"
-            onClick={() => navigate('/library')}
+            onClick={() => navigate('/library', { state: { gameId: game.id } })}
         >
             {bgUrl ? (
                 <img src={bgUrl} alt={game.title} className="absolute inset-0 w-full h-full object-cover transition-transform duration-[2s] group-hover:scale-105 brightness-[0.6] saturate-125" />
@@ -45,13 +67,26 @@ function HeroFeaturedGame({ game }: { game: Game }) {
                     Featured Selection
                 </span>
 
-                <h1 className="text-5xl md:text-7xl font-black text-white tracking-tighter uppercase leading-[0.9] mb-4 drop-shadow-2xl max-w-3xl">
-                    {game.title}
-                </h1>
+                {isLogoValid ? (
+                    <img
+                        key={game.id}
+                        src={logoSrc || undefined}
+                        alt={game.title}
+                        onError={() => setLogoFailed(true)}
+                        className={cn(
+                            "block w-auto max-w-[420px] max-h-[154px] object-contain mb-5 drop-shadow-[0_4px_40px_rgba(0,0,0,0.95)] transition-opacity duration-300",
+                            !logoSrc ? "opacity-0" : "opacity-100"
+                        )}
+                    />
+                ) : (
+                    <h1 className="text-5xl md:text-7xl font-black text-white tracking-tighter uppercase leading-[0.9] mb-4 drop-shadow-2xl max-w-3xl">
+                        {game.title}
+                    </h1>
+                )}
 
                 {game.description && (
                     <p className="text-white/60 text-sm md:text-base font-medium max-w-2xl line-clamp-2 leading-relaxed mb-8 drop-shadow-md">
-                        {game.description}
+                        {stripHtml(game.description)}
                     </p>
                 )}
 
@@ -66,7 +101,7 @@ function HeroFeaturedGame({ game }: { game: Game }) {
                         {isRunning ? <Square size={16} fill="currentColor" /> : <Play size={18} fill="currentColor" />}
                         {isRunning ? "Stop Process" : "Play Now"}
                     </button>
-                    <button onClick={(e) => { e.stopPropagation(); navigate('/library'); }} className="px-8 py-4 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white font-bold text-xs uppercase tracking-widest transition-all backdrop-blur-md">
+                    <button onClick={(e) => { e.stopPropagation(); navigate('/library', { state: { gameId: game.id } }); }} className="px-8 py-4 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white font-bold text-xs uppercase tracking-widest transition-all backdrop-blur-md">
                         View Details
                     </button>
                 </div>
@@ -82,7 +117,7 @@ function StoreCard({ game }: { game: Game }) {
     return (
         <motion.div
             whileHover={{ y: -8 }}
-            onClick={() => navigate('/library')}
+            onClick={() => navigate('/library', { state: { gameId: game.id } })}
             className="group cursor-pointer flex flex-col gap-3"
         >
             <div className="w-full aspect-[2/3] rounded-2xl overflow-hidden border border-white/10 bg-black/40 shadow-xl relative">

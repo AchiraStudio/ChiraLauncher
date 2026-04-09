@@ -11,19 +11,14 @@ export function Favorites() {
     const { gamesById } = useGameStore();
     const { customFolders } = useFolderStore();
 
-    // Find the 'favorites' folder (internal filter or manual)
     const favoriteGames = useMemo(() => {
         const allGames = Object.values(gamesById);
-
-        // Strategy: 1. Check for manual folders with filterType 'favorites'
-        // Or find games that appear in any 'favorites' typed folder
         const favoriteIds = new Set<string>();
         customFolders.forEach(f => {
             if (f.filterType === "favorites") {
                 f.gameIds?.forEach(id => favoriteIds.add(id));
             }
         });
-
         return allGames.filter(g => favoriteIds.has(g.id));
     }, [gamesById, customFolders]);
 
@@ -50,7 +45,7 @@ export function Favorites() {
                 </header>
 
                 {favoriteGames.length === 0 ? (
-                    <motion.div 
+                    <motion.div
                         initial={{ opacity: 0, scale: 0.95 }}
                         animate={{ opacity: 1, scale: 1 }}
                         className="flex-1 flex flex-col items-center justify-center py-40 text-center"
@@ -85,18 +80,18 @@ export function Favorites() {
                                     <GameCard
                                         game={game}
                                         index={i}
-                                        onClick={() => navigate(`/game/${game.id}`)}
-                                        onHoverStart={() => {}}
-                                        onHoverEnd={() => {}}
+                                        onClick={() => navigate('/library', { state: { gameId: game.id } })}
+                                        onHoverStart={() => { }}
+                                        onHoverEnd={() => { }}
                                     />
                                 </motion.div>
                             ))}
                         </AnimatePresence>
                     </div>
                 )}
-                
+
                 {favoriteGames.length > 0 && (
-                    <motion.div 
+                    <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         transition={{ delay: 0.5 }}

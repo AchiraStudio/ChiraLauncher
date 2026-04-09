@@ -21,13 +21,14 @@ export interface Game {
     sort_title: string | null;
     executable_path: string;
     playtime_seconds: number;
-    last_played: string | null; // ISO 8601
-    added_at: string | null;     // ISO 8601
+    last_played: string | null;
+    added_at: string | null;
     source: string;
     installed_size: number | null;
     install_dir: string | null;
     cover_image_path: string | null;
     background_image_path: string | null;
+    logo_path: string | null; // NEW
     description: string | null;
     igdb_id: number | null;
     steam_app_id: number | null;
@@ -44,22 +45,19 @@ export interface Game {
     notes: string | null;
     last_metadata_sync: string | null;
 
-    // Phase 20 RAWG metadata overrides
-    genres: string | null; // JSON string
-    tags: string | null; // JSON string
+    genres: string | null;
+    tags: string | null;
     metacritic_score: number | null;
-    platforms: string | null; // JSON string
-    repack_info: string | null; // JSON string
+    platforms: string | null;
+    repack_info: string | null;
     run_as_admin: boolean;
 
-    // Phase Persistent Stats
     session_count: number | null;
     first_played: string | null;
     achievements_unlocked: number | null;
     achievements_total: number | null;
     manual_achievement_path: string | null;
 
-    // Emulator / achievement detection fields
     crack_type: string | null;
     app_id: string | null;
     detected_metadata_path: string | null;
@@ -74,6 +72,7 @@ export interface NewGame {
     executable_path: string;
     cover_path: string | null;
     background_path: string | null;
+    logo_path: string | null; // NEW
     description: string | null;
     developer: string | null;
     genre: string | null;

@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { useLocation } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { useGameStore } from "./store/gameStore";
 import { useUiStore } from "./store/uiStore";
@@ -14,7 +15,7 @@ import { formatPlaytime } from "./lib/format";
 import {
     Clock, Trophy, Heart, Settings, FolderOpen, Play, Square,
     Gamepad2, Trash2, RefreshCcw, Plus, Search, Calendar,
-    User2, Building2, ChevronRight, X, ExternalLink, ThumbsUp, ThumbsDown, Star
+    User2, Building2, ChevronRight, X, ExternalLink, ThumbsUp, ThumbsDown, Star, Info
 } from "lucide-react";
 import { ContextMenu, type ContextMenuItem } from "./components/ui/ContextMenu";
 import { motion, AnimatePresence } from "framer-motion";
@@ -22,28 +23,36 @@ import { AchievementGrid } from "./components/game/AchievementGrid";
 import type { Game } from "./types/game";
 import { useLocalImage } from "./hooks/useLocalImage";
 
-// ─── STEAM HTML RENDERER STYLES ───────────────────────────────────────────────
+// ─── Steam HTML renderer styles ──────────────────────────────────────────────
 const steamHtml = [
-    "text-white/70 text-[14px] leading-[1.85] font-normal",
+    "text-white/65 text-[14px] leading-[1.9] font-normal",
     "[&_h1]:text-white [&_h1]:text-2xl [&_h1]:font-black [&_h1]:uppercase [&_h1]:tracking-tight",
     "[&_h1]:border-b [&_h1]:border-white/10 [&_h1]:pb-3 [&_h1]:mt-12 [&_h1]:mb-5 [&_h1:first-child]:mt-0",
     "[&_h2]:text-white [&_h2]:text-lg [&_h2]:font-bold [&_h2]:mt-8 [&_h2]:mb-3",
     "[&_h3]:text-white/90 [&_h3]:text-base [&_h3]:font-bold [&_h3]:mt-6 [&_h3]:mb-2",
-    "[&_p]:mb-4 [&_p]:text-white/65",
+    "[&_p]:mb-4 [&_p]:text-white/60",
     "[&_strong]:text-white/90 [&_strong]:font-semibold",
     "[&_b]:text-white/90 [&_b]:font-semibold",
-    "[&_i]:text-white/45 [&_em]:text-white/45",
+    "[&_i]:text-white/40 [&_em]:text-white/40",
     "[&_.bb_ul]:list-none [&_.bb_ul]:ml-0 [&_.bb_ul]:mb-5 [&_.bb_ul]:space-y-1.5",
-    "[&_.bb_ul>li]:text-white/65 [&_.bb_ul>li]:flex [&_.bb_ul>li]:items-start [&_.bb_ul>li]:gap-2.5",
+    "[&_.bb_ul>li]:text-white/60 [&_.bb_ul>li]:flex [&_.bb_ul>li]:items-start [&_.bb_ul>li]:gap-2.5",
     "[&_.bb_ul>li]:before:content-['▸'] [&_.bb_ul>li]:before:text-accent [&_.bb_ul>li]:before:text-xs [&_.bb_ul>li]:before:shrink-0 [&_.bb_ul>li]:before:mt-1",
-    "[&_ul]:list-disc [&_ul]:ml-5 [&_ul]:mb-5 [&_ul]:space-y-1.5 [&_li]:text-white/65",
+    "[&_ul]:list-disc [&_ul]:ml-5 [&_ul]:mb-5 [&_ul]:space-y-1.5 [&_li]:text-white/60",
     "[&_.bb_img_ctn]:block [&_.bb_img_ctn]:my-6",
     "[&_img]:max-w-full [&_img]:h-auto [&_img]:rounded-xl [&_img]:border [&_img]:border-white/10 [&_img]:block [&_img]:shadow-[0_8px_32px_rgba(0,0,0,0.5)]",
     "[&_a]:text-accent [&_a]:underline [&_a]:underline-offset-2",
     "[&_br]:leading-none",
 ].join(" ");
 
-// ─── SIDEBAR GAME ROW ─────────────────────────────────────────────────────────
+const reqHtml = [
+    "text-xs text-white/50 leading-relaxed",
+    "[&>strong]:text-accent [&>strong]:block [&>strong]:mb-3 [&>strong]:text-[9px] [&>strong]:font-black [&>strong]:uppercase [&>strong]:tracking-widest",
+    "[&_ul]:list-none [&_ul]:m-0 [&_ul]:p-0",
+    "[&_ul>li]:py-1.5 [&_ul>li]:border-b [&_ul>li]:border-white/[0.05] [&_ul>li:last-child]:border-0",
+    "[&_ul>li>strong]:text-white/75 [&_ul>li>strong]:font-semibold [&_ul>li>strong]:mr-1.5",
+].join(" ");
+
+// ─── Sidebar row ─────────────────────────────────────────────────────────────
 function SidebarRow({ game, isActive, onClick, onContextMenu }: {
     game: Game; isActive: boolean; onClick: () => void; onContextMenu?: (e: React.MouseEvent) => void;
 }) {
@@ -79,8 +88,58 @@ function SidebarRow({ game, isActive, onClick, onContextMenu }: {
     );
 }
 
-// ─── MAIN EXPORT ──────────────────────────────────────────────────────────────
+// ─── Simple label/value row ───────────────────────────────────────────────────
+function MetaRow({ icon, label, value }: { icon: React.ReactNode; label: string; value: string | null | undefined }) {
+    if (!value || value === "Unknown") return null;
+    return (
+        <div className="flex items-center gap-3 group/row">
+            <span className="text-white/20 group-hover/row:text-accent transition-colors shrink-0">{icon}</span>
+            <span className="text-white/35 text-[10px] uppercase tracking-widest font-black w-20 shrink-0">{label}</span>
+            <span className="text-white/80 text-xs font-medium truncate">{value}</span>
+        </div>
+    );
+}
+
+// ─── Game logo or title fallback ─────────────────────────────────────────────
+function GameTitle({ game }: { game: Game }) {
+    const { src: logoSrc, error: logoErr } = useLocalImage(game.logo_path);
+    const [failed, setFailed] = useState(false);
+    const [prevGameId, setPrevGameId] = useState(game.id);
+
+    if (game.id !== prevGameId) {
+        setPrevGameId(game.id);
+        setFailed(false);
+    }
+
+    const isLogoValid = Boolean(game.logo_path && !logoErr && !failed);
+
+    if (isLogoValid) {
+        return (
+            <div className="mb-6">
+                <img
+                    key={game.id}
+                    src={logoSrc || undefined}
+                    alt={game.title}
+                    onError={() => setFailed(true)}
+                    className={cn(
+                        "block w-auto max-w-[480px] max-h-[160px] object-contain drop-shadow-[0_4px_40px_rgba(0,0,0,0.95)] transition-opacity duration-300",
+                        !logoSrc ? "opacity-0" : "opacity-100"
+                    )}
+                />
+            </div>
+        );
+    }
+
+    return (
+        <h1 className="text-6xl font-black tracking-tighter text-white leading-[1] mb-6 drop-shadow-[0_4px_40px_rgba(0,0,0,0.95)]">
+            {game.title}
+        </h1>
+    );
+}
+
+// ─── Main Library component ───────────────────────────────────────────────────
 export default function Library() {
+    const location = useLocation();
     const gamesById = useGameStore((s: any) => s.gamesById);
     const allGames: Game[] = useMemo(
         () => Object.values(gamesById as Record<string, Game>).sort((a, b) => a.title.localeCompare(b.title)),
@@ -102,12 +161,16 @@ export default function Library() {
     const [showAchievements, setShowAchievements] = useState(false);
     const [contextMenu, setContextMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
 
-    // THE scroll container — only this div scrolls
     const mainScrollRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
-        if (!activeGameId && allGames.length > 0) setActiveGameId(allGames[0].id);
-    }, [allGames, activeGameId]);
+        if (location.state?.gameId) {
+            setActiveGameId(location.state.gameId);
+            window.history.replaceState({}, document.title);
+        } else if (!activeGameId && allGames.length > 0) {
+            setActiveGameId(allGames[0].id);
+        }
+    }, [allGames, activeGameId, location.state]);
 
     const activeGame = activeGameId ? gamesById[activeGameId] : null;
 
@@ -117,20 +180,25 @@ export default function Library() {
     }, [activeGame?.id]);
 
     useEffect(() => {
-        if (!activeGame) { setAchievements([]); setReviews(null); setSteamDetails(null); return; }
+        if (!activeGame) {
+            setAchievements([]);
+            setReviews(null);
+            setSteamDetails(null);
+            return;
+        }
 
         setAchievementsLoading(true);
         let local: Achievement[] = [];
 
         getAchievements(activeGame.id)
-            .then(async (ach) => {
+            .then(async (ach: Achievement[]) => {
                 local = ach;
                 setAchievements(local);
                 if (activeGame.steam_app_id && ach.length > 0) {
                     try {
                         const pcts = await fetchSteamAchievementPercentages(activeGame.steam_app_id.toString());
                         if (Object.keys(pcts).length > 0)
-                            setAchievements(local.map(a => ({ ...a, global_percent: a.global_percent ?? pcts[a.api_name] ?? null })));
+                            setAchievements(local.map((a: Achievement) => ({ ...a, global_percent: a.global_percent ?? pcts[a.api_name] ?? null })));
                     } catch (_) { }
                 }
             })
@@ -185,13 +253,14 @@ export default function Library() {
 
     const rawBg = activeGame?.background_image_path || (activeGame as any)?.background_path;
     const rawCover = activeGame?.cover_image_path || (activeGame as any)?.cover_path;
+
     const { src: bgSrc, error: bgErr } = useLocalImage(rawBg ? rawBg.split("?pos=")[0] : null);
     const { src: coverSrc, error: coverErr } = useLocalImage(rawCover);
+
     const bgUrl = bgSrc && !bgErr ? bgSrc : coverSrc && !coverErr ? coverSrc : null;
     const coverUrl = coverSrc && !coverErr ? coverSrc : null;
     const bgPos = rawBg?.includes("?pos=") ? rawBg.split("?pos=")[1].replace("-", " ") : "center top";
 
-    // ── EMPTY LIBRARY ────────────────────────────────────────────────────────
     if (allGames.length === 0) {
         return (
             <div className="flex items-center justify-center w-full h-screen">
@@ -216,7 +285,6 @@ export default function Library() {
         );
     }
 
-    // ── MAIN LAYOUT ──────────────────────────────────────────────────────────
     return (
         <div
             className="fixed inset-0 flex overflow-hidden bg-[#08090f]"
@@ -226,27 +294,28 @@ export default function Library() {
                 <ContextMenu x={contextMenu.x} y={contextMenu.y} items={contextMenu.items} onClose={() => setContextMenu(null)} />
             )}
 
-            {/* ══ LEFT SIDEBAR ══════════════════════════════════════════════ */}
-            <aside className="w-[300px] shrink-0 flex flex-col h-full bg-[#0c0e18]/90 border-r border-white/[0.06] z-20">
-                <div className="px-5 pt-6 pb-3 shrink-0">
-                    <div className="flex items-center justify-between mb-4">
-                        <span className="text-[11px] font-black text-white/50 uppercase tracking-widest">Library</span>
-                        <span className="text-[10px] font-bold text-accent bg-accent/10 px-2.5 py-1 rounded-lg border border-accent/20">
+            {/* ── Sidebar ── */}
+            <aside className="w-[340px] shrink-0 flex flex-col h-full bg-black/40 backdrop-blur-3xl border-r border-white/5 z-30">
+                <div className="px-6 pt-10 pb-5 shrink-0">
+                    <div className="flex items-center justify-between mb-5">
+                        <h2 className="text-sm font-black text-white tracking-widest uppercase">Collection</h2>
+                        <span className="text-xs font-bold text-accent bg-accent/10 px-2.5 py-1 rounded-lg border border-accent/20">
                             {allGames.length}
                         </span>
                     </div>
+
                     <div className="relative">
-                        <Search size={13} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30" />
+                        <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30" />
                         <input
                             type="text"
                             value={search}
                             onChange={e => setSearch(e.target.value)}
-                            placeholder="Search..."
-                            className="w-full bg-white/[0.04] border border-white/[0.08] rounded-xl pl-9 pr-8 py-2.5 text-white text-xs font-medium outline-none focus:border-accent/40 placeholder:text-white/25 transition-all"
+                            placeholder="Search library..."
+                            className="w-full bg-white/[0.04] border border-white/[0.08] rounded-xl pl-10 pr-8 py-3 text-white text-sm font-medium outline-none focus:border-accent/40 placeholder:text-white/25 transition-all shadow-inner"
                         />
                         {search && (
                             <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/70">
-                                <X size={12} />
+                                <X size={14} />
                             </button>
                         )}
                     </div>
@@ -255,33 +324,31 @@ export default function Library() {
                 <div className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-none px-3 py-1 space-y-0.5">
                     {filteredGames.length === 0 ? (
                         <div className="flex flex-col items-center justify-center h-32 text-white/20 text-[10px] font-bold gap-2 uppercase tracking-widest">
-                            <Search size={20} className="opacity-30" />No results
+                            <Search size={20} className="opacity-30" /> No results
                         </div>
                     ) : filteredGames.map(game => (
                         <SidebarRow
                             key={game.id}
                             game={game}
                             isActive={activeGameId === game.id}
-                            onClick={() => setActiveGameId(game.id)}
+                            onClick={() => { setActiveGameId(game.id); }}
                             onContextMenu={e => handleContextMenu(e, game)}
                         />
                     ))}
                 </div>
 
-                <div className="px-3 py-3 shrink-0 border-t border-white/[0.06]">
+                <div className="px-5 py-5 shrink-0 border-t border-white/[0.06]">
                     <button
                         onClick={() => setAddGameModalOpen(true)}
-                        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] text-white/50 hover:text-white text-[11px] font-bold transition-all uppercase tracking-widest"
+                        className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white font-bold transition-all uppercase tracking-widest text-[11px]"
                     >
-                        <Plus size={14} /> Add Game
+                        <Plus size={16} /> Add New Game
                     </button>
                 </div>
             </aside>
 
-            {/* ══ RIGHT CONTENT AREA ════════════════════════════════════════ */}
+            {/* ── Main content area ── */}
             <div className="flex-1 relative overflow-hidden">
-
-                {/* Background — fixed behind scroll content */}
                 <div className="absolute inset-0 z-0 pointer-events-none">
                     <AnimatePresence mode="wait">
                         {bgUrl && (
@@ -303,11 +370,6 @@ export default function Library() {
                     <div className="absolute inset-0 bg-gradient-to-t from-[#08090f] via-[#08090f]/60 to-transparent" />
                 </div>
 
-                {/* ══ THE ONE TRUE SCROLL CONTAINER ══════════════════════════
-                    overflow-y-auto lives HERE and nowhere else.
-                    Everything — hero, panels, description, reviews — is a
-                    child of this div and scrolls together naturally.
-                ════════════════════════════════════════════════════════════ */}
                 <div
                     ref={mainScrollRef}
                     className="relative z-10 h-full overflow-y-auto overflow-x-hidden"
@@ -320,19 +382,19 @@ export default function Library() {
                                 initial={{ opacity: 0, y: 16 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 exit={{ opacity: 0 }}
-                                transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+                                transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
                             >
-                                {/* ─── HERO ─────────────────────────────────────────────── */}
-                                <div className="px-12 pt-16 pb-10 flex items-end gap-10">
-                                    {/* Cover */}
-                                    <div className="w-[200px] shrink-0">
-                                        <div className="w-full aspect-[2/3] rounded-2xl overflow-hidden shadow-[0_20px_60px_rgba(0,0,0,0.8)] border border-white/10 bg-black/50 relative group">
+                                <div className="h-[60vh] min-h-[460px] pointer-events-none" />
+
+                                <div className="px-12 pb-10 flex items-end gap-10">
+                                    <div className="w-[185px] shrink-0">
+                                        <div className="w-full aspect-[2/3] rounded-2xl overflow-hidden shadow-[0_24px_64px_rgba(0,0,0,0.9)] border border-white/10 bg-black/50 relative group">
                                             {coverUrl
                                                 ? <img src={coverUrl} alt={activeGame.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" />
                                                 : <div className="w-full h-full flex items-center justify-center text-white/10"><Gamepad2 size={48} strokeWidth={1} /></div>
                                             }
                                             {isRunning && (
-                                                <div className="absolute top-3 left-3 flex items-center gap-1.5 bg-green-500/90 backdrop-blur-sm px-2.5 py-1 rounded-lg border border-green-400/40">
+                                                <div className="absolute top-3 left-3 flex items-center gap-1.5 bg-green-500/90 backdrop-blur-sm px-2.5 py-1 rounded-lg border border-green-400/30">
                                                     <div className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
                                                     <span className="text-[9px] font-black text-white uppercase tracking-widest">Running</span>
                                                 </div>
@@ -340,17 +402,16 @@ export default function Library() {
                                         </div>
                                     </div>
 
-                                    {/* Title + actions */}
                                     <div className="flex-1 min-w-0 pb-1">
                                         {(activeGame.developer || activeGame.source) && (
-                                            <span className="inline-block text-[9px] font-black tracking-widest uppercase bg-white/8 border border-white/10 px-3 py-1.5 rounded-lg text-white/70 mb-4">
+                                            <span className="inline-block text-[9px] font-black tracking-widest uppercase bg-white/[0.07] border border-white/10 px-3 py-1.5 rounded-lg text-white/60 mb-5">
                                                 {activeGame.developer || activeGame.source}
                                             </span>
                                         )}
-                                        <h1 className="text-5xl font-black tracking-tighter text-white leading-[1.05] mb-5 drop-shadow-[0_2px_20px_rgba(0,0,0,0.9)]">
-                                            {activeGame.title}
-                                        </h1>
-                                        <div className="flex items-center gap-5 text-xs text-white/50 font-medium mb-8 bg-black/30 backdrop-blur-md w-fit px-5 py-3 rounded-xl border border-white/[0.08]">
+
+                                        <GameTitle game={activeGame} />
+
+                                        <div className="flex items-center flex-wrap gap-5 text-xs text-white/45 font-medium mb-7 bg-black/40 backdrop-blur-md w-fit px-5 py-3 rounded-xl border border-white/[0.07]">
                                             <span className="flex items-center gap-1.5 text-white/80">
                                                 <Clock size={13} className="text-accent" />
                                                 {formatPlaytime(activeGame.playtime_seconds || 0)}
@@ -358,90 +419,89 @@ export default function Library() {
                                             {activeGame.last_played && (
                                                 <>
                                                     <span className="w-1 h-1 rounded-full bg-white/20" />
-                                                    <span>Last: <span className="text-white/70">{new Date(activeGame.last_played).toLocaleDateString()}</span></span>
+                                                    <span>Last played: <b className="text-white/65 font-semibold">{new Date(activeGame.last_played).toLocaleDateString()}</b></span>
                                                 </>
                                             )}
                                             {activeGame.release_date && (
                                                 <>
                                                     <span className="w-1 h-1 rounded-full bg-white/20" />
-                                                    <span>Released <span className="text-white/70">{new Date(activeGame.release_date).getFullYear()}</span></span>
+                                                    <span>Released <b className="text-white/65 font-semibold">{new Date(activeGame.release_date).getFullYear()}</b></span>
                                                 </>
                                             )}
                                         </div>
+
                                         <div className="flex items-center gap-3">
                                             <button
                                                 onClick={handleLaunch}
                                                 className={cn(
-                                                    "flex items-center gap-2.5 px-8 py-3 rounded-xl font-black text-xs tracking-widest uppercase transition-all active:scale-95 shadow-lg border",
+                                                    "flex items-center gap-2.5 px-8 py-3.5 rounded-xl font-black text-xs tracking-widest uppercase transition-all active:scale-95 shadow-xl border",
                                                     isRunning
-                                                        ? "bg-red-500/90 hover:bg-red-500 text-white border-red-400/50 shadow-red-500/20"
-                                                        : "bg-accent hover:brightness-110 text-white border-accent/40 shadow-accent/20"
+                                                        ? "bg-red-500/90 hover:bg-red-500 text-white border-red-400/40 shadow-red-500/20"
+                                                        : "bg-accent hover:brightness-110 text-white border-accent/40 shadow-accent/30"
                                                 )}
                                             >
-                                                {isRunning ? <><Square size={15} fill="currentColor" /> Stop</> : <><Play size={15} fill="currentColor" /> Launch</>}
+                                                {isRunning
+                                                    ? <><Square size={14} fill="currentColor" /> Stop</>
+                                                    : <><Play size={14} fill="currentColor" /> Launch</>
+                                                }
                                             </button>
-                                            <button onClick={() => setEditGameModalOpen(true, activeGame)} title="Edit" className="h-10 w-10 rounded-xl bg-white/[0.06] hover:bg-white/10 border border-white/10 flex items-center justify-center text-white/50 hover:text-white transition-all">
+                                            <button onClick={() => setEditGameModalOpen(true, activeGame)} title="Edit metadata" className="h-11 w-11 rounded-xl bg-white/[0.06] hover:bg-white/10 border border-white/10 flex items-center justify-center text-white/50 hover:text-white transition-all">
                                                 <Settings size={16} />
                                             </button>
-                                            <button title="Favorite" className="h-10 w-10 rounded-xl bg-white/[0.06] hover:bg-white/10 border border-white/10 flex items-center justify-center text-white/50 hover:text-white transition-all">
+                                            <button title="Favorite" className="h-11 w-11 rounded-xl bg-white/[0.06] hover:bg-white/10 border border-white/10 flex items-center justify-center text-white/50 hover:text-white transition-all">
                                                 <Heart size={16} />
                                             </button>
-                                            <button onClick={() => refreshMetadata(activeGame.id)} title="Refresh" className="h-10 w-10 rounded-xl bg-white/[0.06] hover:bg-white/10 border border-white/10 flex items-center justify-center text-white/50 hover:text-white transition-all">
+                                            <button onClick={() => refreshMetadata(activeGame.id)} title="Refresh metadata" className="h-11 w-11 rounded-xl bg-white/[0.06] hover:bg-white/10 border border-white/10 flex items-center justify-center text-white/50 hover:text-white transition-all">
                                                 <RefreshCcw size={16} />
                                             </button>
                                         </div>
                                     </div>
                                 </div>
 
-                                {/* ─── INFO + PROGRESS PANELS ───────────────────────────── */}
-                                <div className="px-12 pb-10 grid grid-cols-2 gap-5 max-w-4xl">
-                                    {/* Game Info */}
-                                    <div className="bg-black/40 backdrop-blur-xl border border-white/[0.08] rounded-2xl p-7">
+                                <div className="px-12 pb-10 grid grid-cols-2 gap-5 max-w-4xl relative z-20">
+                                    <div className="bg-black/45 backdrop-blur-xl border border-white/[0.08] rounded-2xl p-7">
                                         <p className="text-[9px] font-black text-white/30 uppercase tracking-widest mb-5 flex items-center gap-1.5">
-                                            <Building2 size={12} className="text-purple-400" /> Game Info
+                                            <Building2 size={11} className="text-purple-400" /> Game Info
                                         </p>
                                         <div className="space-y-3.5">
-                                            {[
-                                                { icon: <User2 size={14} />, label: "Developer", val: activeGame.developer },
-                                                { icon: <Building2 size={14} />, label: "Publisher", val: activeGame.publisher },
-                                                { icon: <Calendar size={14} />, label: "Released", val: activeGame.release_date ? new Date(activeGame.release_date).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }) : null },
-                                                { icon: <Star size={14} />, label: "Genre", val: activeGame.genre },
-                                            ].map(({ icon, label, val }) => val && val !== "Unknown" ? (
-                                                <div key={label} className="flex items-center gap-3">
-                                                    <span className="text-white/20 shrink-0">{icon}</span>
-                                                    <span className="text-white/35 text-[10px] uppercase tracking-widest font-black w-20 shrink-0">{label}</span>
-                                                    <span className="text-white/80 text-xs font-medium truncate">{val}</span>
-                                                </div>
-                                            ) : null)}
+                                            <MetaRow icon={<User2 size={13} />} label="Developer" value={activeGame.developer} />
+                                            <MetaRow icon={<Building2 size={13} />} label="Publisher" value={activeGame.publisher} />
+                                            <MetaRow
+                                                icon={<Calendar size={13} />}
+                                                label="Released"
+                                                value={activeGame.release_date ? new Date(activeGame.release_date).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }) : null}
+                                            />
+                                            <MetaRow icon={<Star size={13} />} label="Genre" value={activeGame.genre} />
                                         </div>
                                     </div>
 
-                                    {/* Achievements Progress */}
                                     <div
                                         onClick={() => achievements.length > 0 && setShowAchievements(true)}
                                         className={cn(
-                                            "bg-black/40 backdrop-blur-xl border border-white/[0.08] rounded-2xl p-7 flex flex-col justify-between",
-                                            achievements.length > 0 ? "cursor-pointer hover:border-yellow-500/30 hover:bg-black/50 transition-all group" : "opacity-50"
+                                            "bg-black/45 backdrop-blur-xl border border-white/[0.08] rounded-2xl p-7 flex flex-col justify-between transition-all",
+                                            achievements.length > 0
+                                                ? "cursor-pointer hover:border-yellow-500/30 hover:bg-black/55 group"
+                                                : "opacity-50"
                                         )}
                                     >
                                         <div className="flex items-start justify-between mb-6">
                                             <div>
                                                 <p className="text-[9px] font-black text-white/30 uppercase tracking-widest mb-4 flex items-center gap-1.5">
-                                                    <Trophy size={12} className="text-yellow-400" /> Progress
+                                                    <Trophy size={11} className="text-yellow-400" /> Achievements
                                                 </p>
                                                 <div className="text-5xl font-black text-white tracking-tighter leading-none">
                                                     {earned}
-                                                    <span className="text-white/25 text-2xl ml-2">/ {achievements.length || "--"}</span>
+                                                    <span className="text-white/25 text-2xl ml-2">/ {achievements.length || "—"}</span>
                                                 </div>
                                             </div>
                                             {achievements.length > 0 && (
                                                 <div className="w-9 h-9 rounded-xl bg-white/[0.04] group-hover:bg-yellow-500/10 flex items-center justify-center text-white/20 group-hover:text-yellow-400 transition-all">
-                                                    <ExternalLink size={15} />
+                                                    <ExternalLink size={14} />
                                                 </div>
                                             )}
                                         </div>
                                         <div>
-                                            <div className="h-2 w-full bg-white/[0.08] rounded-full overflow-hidden mb-3">
+                                            <div className="h-1.5 w-full bg-white/[0.08] rounded-full overflow-hidden mb-3">
                                                 <motion.div
                                                     className="h-full bg-gradient-to-r from-yellow-600 to-yellow-400 rounded-full"
                                                     initial={{ width: 0 }}
@@ -454,9 +514,11 @@ export default function Library() {
                                     </div>
                                 </div>
 
-                                {/* ─── DESCRIPTION ──────────────────────────────────────── */}
                                 {activeGame.description && (
                                     <div className="px-12 pt-10 pb-10 border-t border-white/[0.06] max-w-4xl">
+                                        <p className="text-[9px] font-black text-white/30 uppercase tracking-widest mb-6 flex items-center gap-1.5">
+                                            <Info size={11} className="text-blue-400" /> About this game
+                                        </p>
                                         <div
                                             className={steamHtml}
                                             dangerouslySetInnerHTML={{ __html: activeGame.description }}
@@ -464,28 +526,19 @@ export default function Library() {
                                     </div>
                                 )}
 
-                                {/* ─── SYSTEM REQUIREMENTS ──────────────────────────────── */}
                                 {steamDetails?.pc_requirements && (steamDetails.pc_requirements.minimum || steamDetails.pc_requirements.recommended) && (
-                                    <div className="px-12 pt-10 pb-10 border-t border-white/[0.06] max-w-4xl">
-                                        <h2 className="text-sm font-black text-white uppercase tracking-widest mb-5">System Requirements</h2>
+                                    <div className="px-12 pt-10 pb-10 border-t border-white/[0.06] max-w-5xl">
+                                        <h2 className="text-[9px] font-black text-white/30 uppercase tracking-widest mb-6">System Requirements</h2>
                                         <div className="grid grid-cols-2 gap-5">
                                             {steamDetails.pc_requirements.minimum && (
                                                 <div
-                                                    className="bg-black/40 border border-white/[0.08] rounded-2xl p-6 text-xs text-white/55 leading-relaxed
-                                                    [&>strong]:text-accent [&>strong]:block [&>strong]:mb-3 [&>strong]:text-[9px] [&>strong]:font-black [&>strong]:uppercase [&>strong]:tracking-widest
-                                                    [&_ul]:list-none [&_ul]:m-0 [&_ul]:p-0
-                                                    [&_ul>li]:py-1.5 [&_ul>li]:border-b [&_ul>li]:border-white/[0.05] [&_ul>li]:last:border-0
-                                                    [&_ul>li>strong]:text-white/75 [&_ul>li>strong]:font-semibold [&_ul>li>strong]:mr-1.5"
+                                                    className={cn("bg-black/40 border border-white/[0.08] rounded-2xl p-6", reqHtml)}
                                                     dangerouslySetInnerHTML={{ __html: steamDetails.pc_requirements.minimum }}
                                                 />
                                             )}
                                             {steamDetails.pc_requirements.recommended && (
                                                 <div
-                                                    className="bg-black/40 border border-white/[0.08] rounded-2xl p-6 text-xs text-white/55 leading-relaxed
-                                                    [&>strong]:text-accent [&>strong]:block [&>strong]:mb-3 [&>strong]:text-[9px] [&>strong]:font-black [&>strong]:uppercase [&>strong]:tracking-widest
-                                                    [&_ul]:list-none [&_ul]:m-0 [&_ul]:p-0
-                                                    [&_ul>li]:py-1.5 [&_ul>li]:border-b [&_ul>li]:border-white/[0.05] [&_ul>li]:last:border-0
-                                                    [&_ul>li>strong]:text-white/75 [&_ul>li>strong]:font-semibold [&_ul>li>strong]:mr-1.5"
+                                                    className={cn("bg-black/40 border border-white/[0.08] rounded-2xl p-6", reqHtml)}
                                                     dangerouslySetInnerHTML={{ __html: steamDetails.pc_requirements.recommended }}
                                                 />
                                             )}
@@ -493,7 +546,6 @@ export default function Library() {
                                     </div>
                                 )}
 
-                                {/* ─── GENRES / FEATURES / METACRITIC ──────────────────── */}
                                 {steamDetails && (steamDetails.metacritic || steamDetails.genres?.length || steamDetails.categories?.length) && (
                                     <div className="px-12 pt-10 pb-10 border-t border-white/[0.06] max-w-4xl flex flex-wrap gap-10">
                                         {steamDetails.metacritic && (
@@ -502,7 +554,8 @@ export default function Library() {
                                                 <div className="flex items-center gap-3">
                                                     <div className={cn(
                                                         "w-12 h-12 rounded-xl flex items-center justify-center text-xl font-black text-white",
-                                                        steamDetails.metacritic.score >= 75 ? "bg-green-600" : steamDetails.metacritic.score >= 50 ? "bg-yellow-600" : "bg-red-600"
+                                                        steamDetails.metacritic.score >= 75 ? "bg-green-600" :
+                                                            steamDetails.metacritic.score >= 50 ? "bg-yellow-600" : "bg-red-600"
                                                     )}>
                                                         {steamDetails.metacritic.score}
                                                     </div>
@@ -514,7 +567,7 @@ export default function Library() {
                                             <div>
                                                 <p className="text-[9px] font-black text-white/30 uppercase tracking-widest mb-3">Genres</p>
                                                 <div className="flex flex-wrap gap-2">
-                                                    {steamDetails.genres.map(g => (
+                                                    {steamDetails.genres.map((g: { description: string }) => (
                                                         <span key={g.description} className="bg-accent/10 border border-accent/20 text-accent px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider">
                                                             {g.description}
                                                         </span>
@@ -526,7 +579,7 @@ export default function Library() {
                                             <div>
                                                 <p className="text-[9px] font-black text-white/30 uppercase tracking-widest mb-3">Features</p>
                                                 <div className="flex flex-wrap gap-2">
-                                                    {steamDetails.categories.map(c => (
+                                                    {steamDetails.categories.map((c: { description: string }) => (
                                                         <span key={c.description} className="bg-white/[0.04] border border-white/[0.08] px-3 py-1.5 rounded-lg text-[10px] text-white/50 font-medium">
                                                             {c.description}
                                                         </span>
@@ -537,18 +590,19 @@ export default function Library() {
                                     </div>
                                 )}
 
-                                {/* ─── REVIEWS ──────────────────────────────────────────── */}
                                 {reviews && reviews.reviews.length > 0 && (
                                     <div className="px-12 pt-10 pb-16 border-t border-white/[0.06] max-w-4xl">
                                         <div className="mb-6">
-                                            <h2 className="text-sm font-black text-white uppercase tracking-widest mb-1">Player Reviews</h2>
-                                            <p className="text-[10px] text-white/30 font-bold uppercase tracking-widest">
-                                                <span className="text-accent">{reviews.query_summary.review_score_desc}</span>
+                                            <h2 className="text-[9px] font-black text-white/30 uppercase tracking-widest mb-1 flex items-center gap-1.5">
+                                                <ThumbsUp size={11} className="text-green-400" /> Player Reviews
+                                            </h2>
+                                            <p className="text-[11px] text-white/40 mt-2">
+                                                <span className="text-accent font-bold">{reviews.query_summary.review_score_desc}</span>
                                                 {" · "}{reviews.query_summary.total_reviews.toLocaleString()} reviews
                                             </p>
                                         </div>
                                         <div className="grid grid-cols-2 gap-4">
-                                            {reviews.reviews.slice(0, 4).map((rev: SteamReview, i) => (
+                                            {reviews.reviews.slice(0, 4).map((rev: SteamReview, i: number) => (
                                                 <div key={i} className="bg-black/40 border border-white/[0.07] rounded-2xl p-5 hover:bg-black/50 transition-colors">
                                                     <div className="flex items-center justify-between mb-3">
                                                         <div className="flex items-center gap-2.5">
@@ -564,7 +618,7 @@ export default function Library() {
                                                             "flex items-center gap-1 px-2 py-1 rounded-lg border text-[9px] font-black uppercase",
                                                             rev.voted_up ? "bg-accent/10 border-accent/20 text-accent" : "bg-red-500/10 border-red-500/20 text-red-400"
                                                         )}>
-                                                            {rev.voted_up ? <ThumbsUp size={10} /> : <ThumbsDown size={10} />}
+                                                            {rev.voted_up ? <ThumbsUp size={9} /> : <ThumbsDown size={9} />}
                                                             <span className="ml-1">{rev.voted_up ? "Yes" : "No"}</span>
                                                         </div>
                                                     </div>
@@ -575,7 +629,6 @@ export default function Library() {
                                     </div>
                                 )}
 
-                                {/* ─── NO STEAM DATA STATE ──────────────────────────────── */}
                                 {!activeGame.description && !steamDetails && !reviews && (
                                     <div className="px-12 py-16 border-t border-white/[0.06] flex flex-col items-center text-center">
                                         <div className="w-16 h-16 rounded-2xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center mb-5">
@@ -593,14 +646,13 @@ export default function Library() {
                                         </button>
                                     </div>
                                 )}
-
                             </motion.div>
                         )}
                     </AnimatePresence>
-                </div>{/* end scroll container */}
-            </div>{/* end right area */}
+                </div>
+            </div>
 
-            {/* ══ ACHIEVEMENT MODAL ═════════════════════════════════════════ */}
+            {/* ACHIEVEMENTS MODAL */}
             <AnimatePresence>
                 {showAchievements && activeGame && (
                     <motion.div

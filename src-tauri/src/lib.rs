@@ -393,6 +393,11 @@ pub fn run() {
             extensions::install_extension,
             extensions::toggle_extension,
             extensions::read_extension_file,
+            commands::metadata::upload_custom_cover,
+            commands::metadata::upload_custom_background,
+            commands::metadata::upload_custom_logo,
+            commands::metadata::download_url_to_cache,
+            commands::metadata::get_fitgirl_repacks,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

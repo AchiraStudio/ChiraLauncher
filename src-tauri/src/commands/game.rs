@@ -13,7 +13,11 @@ pub async fn add_game(state: State<'_, AppState>, game: NewGame) -> Result<(), S
     let game_id = game.id.clone();
 
     if let Some(saved) = load_game_stats(&game.id) {
-        log::info!("[Library] Restoring {} secs playtime for re-added game {}", saved.total_playtime_secs, game.id);
+        log::info!(
+            "[Library] Restoring {} secs playtime for re-added game {}",
+            saved.total_playtime_secs,
+            game.id
+        );
     }
 
     state
@@ -27,9 +31,10 @@ pub async fn add_game(state: State<'_, AppState>, game: NewGame) -> Result<(), S
         let game_id_clone = game_id.clone();
         let install_dir = game.install_dir.clone().unwrap_or_default();
         let db_app_id = game.steam_app_id.map(|id| id.to_string());
-        
+
         tauri::async_runtime::spawn(async move {
-            let crack_type: Option<crate::achievements::CrackType> = game.crack_type
+            let crack_type: Option<crate::achievements::CrackType> = game
+                .crack_type
                 .as_deref()
                 .and_then(|s| serde_json::from_str(&format!("\"{}\"", s)).ok());
 
@@ -42,20 +47,31 @@ pub async fn add_game(state: State<'_, AppState>, game: NewGame) -> Result<(), S
                 db_tx: Some(&db_tx),
             };
 
-            crate::achievements::sync_achievements(&game_id_clone, &install_dir, db_app_id.as_deref(), &opts);
+            crate::achievements::sync_achievements(
+                &game_id_clone,
+                &install_dir,
+                db_app_id.as_deref(),
+                &opts,
+            );
         });
     }
 
     if let Some(saved) = load_game_stats(&game_id) {
-        state.db_tx.send(DbWrite::Game(GameDbWrite::UpdatePlaytime {
-            game_id: game_id.clone(),
-            delta_seconds: saved.total_playtime_secs,
-        })).ok();
-        if let Some(last) = saved.last_played {
-            state.db_tx.send(DbWrite::Game(GameDbWrite::SetLastPlayed {
+        state
+            .db_tx
+            .send(DbWrite::Game(GameDbWrite::UpdatePlaytime {
                 game_id: game_id.clone(),
-                timestamp: last.to_rfc3339(),
-            })).ok();
+                delta_seconds: saved.total_playtime_secs,
+            }))
+            .ok();
+        if let Some(last) = saved.last_played {
+            state
+                .db_tx
+                .send(DbWrite::Game(GameDbWrite::SetLastPlayed {
+                    game_id: game_id.clone(),
+                    timestamp: last.to_rfc3339(),
+                }))
+                .ok();
         }
     }
 
@@ -96,17 +112,17 @@ pub async fn set_manual_achievement_path(
         }))
         .map_err(|e| e.to_string())?;
 
-    // If path was cleared (None), trigger a re-discovery immediately or start watcher
     if path.is_none() {
         let pool = state.read_pool.clone();
         let db_tx = state.db_tx.clone();
         let game_id_clone = game_id.clone();
-        
+
         tauri::async_runtime::spawn(async move {
             if let Ok(Some(game)) = crate::db::queries::get_game_by_id(&pool, &game_id_clone) {
                 if let Some(install_dir) = game.install_dir {
                     let db_app_id = game.steam_app_id.map(|id| id.to_string());
-                    let crack_type: Option<crate::achievements::CrackType> = game.crack_type
+                    let crack_type: Option<crate::achievements::CrackType> = game
+                        .crack_type
                         .as_deref()
                         .and_then(|s| serde_json::from_str(&format!("\"{}\"", s)).ok());
 
@@ -119,7 +135,12 @@ pub async fn set_manual_achievement_path(
                         db_tx: Some(&db_tx),
                     };
 
-                    crate::achievements::sync_achievements(&game_id_clone, &install_dir, db_app_id.as_deref(), &opts);
+                    crate::achievements::sync_achievements(
+                        &game_id_clone,
+                        &install_dir,
+                        db_app_id.as_deref(),
+                        &opts,
+                    );
                 }
             }
         });
@@ -134,6 +155,7 @@ pub async fn update_game_assets(
     game_id: String,
     cover_path: Option<String>,
     background_path: Option<String>,
+    logo_path: Option<String>, // NEW
 ) -> Result<(), String> {
     state
         .db_tx
@@ -141,6 +163,7 @@ pub async fn update_game_assets(
             game_id,
             cover_path,
             background_path,
+            logo_path,
         }))
         .map_err(|e| e.to_string())
 }

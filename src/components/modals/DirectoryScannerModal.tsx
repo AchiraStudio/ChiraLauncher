@@ -105,6 +105,7 @@ export function DirectoryScannerModal() {
                     executable_path: g.executable_path,
                     cover_path: null,
                     background_path: null,
+                    logo_path: null, // Fixed: Added logo_path to resolve TS error
                     description: null,
                     developer: null,
                     genre: null,

@@ -28,6 +28,31 @@ pub async fn upload_custom_background(
 }
 
 #[tauri::command]
+pub async fn upload_custom_logo(
+    _game_id: String,
+    file_path: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    state
+        .image_cache
+        .upload_custom_logo(&file_path)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn download_url_to_cache(
+    url: String,
+    image_type: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    state
+        .image_cache
+        .download_url_to_cache(&url, &image_type)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn get_fitgirl_repacks() -> Result<serde_json::Value, String> {
     Ok(serde_json::json!([]))
 }
@@ -53,7 +78,6 @@ pub async fn read_image_base64(path: String) -> Result<String, String> {
     Ok(format!("data:{};base64,{}", mime, b64))
 }
 
-// NEW: Steam Metadata Fetchers
 #[tauri::command]
 pub async fn fetch_steam_app_details(app_id: String) -> Result<serde_json::Value, String> {
     let url = format!(
@@ -82,10 +106,7 @@ pub async fn fetch_steam_reviews(app_id: String) -> Result<serde_json::Value, St
 pub async fn fetch_global_achievement_percentages(
     app_id: String,
 ) -> Result<serde_json::Value, String> {
-    let url = format!(
-        "https://api.steampowered.com/ISteamUserStats/GetGlobalAchievementPercentagesForApp/v2/?gameid={}",
-        app_id
-    );
+    let url = format!("https://api.steampowered.com/ISteamUserStats/GetGlobalAchievementPercentagesForApp/v2/?gameid={}", app_id);
     let client = reqwest::Client::new();
     let res = client.get(&url).send().await.map_err(|e| e.to_string())?;
     let json: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;

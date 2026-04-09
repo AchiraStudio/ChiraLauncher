@@ -17,7 +17,9 @@ fn launch_elevated(exe_path: &str, working_dir: &str) -> Result<u32, String> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Foundation::{CloseHandle, GetLastError};
     use windows_sys::Win32::System::Threading::GetProcessId;
-    use windows_sys::Win32::UI::Shell::{ShellExecuteExW, SEE_MASK_FLAG_NO_UI, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW};
+    use windows_sys::Win32::UI::Shell::{
+        ShellExecuteExW, SEE_MASK_FLAG_NO_UI, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW,
+    };
     use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
     let exe_utf16: Vec<u16> = std::ffi::OsStr::new(exe_path)
@@ -87,13 +89,16 @@ pub async fn launch_game(
 
     log::info!("Launching game '{}' ({})", game.title, id);
 
-    // P1c: Username Patching
     if let Ok(Some(profile)) = crate::profile::get_profile(state.clone()).await {
         if let Some(install_dir) = game.install_dir.as_ref() {
             let path = Path::new(install_dir);
             match crate::patcher::patch_game(path, &profile.username, &profile.steam_id) {
                 Ok(files) if !files.is_empty() => {
-                    log::info!("Patched {} config files for game {}", files.len(), game.title);
+                    log::info!(
+                        "Patched {} config files for game {}",
+                        files.len(),
+                        game.title
+                    );
                 }
                 Ok(_) => log::debug!("No configurations needed patching for game {}", game.title),
                 Err(e) => log::error!("Failed to patch configs for game {}: {}", game.title, e),
@@ -124,12 +129,6 @@ pub async fn launch_game(
             .unwrap_or_default();
     }
 
-    /*
-    ==========================================
-    ELEVATED LAUNCH
-    ==========================================
-    */
-
     if game.run_as_admin {
         log::info!("Game '{}' requires admin rights", game.title);
 
@@ -141,11 +140,21 @@ pub async fn launch_game(
         )
         .ok();
 
-        // Show overlay, trigger toast, and start achievement watcher
-        let stop_flag = show_overlay_and_start_watcher(&app, &id, &game.title, game.cover_path.as_ref(), &working_dir, game.steam_app_id, true, &state);
+        let stop_flag = show_overlay_and_start_watcher(
+            &app,
+            &id,
+            &game.title,
+            game.cover_path.as_ref(),
+            &working_dir,
+            game.steam_app_id,
+            true,
+            &state,
+        );
 
         let mut sys = sysinfo::System::new();
-        sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[sysinfo::Pid::from_u32(pid)]));
+        sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[sysinfo::Pid::from_u32(
+            pid,
+        )]));
         let start_time = crate::process::identity::get_process_start_time(pid, &sys).unwrap_or(0);
 
         {
@@ -165,15 +174,13 @@ pub async fn launch_game(
             );
         }
 
-        log::info!("Elevated game '{}' launched successfully (PID {})", game.title, pid);
+        log::info!(
+            "Elevated game '{}' launched successfully (PID {})",
+            game.title,
+            pid
+        );
         return Ok(());
     }
-
-    /*
-    ==========================================
-    NORMAL LAUNCH
-    ==========================================
-    */
 
     let mut cmd = Command::new(&clean_exe_path);
 
@@ -188,51 +195,56 @@ pub async fn launch_game(
         Ok(child) => child.id(),
         Err(e) => {
             if let Some(740) = e.raw_os_error() {
-        log::info!("Game requires elevation (OS 740), retrying RunAs");
+                log::info!("Game requires elevation (OS 740), retrying RunAs");
+                let pid = launch_elevated(&clean_exe_path, &working_dir)?;
 
-        let pid = launch_elevated(&clean_exe_path, &working_dir)?;
+                app.emit(
+                    "game-started",
+                    json!({ "game_id": id, "source": "Launcher", "elevated": true, "pid": pid }),
+                )
+                .ok();
 
-        app.emit(
-            "game-started",
-            json!({ "game_id": id, "source": "Launcher", "elevated": true, "pid": pid }),
-        )
-        .ok();
+                let stop_flag = show_overlay_and_start_watcher(
+                    &app,
+                    &id,
+                    &game.title,
+                    game.cover_path.as_ref(),
+                    &working_dir,
+                    game.steam_app_id,
+                    true,
+                    &state,
+                );
 
-        let stop_flag = show_overlay_and_start_watcher(&app, &id, &game.title, game.cover_path.as_ref(), &working_dir, game.steam_app_id, true, &state);
-
-        let mut sys = sysinfo::System::new();
-        sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[sysinfo::Pid::from_u32(pid)]));
-        let start_time = crate::process::identity::get_process_start_time(pid, &sys).unwrap_or(0);
-
-        {
-            let mut running = state.running_games.lock().unwrap();
-            running.insert(
-                id.clone(),
-                ProcessIdentity {
+                let mut sys = sysinfo::System::new();
+                sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[sysinfo::Pid::from_u32(
                     pid,
-                    exe_path: clean_exe_path.to_lowercase(),
-                    start_time,
-                    game_id: id.clone(),
-                    launched_by: LaunchSource::Launcher,
-                    elevated: true,
-                    elevated_stop_flag: stop_flag,
-                    achievement_watcher_stop_flag: None,
-                },
-            );
-        }
+                )]));
+                let start_time =
+                    crate::process::identity::get_process_start_time(pid, &sys).unwrap_or(0);
 
-        return Ok(());
-    }
+                {
+                    let mut running = state.running_games.lock().unwrap();
+                    running.insert(
+                        id.clone(),
+                        ProcessIdentity {
+                            pid,
+                            exe_path: clean_exe_path.to_lowercase(),
+                            start_time,
+                            game_id: id.clone(),
+                            launched_by: LaunchSource::Launcher,
+                            elevated: true,
+                            elevated_stop_flag: stop_flag,
+                            achievement_watcher_stop_flag: None,
+                        },
+                    );
+                }
+
+                return Ok(());
+            }
 
             return Err(format!("Failed to launch '{}': {}", clean_exe_path, e));
         }
     };
-
-    /*
-    ==========================================
-    PROCESS IDENTITY (NORMAL LAUNCH)
-    ==========================================
-    */
 
     let mut sys = sysinfo::System::new();
     sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[sysinfo::Pid::from_u32(
@@ -264,61 +276,79 @@ pub async fn launch_game(
     )
     .ok();
 
-    // Show overlay, trigger toast, and start achievement watcher
-    show_overlay_and_start_watcher(&app, &id, &game.title, game.cover_path.as_ref(), &working_dir, game.steam_app_id, false, &state);
+    show_overlay_and_start_watcher(
+        &app,
+        &id,
+        &game.title,
+        game.cover_path.as_ref(),
+        &working_dir,
+        game.steam_app_id,
+        false,
+        &state,
+    );
 
     log::info!("Game '{}' launched successfully (PID {})", game.title, pid);
 
     Ok(())
 }
 
-/// Show the overlay window, emit the start toast, and launch the achievement watcher if applicable.
 fn show_overlay_and_start_watcher(
-    app: &AppHandle, 
-    game_id: &str, 
-    title: &str, 
-    cover_path: Option<&String>, 
-    install_dir: &str, 
+    app: &AppHandle,
+    game_id: &str,
+    title: &str,
+    cover_path: Option<&String>,
+    install_dir: &str,
     db_steam_app_id: Option<u32>,
     is_elevated: bool,
     state: &State<'_, AppState>,
 ) -> Option<Arc<std::sync::atomic::AtomicBool>> {
     let mut overlay_stop_flag = None;
-    // Show overlay and emit "Now Playing" toast
+
     if let Some(overlay) = app.get_webview_window("achievement-overlay") {
         let _ = overlay.show();
         let _ = overlay.set_always_on_top(true);
-        
-        // --- ADMIN GAME OVERLAY FIX ---
-        // If the game is elevated, our medium-integrity Tauri process can't easily push 
-        // its window above the high-integrity game window using standard OS messages.
-        // We spawn a dedicated native thread to hammer SetWindowPos.
+
         if is_elevated {
             if let Ok(hwnd) = overlay.hwnd() {
                 let hwnd_isize = hwnd.0 as isize;
                 let game_id_clone = game_id.to_string();
-                
+
                 let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
                 let stop_clone = Arc::clone(&stop);
                 overlay_stop_flag = Some(stop);
-                
+
                 std::thread::spawn(move || {
                     use std::sync::atomic::Ordering;
-                    use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowPos, HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE, SWP_NOACTIVATE};
-                    log::info!("Started elevated overlay persistence thread for game ID: {}", game_id_clone);
-                    
+                    use windows_sys::Win32::UI::WindowsAndMessaging::{
+                        SetWindowPos, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+                    };
+                    log::info!(
+                        "Started elevated overlay persistence thread for game ID: {}",
+                        game_id_clone
+                    );
+
                     while !stop_clone.load(Ordering::Relaxed) {
                         std::thread::sleep(std::time::Duration::from_millis(500));
                         unsafe {
-                            SetWindowPos(hwnd_isize as _, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                            SetWindowPos(
+                                hwnd_isize as _,
+                                HWND_TOPMOST,
+                                0,
+                                0,
+                                0,
+                                0,
+                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                            );
                         }
                     }
-                    log::info!("Game {} stopped, terminating elevated overlay thread.", game_id_clone);
+                    log::info!(
+                        "Game {} stopped, terminating elevated overlay thread.",
+                        game_id_clone
+                    );
                 });
             }
         }
-        
-        // Encode cover image to Base64 to bypass strict local file restrictions over custom schemes
+
         let cover_base64 = cover_path.and_then(|p| std::fs::read(p).ok()).map(|bytes| {
             use base64::Engine;
             let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
@@ -327,7 +357,7 @@ fn show_overlay_and_start_watcher(
                 .and_then(|s| s.to_str())
                 .unwrap_or("jpg")
                 .to_lowercase();
-                
+
             let mime = match ext.as_str() {
                 "png" => "image/png",
                 "webp" => "image/webp",
@@ -337,23 +367,30 @@ fn show_overlay_and_start_watcher(
             format!("data:{};base64,{}", mime, encoded)
         });
 
-        let _ = overlay.emit("game-started-toast", json!({
-            "title": title,
-            "coverBase64": cover_base64
-        }));
+        let _ = overlay.emit(
+            "game-started-toast",
+            json!({
+                "title": title,
+                "coverBase64": cover_base64
+            }),
+        );
     }
 
     let scan_roots = crate::settings::default_scan_roots();
-
-    // Resolve app_id from file or DB
     let game_path = std::path::Path::new(install_dir);
     let app_id = crate::achievements::resolve_app_id(game_path)
         .or_else(|| db_steam_app_id.map(|id| id.to_string()));
 
     if let Some(app_id) = app_id {
-        // Only start watcher if steam_settings/achievements.json exists
         let meta_path = game_path.join("steam_settings").join("achievements.json");
-        let saves_likely_exist = crate::achievements::resolve_save_path(Some(&app_id), game_path, None, &scan_roots, None).is_some();
+        let saves_likely_exist = crate::achievements::resolve_save_path(
+            Some(&app_id),
+            game_path,
+            None,
+            &scan_roots,
+            None,
+        )
+        .is_some();
 
         if meta_path.exists() || saves_likely_exist {
             if let Err(e) = crate::achievement_watcher::watch_game_achievements(
@@ -390,68 +427,107 @@ pub async fn toggle_run_as_admin(
 }
 
 #[cfg(target_os = "windows")]
-fn kill_process(pid: u32, is_elevated: bool) -> bool {
+async fn kill_process(pid: u32, is_elevated: bool) -> bool {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use windows_sys::Win32::Foundation::{BOOL, HWND, LPARAM, TRUE};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetWindowThreadProcessId, IsWindowVisible, PostMessageW, WM_CLOSE,
+    };
+
     let mut sys = sysinfo::System::new();
-    
-    // Elevated processes can't easily be gracefully closed from a non-elevated launcher 
-    // without popping UAC twice (once for graceful, once for force if it fails).
-    // So we just force kill them directly with one UAC prompt.
+
     if is_elevated {
-        log::info!("Elevated game - using force taskkill directly");
-        let ps_script = format!("Start-Process taskkill -ArgumentList '/F /T /PID {}' -Verb RunAs -WindowStyle Hidden", pid);
-        let result = Command::new("powershell")
+        log::info!("Elevated game - attempting graceful close via elevated taskkill");
+        let ps_graceful = format!(
+            "Start-Process taskkill -ArgumentList '/PID {} /T' -Verb RunAs -WindowStyle Hidden",
+            pid
+        );
+        let _ = Command::new("powershell")
             .args([
                 "-NoProfile",
                 "-WindowStyle",
                 "Hidden",
                 "-Command",
-                &ps_script,
+                &ps_graceful,
             ])
             .creation_flags(0x00000008) // DETACHED_PROCESS
             .output();
 
-        match result {
-            Ok(output) => {
-                let success = output.status.success();
-                if !success {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    log::warn!("taskkill failed for PID {}: {}", pid, stderr.trim());
-                }
-                success
-            }
-            Err(e) => {
-                log::error!("Failed to run taskkill for PID {}: {}", pid, e);
-                false
-            }
+        tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
+
+        sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[sysinfo::Pid::from_u32(
+            pid,
+        )]));
+        if sys.process(sysinfo::Pid::from_u32(pid)).is_none() {
+            return true;
         }
-    } else {
-        // For non-elevated games, try graceful close (Alt+F4 behavior) first
-        log::info!("Attempting graceful close for PID {}", pid);
-        let _ = Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/T"])
+
+        log::info!("Elevated game did not close gracefully, forcing kill.");
+        let ps_force = format!(
+            "Start-Process taskkill -ArgumentList '/F /T /PID {}' -Verb RunAs -WindowStyle Hidden",
+            pid
+        );
+        let _ = Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-WindowStyle",
+                "Hidden",
+                "-Command",
+                &ps_force,
+            ])
             .creation_flags(0x00000008)
             .output();
 
-        // Give the game 1.5 seconds to save data and cleanly exit
-        std::thread::sleep(std::time::Duration::from_millis(1500));
+        return true;
+    } else {
+        log::info!(
+            "Attempting graceful close (Alt+F4 equivalent) for PID {}",
+            pid
+        );
 
-        sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[sysinfo::Pid::from_u32(pid)]));
+        static TARGET_PID: AtomicU32 = AtomicU32::new(0);
+        TARGET_PID.store(pid, Ordering::SeqCst);
+
+        unsafe extern "system" fn enum_proc(hwnd: HWND, _lparam: LPARAM) -> BOOL {
+            let mut window_pid = 0;
+            GetWindowThreadProcessId(hwnd, &mut window_pid);
+            // If the window belongs to our target PID and is visible, simulate clicking the X
+            if window_pid == TARGET_PID.load(Ordering::SeqCst) && IsWindowVisible(hwnd) != 0 {
+                PostMessageW(hwnd, WM_CLOSE, 0, 0);
+            }
+            TRUE
+        }
+
+        unsafe {
+            EnumWindows(Some(enum_proc), 0);
+        }
+
+        // Give the game 2 seconds to save data and cleanly exit
+        tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
+
+        sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[sysinfo::Pid::from_u32(
+            pid,
+        )]));
         if sys.process(sysinfo::Pid::from_u32(pid)).is_none() {
             log::info!("Process {} closed gracefully.", pid);
             return true;
         }
 
-        log::info!("Process {} did not close gracefully. Proceeding with force kill.", pid);
+        log::info!(
+            "Process {} did not close gracefully. Proceeding with force kill.",
+            pid
+        );
         let force_result = Command::new("taskkill")
             .args(["/F", "/T", "/PID", &pid.to_string()])
             .creation_flags(0x00000008)
             .output();
-            
+
         match force_result {
             Ok(output) if output.status.success() => true,
             _ => {
-                // Fallback to sysinfo kill if taskkill fails
-                sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[sysinfo::Pid::from_u32(pid)]));
+                sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[sysinfo::Pid::from_u32(
+                    pid,
+                )]));
                 if let Some(process) = sys.process(sysinfo::Pid::from_u32(pid)) {
                     process.kill();
                     true
@@ -464,9 +540,11 @@ fn kill_process(pid: u32, is_elevated: bool) -> bool {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn kill_process(pid: u32, _is_elevated: bool) -> bool {
+async fn kill_process(pid: u32, _is_elevated: bool) -> bool {
     let mut sys = sysinfo::System::new();
-    sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[sysinfo::Pid::from_u32(pid)]));
+    sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[sysinfo::Pid::from_u32(
+        pid,
+    )]));
     if let Some(process) = sys.process(sysinfo::Pid::from_u32(pid)) {
         process.kill();
         true
@@ -483,26 +561,20 @@ pub async fn force_stop_game(id: String, state: State<'_, AppState>) -> Result<(
     };
 
     if let Some(identity) = identity {
-        let killed = kill_process(identity.pid, identity.elevated);
+        let killed = kill_process(identity.pid, identity.elevated).await;
 
         if killed {
             if let Some(flag) = &identity.elevated_stop_flag {
                 flag.store(true, std::sync::atomic::Ordering::Relaxed);
             }
-            
+
             log::info!("Force stopped game '{}' (PID {})", id, identity.pid);
-            
-            // CRITICAL FIX: We do NOT remove the game from `running_games` here anymore!
-            // The `monitor` loop will spot that the process has exited on its next 2-second tick.
-            // It will then cleanly remove it, save the playtime to DB, and emit the `game-stopped` event.
-            // It will then also stop the achievement watcher if it's running.
         } else {
             log::warn!(
                 "PID {} for game '{}' could not be killed — it may require elevation or has already exited.",
                 identity.pid,
                 id
             );
-            // Return an error so the frontend knows the kill failed, allowing it to revert the button state to "Running"
             return Err("Failed to force stop the game. The process may require admin privileges or is already closed.".to_string());
         }
     } else {
@@ -516,6 +588,7 @@ pub async fn force_stop_game(id: String, state: State<'_, AppState>) -> Result<(
     Ok(())
 }
 
+// ... remaining commands (open_path_in_explorer, etc.)
 #[tauri::command]
 pub async fn open_path_in_explorer(path: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
@@ -542,7 +615,10 @@ pub struct RefreshResult {
 }
 
 #[tauri::command]
-pub async fn resolve_game_app_id(game_id: String, state: State<'_, AppState>) -> Result<Option<String>, String> {
+pub async fn resolve_game_app_id(
+    game_id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<String>, String> {
     let game = get_game_by_id(&state.read_pool, &game_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Game not found: {}", game_id))?;
@@ -553,26 +629,27 @@ pub async fn resolve_game_app_id(game_id: String, state: State<'_, AppState>) ->
 }
 
 #[tauri::command]
-pub async fn refresh_game_metadata(game_id: String, state: State<'_, AppState>, app: AppHandle) -> Result<RefreshResult, String> {
-    // In-flight guard: prevent concurrent metadata refresh for the same game
+pub async fn refresh_game_metadata(
+    game_id: String,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<RefreshResult, String> {
     {
         let mut in_flight = state.metadata_refresh_lock.lock().await;
         if !in_flight.insert(game_id.clone()) {
             return Err("Refresh already in progress for this game".into());
         }
     }
-
-    // Wrap the internal logic so we can guarantee the guard is dropped at the end
     let result = refresh_game_metadata_internal(&game_id, &state, &app).await;
-
-    // Guaranteed cleanup runs
     state.metadata_refresh_lock.lock().await.remove(&game_id);
-
     result
 }
 
-async fn refresh_game_metadata_internal(game_id: &str, state: &State<'_, AppState>, app: &AppHandle) -> Result<RefreshResult, String> {
-    // 1. Fetch game from DB
+async fn refresh_game_metadata_internal(
+    game_id: &str,
+    state: &State<'_, AppState>,
+    app: &AppHandle,
+) -> Result<RefreshResult, String> {
     let game = get_game_by_id(&state.read_pool, &game_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Game not found: {}", game_id))?;
@@ -585,31 +662,44 @@ async fn refresh_game_metadata_internal(game_id: &str, state: &State<'_, AppStat
     });
     let game_path = PathBuf::from(&install_dir);
 
-    // 2. Scan for app_id
     let found_app_id = crate::achievements::resolve_app_id(&game_path);
-    let app_id_changed = found_app_id.is_some() && found_app_id.as_deref() != game.steam_app_id.as_ref().map(|id| id.to_string()).as_deref();
+    let app_id_changed = found_app_id.is_some()
+        && found_app_id.as_deref()
+            != game
+                .steam_app_id
+                .as_ref()
+                .map(|id| id.to_string())
+                .as_deref();
 
-    // 3. Update DB if new app_id found
     if let Some(ref id_str) = found_app_id {
         if app_id_changed {
             if let Ok(app_id_u32) = id_str.parse::<u32>() {
-                state.db_tx.send(crate::state::DbWrite::Game(crate::state::GameDbWrite::UpdateSteamAppId {
-                    game_id: game_id.to_string(),
-                    steam_app_id: Some(app_id_u32),
-                })).map_err(|e| e.to_string())?;
+                state
+                    .db_tx
+                    .send(crate::state::DbWrite::Game(
+                        crate::state::GameDbWrite::UpdateSteamAppId {
+                            game_id: game_id.to_string(),
+                            steam_app_id: Some(app_id_u32),
+                        },
+                    ))
+                    .map_err(|e| e.to_string())?;
             }
         }
     }
 
-    // 4. Resolve save path with new or existing app_id
     let scan_roots = crate::settings::default_scan_roots();
-    let effective_app_id = found_app_id.clone().or_else(|| game.steam_app_id.as_ref().map(|id| id.to_string()));
-    let save_path = crate::achievements::resolve_save_path(effective_app_id.as_deref(), &game_path, game.manual_achievement_path.as_deref(), &scan_roots, None);
+    let effective_app_id = found_app_id
+        .clone()
+        .or_else(|| game.steam_app_id.as_ref().map(|id| id.to_string()));
+    let save_path = crate::achievements::resolve_save_path(
+        effective_app_id.as_deref(),
+        &game_path,
+        game.manual_achievement_path.as_deref(),
+        &scan_roots,
+        None,
+    );
 
-    // 5. Re-fetch RAWG logic removed as we are now offline-first
     let rawg_refreshed = false;
-
-    // 6. Emit event for UI reactivity
     let _ = app.emit("game-metadata-refreshed", &game_id);
 
     Ok(RefreshResult {
@@ -619,23 +709,32 @@ async fn refresh_game_metadata_internal(game_id: &str, state: &State<'_, AppStat
     })
 }
 
-// ── Force Borderless ──────────────────────────────────────────────────────────
+#[tauri::command]
+pub fn force_borderless(game_pid: u32) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        borderless::force_borderless_impl(game_pid)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = game_pid;
+        Err("force_borderless is only supported on Windows".to_string())
+    }
+}
 
 #[cfg(target_os = "windows")]
 mod borderless {
     use std::sync::atomic::{AtomicIsize, Ordering};
-    use windows_sys::Win32::Foundation::{BOOL, HWND, LPARAM, TRUE, FALSE};
+    use windows_sys::Win32::Foundation::{BOOL, FALSE, HWND, LPARAM, TRUE};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, GetWindowThreadProcessId, IsWindowVisible,
-        SetWindowLongW, SetWindowPos, GetSystemMetrics,
-        GWL_STYLE, HWND_TOPMOST, SWP_FRAMECHANGED, SWP_NOACTIVATE,
-        WS_POPUP, WS_VISIBLE, SM_CXSCREEN, SM_CYSCREEN,
+        EnumWindows, GetSystemMetrics, GetWindowThreadProcessId, IsWindowVisible, SetWindowLongW,
+        SetWindowPos, GWL_STYLE, HWND_TOPMOST, SM_CXSCREEN, SM_CYSCREEN, SWP_FRAMECHANGED,
+        SWP_NOACTIVATE, WS_POPUP, WS_VISIBLE,
     };
 
     static FOUND_HWND: AtomicIsize = AtomicIsize::new(0);
 
     unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
-        // Skip invisible windows
         if IsWindowVisible(hwnd) == 0 {
             return TRUE;
         }
@@ -643,7 +742,7 @@ mod borderless {
         GetWindowThreadProcessId(hwnd, &mut pid);
         if pid == lparam as u32 {
             FOUND_HWND.store(hwnd, Ordering::SeqCst);
-            return FALSE; // Stop enumeration — found our window
+            return FALSE;
         }
         TRUE
     }
@@ -660,39 +759,27 @@ mod borderless {
                 ));
             }
 
-            // Strip caption and thick-frame (title bar + resize border), keep popup + visible
             let new_style = (WS_POPUP | WS_VISIBLE) as i32;
             SetWindowLongW(hwnd, GWL_STYLE, new_style);
 
-            // Move to cover the full screen and make TOPMOST
             let w = GetSystemMetrics(SM_CXSCREEN);
             let h = GetSystemMetrics(SM_CYSCREEN);
             SetWindowPos(
                 hwnd,
                 HWND_TOPMOST,
-                0, 0, w, h,
+                0,
+                0,
+                w,
+                h,
                 SWP_FRAMECHANGED | SWP_NOACTIVATE,
             );
 
-            log::info!("Forced borderless on HWND {:x} for PID {}", hwnd as usize, game_pid);
+            log::info!(
+                "Forced borderless on HWND {:x} for PID {}",
+                hwnd as usize,
+                game_pid
+            );
         }
         Ok(())
-    }
-}
-
-/// Force a game window into borderless fullscreen so the overlay can sit on top.
-/// Finds the game's window by PID using EnumWindows (not FindWindowW, which requires
-/// a known title/class). Strips WS_CAPTION and WS_THICKFRAME, resizes to full screen,
-/// and marks the window HWND_TOPMOST.
-#[tauri::command]
-pub fn force_borderless(game_pid: u32) -> Result<(), String> {
-    #[cfg(target_os = "windows")]
-    {
-        borderless::force_borderless_impl(game_pid)
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        let _ = game_pid;
-        Err("force_borderless is only supported on Windows".to_string())
     }
 }

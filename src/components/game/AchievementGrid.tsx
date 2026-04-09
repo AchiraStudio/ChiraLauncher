@@ -10,13 +10,18 @@ function formatDate(ts: number | null): string {
     return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
-// ── Rarity Color Logic ──
+// ── Rarity Color Logic (Updated to exact user specs) ──
 function getRarityColors(percent: number | null) {
     if (percent === null) return { name: "COMMON", border: "border-white/10", shadow: "shadow-none", text: "text-white/40" };
-    if (percent > 50) return { name: "COMMON", border: "border-[#10b981]/50", shadow: "shadow-[0_0_15px_rgba(16,185,129,0.15)]", text: "text-[#10b981]" };
+    // 🟢 Common > 50%
+    if (percent > 50) return { name: "COMMON", border: "border-[#22c55e]/50", shadow: "shadow-[0_0_15px_rgba(34,197,94,0.15)]", text: "text-[#22c55e]" };
+    // 🔵 Uncommon 25% – 50%
     if (percent > 25) return { name: "UNCOMMON", border: "border-[#3b82f6]/50", shadow: "shadow-[0_0_15px_rgba(59,130,246,0.15)]", text: "text-[#3b82f6]" };
-    if (percent > 10) return { name: "RARE", border: "border-[#8b5cf6]/50", shadow: "shadow-[0_0_15px_rgba(139,92,246,0.15)]", text: "text-[#8b5cf6]" };
+    // 🟣 Rare 10% – 25%
+    if (percent > 10) return { name: "RARE", border: "border-[#a855f7]/50", shadow: "shadow-[0_0_15px_rgba(168,85,247,0.15)]", text: "text-[#a855f7]" };
+    // 🟡 Very Rare 5% – 10%
     if (percent > 5) return { name: "VERY RARE", border: "border-[#eab308]/50", shadow: "shadow-[0_0_15px_rgba(234,179,8,0.15)]", text: "text-[#eab308]" };
+    // 🔴 Ultra Rare < 5%
     return { name: "ULTRA RARE", border: "border-[#ef4444]/60", shadow: "shadow-[0_0_15px_rgba(239,68,68,0.25)]", text: "text-[#ef4444]" };
 }
 
@@ -113,8 +118,8 @@ export function AchievementGrid({ achievements, gameName }: Props) {
                         key={tab.key}
                         onClick={() => setFilter(tab.key)}
                         className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border ${filter === tab.key
-                                ? `bg-white/10 border-white/20 shadow-md ${tab.cls}`
-                                : "border-transparent text-white/20 hover:text-white/40 hover:bg-white/5"
+                            ? `bg-white/10 border-white/20 shadow-md ${tab.cls}`
+                            : "border-transparent text-white/20 hover:text-white/40 hover:bg-white/5"
                             }`}
                     >
                         {tab.label}
@@ -203,7 +208,7 @@ export function AchievementGrid({ achievements, gameName }: Props) {
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
-                        className="fixed inset-0 z-50 flex items-center justify-center p-6"
+                        className="fixed inset-0 z-[100] flex items-center justify-center p-6"
                         onClick={() => setSelected(null)}
                     >
                         <div className="absolute inset-0 bg-black/80 backdrop-blur-md" />

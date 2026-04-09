@@ -1,7 +1,6 @@
 use rusqlite::Connection;
 
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
-    // 0. Ensure migration table exists
     conn.execute(
         "CREATE TABLE IF NOT EXISTS schema_migrations (
             version INTEGER PRIMARY KEY
@@ -9,14 +8,12 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         [],
     )?;
 
-    // Get current version
     let current_version: i32 = conn.query_row(
         "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
         [],
         |row| row.get(0),
     )?;
 
-    // Migration 1: Initial schema
     if current_version < 1 {
         let tx = conn.unchecked_transaction()?;
         tx.execute(
@@ -44,7 +41,6 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         tx.commit()?;
     }
 
-    // Migration 2: Achievements
     if current_version < 2 {
         let tx = conn.unchecked_transaction()?;
         tx.execute(
@@ -63,7 +59,6 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         tx.commit()?;
     }
 
-    // Migration 3: Scan paths
     if current_version < 3 {
         let tx = conn.unchecked_transaction()?;
         tx.execute(
@@ -78,7 +73,6 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         tx.commit()?;
     }
 
-    // Migration 4: Scanner tracking fields
     if current_version < 4 {
         let tx = conn.unchecked_transaction()?;
         tx.execute(
@@ -91,7 +85,6 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         tx.commit()?;
     }
 
-    // Migration 5: Settings
     if current_version < 5 {
         crate::settings::init_table(conn)?;
         let tx = conn.unchecked_transaction()?;
@@ -99,7 +92,6 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         tx.commit()?;
     }
 
-    // Migration 6: Update Settings Columns
     if current_version < 6 {
         crate::settings::init_table(conn)?;
         let tx = conn.unchecked_transaction()?;
@@ -107,7 +99,6 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         tx.commit()?;
     }
 
-    // Migration 7: Add RAWG API Key
     if current_version < 7 {
         crate::settings::init_table(conn)?;
         let tx = conn.unchecked_transaction()?;
@@ -115,7 +106,6 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         tx.commit()?;
     }
 
-    // Migration 8: RAWG Override & Metadata Cache
     if current_version < 8 {
         let tx = conn.unchecked_transaction()?;
         tx.execute(
@@ -158,7 +148,6 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         tx.commit()?;
     }
 
-    // Migration 9: run_as_admin flag per game
     if current_version < 9 {
         let tx = conn.unchecked_transaction()?;
         let _ = tx.execute(
@@ -169,7 +158,6 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         tx.commit()?;
     }
 
-    // Migration 10: Folders
     if current_version < 10 {
         let tx = conn.unchecked_transaction()?;
         tx.execute(
@@ -183,7 +171,6 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         tx.commit()?;
     }
 
-    // Migration 11: Profiles
     if current_version < 11 {
         let tx = conn.unchecked_transaction()?;
         tx.execute(
@@ -201,7 +188,6 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         tx.commit()?;
     }
 
-    // Migration 12: OS Integration
     if current_version < 12 {
         let tx = conn.unchecked_transaction()?;
         tx.execute(
@@ -217,7 +203,6 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         tx.commit()?;
     }
 
-    // Migration 13: Extensions
     if current_version < 13 {
         let tx = conn.unchecked_transaction()?;
         tx.execute(
@@ -237,7 +222,6 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         tx.commit()?;
     }
 
-    // Migration 14: Settings - Steam API
     if current_version < 14 {
         crate::settings::init_table(conn)?;
         let tx = conn.unchecked_transaction()?;
@@ -245,7 +229,6 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         tx.commit()?;
     }
 
-    // Migration 15: Game Stats columns
     if current_version < 15 {
         let tx = conn.unchecked_transaction()?;
         let _ = tx.execute(
@@ -333,7 +316,6 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         tx.commit()?;
     }
 
-    // Migration 22: Add XP tracking to User Profile
     if current_version < 22 {
         let tx = conn.unchecked_transaction()?;
         let _ = tx.execute(
@@ -341,6 +323,14 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
             [],
         );
         tx.execute("INSERT INTO schema_migrations (version) VALUES (22)", [])?;
+        tx.commit()?;
+    }
+
+    // NEW Migration 23: Logo Path
+    if current_version < 23 {
+        let tx = conn.unchecked_transaction()?;
+        let _ = tx.execute("ALTER TABLE games ADD COLUMN logo_path TEXT", []);
+        tx.execute("INSERT INTO schema_migrations (version) VALUES (23)", [])?;
         tx.commit()?;
     }
 
