@@ -41,11 +41,11 @@ export default function AchievementOverlay() {
     }, []);
 
     useEffect(() => {
+        // --- Core Achievement Listener ---
         const unlistenAch = listen<AchievementPayload>("achievement-unlocked", (event: { payload: AchievementPayload }) => {
             const id = crypto.randomUUID();
             setQueue((q: QueueItem[]) => {
                 // Deduplicate: ignore if an identical api_name is already in the queue
-                // (prevents the same unlock event firing twice from two emit paths)
                 const alreadyQueued = q.some(
                     (item: QueueItem) =>
                         item.type === "achievement" &&
@@ -56,11 +56,9 @@ export default function AchievementOverlay() {
                 return [...q, { id, type: "achievement", payload: event.payload }];
             });
             playAchievementSound();
-            // ⚠️  No setTimeout(removeById) here — the toast calls onDone itself
-            //     at the end of its own animation lifecycle (T_BUBBLE + T_EXPAND +
-            //     T_HOLD + T_SHRINK + T_POPOUT). One removal path, no race.
         });
 
+        // --- Core Game Start Listener ---
         const unlistenStart = listen<GameStartPayload>("game-started-toast", (event: { payload: GameStartPayload }) => {
             setQueue((q: QueueItem[]) => {
                 if (q.length >= MAX_QUEUE_DEPTH) return q;
@@ -69,9 +67,16 @@ export default function AchievementOverlay() {
             playAchievementSound();
         });
 
+        // --- STOP LISTENER FIX: Purge the queue and hide immediately when game closes ---
+        const unlistenStop = listen("game-stopped", () => {
+            setQueue([]); // Flush the queue
+            getCurrentWindow().hide().catch(console.error); // Hide window explicitly
+        });
+
         return () => {
             unlistenAch.then((f: UnlistenFn) => f());
             unlistenStart.then((f: UnlistenFn) => f());
+            unlistenStop.then((f: UnlistenFn) => f());
         };
     }, [removeById]);
 

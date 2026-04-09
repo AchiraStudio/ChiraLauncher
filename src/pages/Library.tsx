@@ -144,11 +144,7 @@ export default function Library() {
             .finally(() => setAchievementsLoading(false));
     }, [activeGame?.id]);
 
-    // Setup local image hooks
-    const { src: bgUrl, error: bgError } = useLocalImage(activeGame?.background_image_path || (activeGame as any)?.background_path || activeGame?.cover_image_path || (activeGame as any)?.cover_path);
-    const { src: coverUrl } = useLocalImage(activeGame?.cover_image_path || (activeGame as any)?.cover_path);
-
-    // Update global background
+    // Update global background (which renders across the ENTIRE app window)
     useEffect(() => {
         if (activeGame) {
             setCurrentBg(activeGame.background_image_path || (activeGame as any).background_path || activeGame.cover_image_path || null);
@@ -157,6 +153,9 @@ export default function Library() {
         }
         return () => { setCurrentBg(null); };
     }, [activeGame?.id, setCurrentBg]);
+
+    // Prepare local cover url for the left panel
+    const { src: coverUrl } = useLocalImage(activeGame?.cover_image_path || (activeGame as any)?.cover_path);
 
     const handleAction = async () => {
         if (!activeGame) return;
@@ -194,24 +193,24 @@ export default function Library() {
     if (allGames.length === 0) {
         return (
             <div className="flex items-center justify-center h-full relative" onClick={() => setContextMenu(null)}>
-                <div className="text-center space-y-6">
+                <div className="text-center space-y-6 relative z-10 glass-panel p-16 rounded-[3rem] border border-white/5 shadow-2xl">
                     <div className="w-24 h-24 rounded-3xl bg-accent/10 border border-accent/20 flex items-center justify-center mx-auto text-accent">
                         <Gamepad2 size={40} strokeWidth={1.5} />
                     </div>
                     <div>
-                        <h2 className="text-2xl font-black text-white">Your library is empty</h2>
-                        <p className="text-white/30 text-sm mt-2">Add your first game to get started.</p>
+                        <h2 className="text-3xl font-black text-white uppercase tracking-tight">Your library is empty</h2>
+                        <p className="text-white/40 text-sm mt-3 font-medium uppercase tracking-widest">Add your first game to initialize the index.</p>
                     </div>
-                    <div className="flex gap-4 justify-center mt-4">
+                    <div className="flex gap-4 justify-center mt-8">
                         <button
                             onClick={() => setAddGameModalOpen(true)}
-                            className="inline-flex items-center gap-2 bg-accent hover:brightness-110 text-white px-8 py-3.5 rounded-2xl font-black text-sm tracking-wide transition-all shadow-xl shadow-accent/20 active:scale-95"
+                            className="inline-flex items-center gap-2 bg-accent hover:brightness-110 text-white px-8 py-3.5 rounded-2xl font-black text-xs tracking-widest uppercase transition-all shadow-xl shadow-accent/20 active:scale-95"
                         >
                             <Plus size={18} /> Add Game
                         </button>
                         <button
                             onClick={() => setScannerModalOpen(true)}
-                            className="inline-flex items-center gap-2 bg-white/5 hover:bg-white/10 text-white px-8 py-3.5 rounded-2xl font-black text-sm tracking-wide transition-all border border-white/10 active:scale-95"
+                            className="inline-flex items-center gap-2 bg-white/5 hover:bg-white/10 text-white px-8 py-3.5 rounded-2xl font-black text-xs tracking-widest uppercase transition-all border border-white/10 active:scale-95"
                         >
                             <FolderOpen size={18} /> Scan Folders
                         </button>
@@ -225,34 +224,12 @@ export default function Library() {
         <div className="flex h-full w-full relative" onClick={() => setContextMenu(null)}>
             {contextMenu && <ContextMenu x={contextMenu.x} y={contextMenu.y} items={contextMenu.items} onClose={() => setContextMenu(null)} />}
 
+            {/* Subtle overlay gradients so text remains readable against bright backgrounds */}
+            <div className="absolute inset-0 bg-gradient-to-t from-background/80 via-background/20 to-transparent z-10 pointer-events-none" />
+            <div className="absolute inset-0 bg-gradient-to-r from-background/90 via-background/40 to-background/60 z-10 pointer-events-none" />
+
             {/* ── Hero / Detail Panel (left) ── */}
-            <div className="flex-1 relative overflow-hidden pointer-events-none">
-
-                {/* Per-game background (independent of global BG) */}
-                <AnimatePresence mode="popLayout">
-                    {bgUrl && !bgError && (
-                        <motion.div
-                            key={bgUrl}
-                            initial={{ opacity: 0, scale: 1.04 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            exit={{ opacity: 0 }}
-                            transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
-                            className="absolute inset-0 z-0"
-                        >
-                            <img
-                                src={bgUrl}
-                                alt=""
-                                className="w-full h-full object-cover brightness-[0.45] saturate-[1.1]"
-                            />
-                        </motion.div>
-                    )}
-                </AnimatePresence>
-
-                {/* Gradient overlays for readability */}
-                <div className="absolute inset-0 bg-gradient-to-t from-background via-background/60 to-transparent z-10 pointer-events-none" />
-                <div className="absolute inset-0 bg-gradient-to-r from-background/90 via-background/40 to-transparent z-10 pointer-events-none" />
-
-                {/* Content */}
+            <div className="flex-1 relative z-20 flex flex-col justify-end p-12 pointer-events-auto">
                 <AnimatePresence mode="wait">
                     {activeGame && (
                         <motion.div
@@ -261,7 +238,6 @@ export default function Library() {
                             animate={{ opacity: 1, y: 0 }}
                             exit={{ opacity: 0, y: -10 }}
                             transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-                            className="absolute inset-0 z-20 flex flex-col justify-end p-12 pointer-events-auto"
                         >
                             <div className="flex items-start gap-10">
 
@@ -336,7 +312,7 @@ export default function Library() {
                                     </h1>
 
                                     {/* Quick Stats Row */}
-                                    <div className="flex items-center flex-wrap gap-6 text-sm text-white/60 font-semibold mb-8 bg-black/30 w-fit px-5 py-3 rounded-2xl border border-white/5 backdrop-blur-sm">
+                                    <div className="flex items-center flex-wrap gap-6 text-sm text-white/60 font-semibold mb-8 bg-black/30 w-fit px-5 py-3 rounded-2xl border border-white/5 backdrop-blur-sm shadow-xl">
                                         <span className="flex items-center gap-2"><Clock size={16} className="text-accent" /> {formatPlaytime(activeGame.playtime_seconds || 0)}</span>
                                         <span className="w-1.5 h-1.5 rounded-full bg-white/20" />
                                         {activeGame.last_played && (
@@ -355,7 +331,7 @@ export default function Library() {
 
                                         {/* Metadata Grid */}
                                         {(activeGame.developer || activeGame.publisher || activeGame.release_date || activeGame.genre) && (
-                                            <div className="bg-black/40 backdrop-blur-2xl border border-white/10 rounded-2xl p-5 flex-1 min-w-[240px] space-y-3.5 shadow-xl hover:bg-black/50 transition-colors">
+                                            <div className="bg-black/40 backdrop-blur-2xl border border-white/10 rounded-2xl p-5 flex-1 min-w-[240px] space-y-3.5 shadow-xl hover:bg-black/60 transition-colors">
                                                 <h4 className="text-[10px] font-black text-white/30 uppercase tracking-widest mb-2">Game Info</h4>
                                                 <MetaRow icon={<User2 size={14} />} label="Developer" value={activeGame.developer || "Unknown"} />
                                                 <MetaRow icon={<Building2 size={14} />} label="Publisher" value={activeGame.publisher || "Unknown"} />
@@ -422,65 +398,62 @@ export default function Library() {
             </div>
 
             {/* ── Right Panel: Game List ── */}
-            <div className="absolute top-6 right-6 bottom-6 w-[320px] z-30 flex flex-col pointer-events-none">
-                <div className="bg-[#0e1119]/85 backdrop-blur-[40px] border border-white/10 rounded-[1.5rem] w-full h-full flex flex-col shadow-[0_16px_50px_rgba(0,0,0,0.6)] pointer-events-auto overflow-hidden">
-
-                    {/* List header */}
-                    <div className="px-5 pt-6 pb-4 shrink-0">
-                        <div className="flex items-center justify-between mb-4">
-                            <h2 className="text-sm font-black text-white tracking-widest uppercase">Collection</h2>
-                            <span className="text-xs font-bold text-accent bg-accent/10 px-2.5 py-1 rounded-lg border border-accent/20">
-                                {allGames.length}
-                            </span>
-                        </div>
-
-                        {/* Search */}
-                        <div className="relative">
-                            <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30" />
-                            <input
-                                type="text"
-                                value={search}
-                                onChange={(e) => setSearch(e.target.value)}
-                                placeholder="Search library..."
-                                className="w-full bg-black/40 border border-white/10 rounded-xl pl-10 pr-10 py-3 text-white text-sm font-medium outline-none focus:border-accent/50 placeholder:text-white/30 transition-all shadow-inner"
-                            />
-                            {search && (
-                                <button onClick={() => setSearch("")} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-white/30 hover:text-white transition-colors">
-                                    <X size={14} />
-                                </button>
-                            )}
-                        </div>
+            <div className="w-[340px] shrink-0 h-full border-l border-white/5 bg-black/40 backdrop-blur-3xl flex flex-col pointer-events-auto z-30">
+                {/* List header */}
+                <div className="px-6 pt-10 pb-5 shrink-0">
+                    <div className="flex items-center justify-between mb-5">
+                        <h2 className="text-sm font-black text-white tracking-widest uppercase">Collection</h2>
+                        <span className="text-xs font-bold text-accent bg-accent/10 px-2.5 py-1 rounded-lg border border-accent/20">
+                            {allGames.length}
+                        </span>
                     </div>
 
-                    {/* Scrollable game list */}
-                    <div className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-none px-3 pb-3 space-y-1">
-                        {filteredGames.length === 0 ? (
-                            <div className="flex flex-col items-center justify-center h-40 text-white/30 text-xs font-semibold gap-2">
-                                <Search size={24} className="opacity-50" />
-                                No match found
-                            </div>
-                        ) : (
-                            filteredGames.map((game) => (
-                                <LibraryListItem
-                                    key={game.id}
-                                    game={game}
-                                    isActive={activeGameId === game.id}
-                                    onClick={() => setActiveGameId(game.id)}
-                                    onContextMenu={(e) => handleContextMenu(e, game)}
-                                />
-                            ))
+                    {/* Search */}
+                    <div className="relative">
+                        <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30" />
+                        <input
+                            type="text"
+                            value={search}
+                            onChange={(e) => setSearch(e.target.value)}
+                            placeholder="Search library..."
+                            className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-10 py-3 text-white text-sm font-medium outline-none focus:border-accent/50 placeholder:text-white/30 transition-all shadow-inner"
+                        />
+                        {search && (
+                            <button onClick={() => setSearch("")} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-white/30 hover:text-white transition-colors">
+                                <X size={14} />
+                            </button>
                         )}
                     </div>
+                </div>
 
-                    {/* Add game footer */}
-                    <div className="p-4 shrink-0 border-t border-white/5 bg-white/[0.02]">
-                        <button
-                            onClick={() => setAddGameModalOpen(true)}
-                            className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 text-white text-xs font-bold transition-all shadow-sm"
-                        >
-                            <Plus size={16} /> Add New Game
-                        </button>
-                    </div>
+                {/* Scrollable game list */}
+                <div className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-none px-4 pb-4 space-y-1">
+                    {filteredGames.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center h-40 text-white/30 text-xs font-semibold gap-2">
+                            <Search size={24} className="opacity-50" />
+                            No match found
+                        </div>
+                    ) : (
+                        filteredGames.map((game) => (
+                            <LibraryListItem
+                                key={game.id}
+                                game={game}
+                                isActive={activeGameId === game.id}
+                                onClick={() => setActiveGameId(game.id)}
+                                onContextMenu={(e) => handleContextMenu(e, game)}
+                            />
+                        ))
+                    )}
+                </div>
+
+                {/* Add game footer */}
+                <div className="p-5 shrink-0 border-t border-white/5 bg-white/[0.02]">
+                    <button
+                        onClick={() => setAddGameModalOpen(true)}
+                        className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 text-white text-xs font-bold transition-all shadow-sm"
+                    >
+                        <Plus size={16} /> Add New Game
+                    </button>
                 </div>
             </div>
 

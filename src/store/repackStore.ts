@@ -25,6 +25,8 @@ export const useRepackStore = create<RepackState>((set, get) => ({
     initialized: false,
     error: null,
     initialize: () => {
+        if (!window.__TAURI_INTERNALS__) return Promise.resolve(); // Guard for web browser testing
+
         if (!initPromise) {
             initPromise = (async () => {
                 if (get().initialized) return;

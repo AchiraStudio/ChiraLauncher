@@ -7,6 +7,7 @@ import { useGameStore } from "../../store/gameStore";
 import { v4 as uuidv4 } from "uuid";
 import type { NewGame } from "../../types/game";
 import { autoFetchSteamAchievements } from "../../services/gameService";
+import { toast } from "sonner";
 import {
     FolderOpen,
     Gamepad2,
@@ -65,6 +66,11 @@ export function AddGameModal() {
     };
 
     const handlePickFile = async () => {
+        if (!window.__TAURI_INTERNALS__) {
+            toast.error("File selection requires the Tauri desktop environment.");
+            return;
+        }
+
         try {
             const selected = await openDialog({
                 multiple: false,
@@ -84,16 +90,13 @@ export function AddGameModal() {
                     setDetectedCrackType(result.crack_type);
                     setDetectedAppId(result.app_id);
 
-                    // Determine manual achievement path from scanner
                     const achPath = result.achievements_json || result.achievements_ini || result.achievements_xml || null;
                     if (achPath) {
-                        // Keep the exact file path found by the scanner, exactly like CPlay
                         setManualAchievementPath(achPath);
                     }
 
                 } catch (e) {
                     console.error("Scanner failed:", e);
-                    // Fallback to simple title cleaning if scanner fails
                     const filename = selected.split("\\").pop() || "";
                     const cleaned: string = await invoke("clean_title", { filename });
                     setTitle(cleaned);
@@ -107,6 +110,11 @@ export function AddGameModal() {
     };
 
     const handleConfirmImport = async () => {
+        if (!window.__TAURI_INTERNALS__) {
+            toast.error("Database writes require the Tauri desktop environment.");
+            return;
+        }
+
         setIsImporting(true);
         try {
             const newGame: NewGame = {
@@ -138,7 +146,6 @@ export function AddGameModal() {
 
             await invoke("add_game", { game: newGame });
 
-            // Trigger automatic sync
             if (newGame.id) {
                 autoFetchSteamAchievements(newGame.id, newGame.install_dir || "");
             }
@@ -166,10 +173,8 @@ export function AddGameModal() {
                 exit={{ opacity: 0, scale: 0.9, y: 30 }}
                 className="bg-[#12141c] w-full max-w-[800px] max-h-[90vh] rounded-[2.5rem] shadow-[0_50px_100px_rgba(0,0,0,0.8)] border border-white/5 flex flex-col overflow-hidden relative"
             >
-                {/* Background glow */}
                 <div className="absolute top-0 left-1/4 w-1/2 h-1 bg-accent/40 blur-2xl" />
 
-                {/* Header */}
                 <div className="px-10 py-8 flex items-center justify-between">
                     <div>
                         <h2 className="text-2xl font-black tracking-tight text-white uppercase ">Add Native Game</h2>
@@ -186,7 +191,6 @@ export function AddGameModal() {
                     </button>
                 </div>
 
-                {/* Progress bar */}
                 <div className="px-10 mb-4">
                     <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
                         <motion.div
@@ -200,10 +204,8 @@ export function AddGameModal() {
                     </div>
                 </div>
 
-                {/* Content */}
                 <div className="p-10 flex-1 flex flex-col min-h-0 overflow-y-auto custom-scrollbar">
                     <AnimatePresence mode="wait">
-                        {/* STEP 1: Pick File */}
                         {step === "PICK_FILE" && (
                             <motion.div
                                 key="step1"
@@ -237,7 +239,6 @@ export function AddGameModal() {
                             </motion.div>
                         )}
 
-                        {/* STEP 2: Details & Scan Result */}
                         {step === "DETAILS" && (
                             <motion.div
                                 key="step2"
@@ -261,7 +262,6 @@ export function AddGameModal() {
                                     </div>
                                 ) : (
                                     <div className="space-y-8">
-                                        {/* File Path Display */}
                                         <div className="space-y-3">
                                             <label className="text-white/30 text-[10px] font-black tracking-normal uppercase ml-1">Installation Directory</label>
                                             <div className="bg-white/[0.03] p-4 rounded-2xl border border-white/5 flex items-center gap-4">
@@ -274,7 +274,6 @@ export function AddGameModal() {
                                             </div>
                                         </div>
 
-                                        {/* Metadata Inputs */}
                                         <div className="grid grid-cols-1 gap-8">
                                             <div className="space-y-3">
                                                 <label className="text-white/30 text-[10px] font-black tracking-normal uppercase ml-1">Library Display Name</label>
@@ -293,7 +292,6 @@ export function AddGameModal() {
                                                 </div>
                                             </div>
 
-                                            {/* Detected Stats Cards */}
                                             <div className="grid grid-cols-2 gap-4">
                                                 <div className="bg-white/[0.03] border border-white/5 p-5 rounded-3xl relative overflow-hidden group">
                                                     <div className="absolute top-0 right-0 p-4 text-accent/10 group-hover:text-accent/20 transition-colors">
@@ -317,7 +315,6 @@ export function AddGameModal() {
                                                 </div>
                                             </div>
 
-                                            {/* Achievement Path Details */}
                                             <div className="bg-accent/5 border border-accent/10 p-6 rounded-[2rem] space-y-4">
                                                 <div className="flex items-center gap-3">
                                                     <div className="w-8 h-8 rounded-lg bg-accent/20 flex items-center justify-center text-accent">
@@ -371,7 +368,6 @@ export function AddGameModal() {
                             </motion.div>
                         )}
 
-                        {/* STEP 3: Confirm & Import */}
                         {step === "CONFIRM" && (
                             <motion.div
                                 key="step3"

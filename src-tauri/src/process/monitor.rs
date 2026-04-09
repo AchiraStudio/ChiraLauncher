@@ -11,8 +11,6 @@ use crate::db::queries::get_game_exe_map;
 use crate::process::identity::{get_process_start_time, is_process_alive};
 use crate::state::{DbWrite, DbWriteSender, LaunchSource, ProcessIdentity};
 
-
-
 pub fn start(
     app: tauri::AppHandle,
     running: Arc<Mutex<HashMap<String, ProcessIdentity>>>,
@@ -22,25 +20,19 @@ pub fn start(
     tauri::async_runtime::spawn(async move {
         let mut sys = sysinfo::System::new();
 
-        // Two timers: fast process refresh, slow DB refresh
         let mut process_interval = tokio::time::interval(Duration::from_secs(2));
-        let mut last_db_refresh = Instant::now() - Duration::from_secs(60); // force immediate refresh
+        let mut last_db_refresh = Instant::now() - Duration::from_secs(60);
         let mut last_overlay_refresh = Instant::now();
 
         let mut exe_map: HashMap<String, String> = HashMap::new();
-        
-        use tauri::Manager;
 
-        // Per-game achievement watchers are now stored in the global ActiveWatchers state
-        // and are no longer local to the monitor loop.
+        use tauri::Manager;
 
         loop {
             process_interval.tick().await;
 
-            // 1. Refresh process list
             sys.refresh_processes(sysinfo::ProcessesToUpdate::All);
 
-            // 2. Refresh executable map every 20 seconds
             if last_db_refresh.elapsed() > Duration::from_secs(20) {
                 if let Ok(map) = get_game_exe_map(&read_pool) {
                     exe_map = map;
@@ -49,7 +41,6 @@ pub fn start(
             }
 
             // 3. Periodic Overlay Persistence (Always on Top re-assertion)
-            // Re-assert every 4 seconds only if a game is running and overlay is visible.
             if last_overlay_refresh.elapsed() > Duration::from_secs(4) {
                 let has_running_games = {
                     let tracked = running.lock().unwrap();
@@ -58,8 +49,6 @@ pub fn start(
 
                 if has_running_games {
                     if let Some(overlay) = app.get_webview_window("achievement-overlay") {
-                        // Guard: Only re-assert if overlay was already visible.
-                        // This prevents flickering a hidden overlay back to life.
                         if overlay.is_visible().unwrap_or(false) {
                             let _ = overlay.set_always_on_top(true);
                         }
@@ -73,57 +62,91 @@ pub fn start(
             let mut stopped_identities = Vec::new();
 
             {
-                let tracked = running.lock().unwrap();
-                for (game_id, identity) in tracked.iter() {
+                let mut tracked = running.lock().unwrap();
+                let mut keys_to_drop = Vec::new();
+
+                for (game_id, identity) in tracked.iter_mut() {
                     if !is_process_alive(
                         identity.pid,
                         &identity.exe_path,
                         identity.start_time,
                         &sys,
                     ) {
-                        to_remove_keys.push(game_id.clone());
-                        stopped_identities.push(identity.clone());
-                        
-                        if let Some(flag) = &identity.elevated_stop_flag {
-                            flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                        // FIX: PID MIGRATION. Many games use a launcher stub that dies immediately.
+                        // Before we declare the game dead, check if another process with the exact same exe name exists!
+                        let exe_name = std::path::Path::new(&identity.exe_path)
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_lowercase())
+                            .unwrap_or_default();
+
+                        let mut found_child = false;
+                        for (new_pid, p) in sys.processes() {
+                            let p_name = p.name().to_string_lossy().to_lowercase();
+                            if p_name == exe_name || p_name == format!("{}.exe", exe_name) {
+                                // Found a surviving child/related process! Migrate to this PID.
+                                log::info!("[Monitor] Original PID {} died, but found surviving process {} for game {}. Migrating.", identity.pid, new_pid, game_id);
+                                identity.pid = new_pid.as_u32();
+                                identity.start_time = p.start_time();
+                                found_child = true;
+                                break;
+                            }
+                        }
+
+                        if !found_child {
+                            keys_to_drop.push(game_id.clone());
+
+                            if let Some(flag) = &identity.elevated_stop_flag {
+                                flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                            }
                         }
                     }
                 }
-            } // lock dropped here
 
-            // Remove dead processes from running map
-            if !to_remove_keys.is_empty() {
-                let mut tracked = running.lock().unwrap();
-                for game_id in &to_remove_keys {
-                    tracked.remove(game_id);
+                for k in keys_to_drop {
+                    if let Some(id) = tracked.remove(&k) {
+                        to_remove_keys.push(k);
+                        stopped_identities.push(id);
+                    }
                 }
-            } // lock dropped again
+            }
 
-            // Stop achievement watchers and hide overlay for stopped games
+            // Stop achievement prober tasks for permanently stopped games
             for game_id in &to_remove_keys {
                 if let Ok(Some(game)) = crate::db::queries::get_game_by_id(&read_pool, game_id) {
-                    // CRITICAL: If the game has a manual achievement path, the watcher is PERSISTENT.
-                    // It was started on launcher startup or auto-attach and should NOT be stopped
-                    // when the process exits. This allows external launches to still fire badges.
-                    let has_manual_path = game.manual_achievement_path
+                    let has_manual_path = game
+                        .manual_achievement_path
                         .as_deref()
                         .map(|p| !p.is_empty())
                         .unwrap_or(false);
 
                     if has_manual_path {
-                        log::info!("[Monitor] Preserving persistent achievement watcher for game {}", game_id);
+                        log::info!(
+                            "[Monitor] Preserving persistent achievement prober for game {}",
+                            game_id
+                        );
                         continue;
                     }
 
-                    if let Some(state) = app.try_state::<crate::achievement_watcher::ActiveWatchers>() {
+                    if let Some(state) =
+                        app.try_state::<crate::achievement_watcher::ActiveWatchers>()
+                    {
                         let mut watchers = state.0.lock().unwrap();
-                        watchers.remove(game_id);
-                        
+
+                        // Set the AtomicBool to true so the async prober loop breaks
+                        if let Some(flag) = watchers.remove(game_id) {
+                            flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                        }
+
                         if let Some(app_id) = game.steam_app_id.map(|id| id.to_string()) {
-                            watchers.remove(&app_id);
+                            if let Some(flag) = watchers.remove(&app_id) {
+                                flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                            }
                         }
                     }
-                    log::info!("[Monitor] Achievement watcher stopped for game {}", game_id);
+                    log::info!(
+                        "[Monitor] Achievement prober task stopped for game {}",
+                        game_id
+                    );
                 }
             }
 
@@ -166,19 +189,24 @@ pub fn start(
                     use crate::stats::{load_game_stats, save_game_stats, GameStats};
                     use chrono::Utc;
 
-                    let mut stats = load_game_stats(&identity.game_id).unwrap_or_else(|| GameStats {
-                        game_id: identity.game_id.clone(),
-                        first_played: Some(Utc::now()),
-                        stats_version: 1,
-                        ..Default::default()
-                    });
+                    let mut stats =
+                        load_game_stats(&identity.game_id).unwrap_or_else(|| GameStats {
+                            game_id: identity.game_id.clone(),
+                            first_played: Some(Utc::now()),
+                            stats_version: 1,
+                            ..Default::default()
+                        });
 
                     stats.total_playtime_secs += delta;
                     stats.session_count += 1;
                     stats.last_played = Some(Utc::now());
 
                     if let Err(e) = save_game_stats(&stats) {
-                        log::error!("[Stats] Failed to save stats for {}: {}", identity.game_id, e);
+                        log::error!(
+                            "[Stats] Failed to save stats for {}: {}",
+                            identity.game_id,
+                            e
+                        );
                     }
                 }
 
@@ -199,7 +227,6 @@ pub fn start(
             for (pid, process) in sys.processes() {
                 let pid_u32 = pid.as_u32();
 
-                // 1. Skip if we are ALREADY tracking this PID
                 let is_already_tracked = {
                     let tracked = running.lock().unwrap();
                     tracked.values().any(|identity| identity.pid == pid_u32)
@@ -211,7 +238,6 @@ pub fn start(
                 let mut matched_game_id = None;
                 let mut resolved_exe_path = String::new();
 
-                // 2. Exact path match
                 if let Some(p) = process.exe() {
                     let path_str = p.to_string_lossy().to_lowercase();
                     if !path_str.is_empty() {
@@ -222,7 +248,6 @@ pub fn start(
                     }
                 }
 
-                // 3. Fallback: process name match (for elevated processes where .exe() is None)
                 if matched_game_id.is_none() {
                     let proc_name = process.name().to_string_lossy().to_lowercase();
                     for (mapped_path, id) in &exe_map {
@@ -279,12 +304,8 @@ pub fn start(
                             attached_pid
                         );
 
-                        // ── Auto-start achievement watcher ────────────────────────────
-                        start_achievement_watcher_for_game(
-                            &game_id,
-                            &read_pool,
-                            &app,
-                        );
+                        // ── Auto-start achievement prober task ────────────────────────────
+                        start_achievement_watcher_for_game(&game_id, &read_pool, &app);
                     }
                 }
             }
@@ -292,8 +313,6 @@ pub fn start(
     });
 }
 
-/// Look up the game's paths and start a `notify`-based achievement watcher.
-/// Handles both Goldberg JSON and CODEX INI formats via `start_watching_inner`.
 fn start_achievement_watcher_for_game(
     game_id: &str,
     read_pool: &Pool<SqliteConnectionManager>,
@@ -305,7 +324,10 @@ fn start_achievement_watcher_for_game(
     let game = match crate::db::queries::get_game_by_id(read_pool, game_id) {
         Ok(Some(g)) => g,
         Ok(None) => {
-            log::warn!("[Monitor] Game {} not found in DB, skipping achievement watcher", game_id);
+            log::warn!(
+                "[Monitor] Game {} not found in DB, skipping achievement watcher",
+                game_id
+            );
             return;
         }
         Err(e) => {
@@ -317,67 +339,79 @@ fn start_achievement_watcher_for_game(
     let install_dir = match &game.install_dir {
         Some(d) => d.clone(),
         None => {
-            log::info!("[Monitor] Game {} has no install_dir, skipping achievement watcher", game_id);
+            log::info!(
+                "[Monitor] Game {} has no install_dir, skipping achievement watcher",
+                game_id
+            );
             return;
         }
     };
 
-
-    // Resolve app_id from game files or DB
     let game_path = PathBuf::from(&install_dir);
     let app_id = crate::achievements::resolve_app_id(&game_path)
         .or_else(|| game.steam_app_id.map(|id| id.to_string()))
         .unwrap_or_default();
 
-    // Only skip if we have no app_id AND no manual path override:
-    // - If manual_path is set, the watcher can still watch that directory directly
-    // - If we have neither, we can't reliably watch anything
-    if app_id.is_empty() && game.manual_achievement_path.as_deref().map(|p| p.is_empty()).unwrap_or(true) {
-        log::info!("[Monitor] No app_id and no manual path for game {}, skipping achievement watcher", game_id);
+    if app_id.is_empty()
+        && game
+            .manual_achievement_path
+            .as_deref()
+            .map(|p| p.is_empty())
+            .unwrap_or(true)
+    {
+        log::info!(
+            "[Monitor] No app_id and no manual path for game {}, skipping achievement watcher",
+            game_id
+        );
         return;
     }
 
-    if app_id.is_empty() {
-        log::info!("[Monitor] No app_id for game {} — will rely on manual path override", game_id);
-    }
-
-    // Show overlay window before starting watcher
     if let Some(overlay) = app.get_webview_window("achievement-overlay") {
         overlay.show().ok();
         overlay.set_always_on_top(true).ok();
     }
 
-    // Start watcher via existing start_watching_inner (handles both JSON + INI)
-    let watcher_key = if app_id.is_empty() { game_id.to_string() } else { app_id.clone() };
-    
-    // Existence check to prevent 4x badges
+    let watcher_key = if app_id.is_empty() {
+        game_id.to_string()
+    } else {
+        app_id.clone()
+    };
+
     if let Some(state) = app.try_state::<achievement_watcher::ActiveWatchers>() {
         let mut watchers = state.0.lock().unwrap();
         if watchers.contains_key(&watcher_key) {
-            log::info!("[Monitor] Watcher for {} already exists, skipping", watcher_key);
+            log::info!(
+                "[Monitor] Watcher for {} already exists, skipping",
+                watcher_key
+            );
             return;
         }
 
-        // Deserialise crack_type stored as a lowercase string in the DB
         let crack_type: Option<crate::commands::scanner::CrackType> = game
             .crack_type
             .as_deref()
             .and_then(|s| serde_json::from_str(&format!("\"{}\"", s)).ok());
 
-        if let Some(watcher) = achievement_watcher::start_watching_for_game(
+        if let Some(stop_flag) = achievement_watcher::start_watching_for_game(
             app.clone(),
             game_id.to_string(),
             app_id.clone(),
-            game_path,
+            game_path.clone(),
             crate::settings::default_scan_roots(),
             game.manual_achievement_path,
             crack_type,
         ) {
-            watchers.insert(watcher_key, watcher);
-            log::info!("[Monitor] Achievement watcher started for game {} (app_id={})", game_id, app_id);
+            watchers.insert(watcher_key, stop_flag);
+            log::info!(
+                "[Monitor] Achievement prober task started for game {} (app_id={})",
+                game_id,
+                app_id
+            );
         } else {
-            log::info!("[Monitor] No achievement files found for game {}, watcher not started", game_id);
-            // Hide overlay again if no watcher needed
+            log::info!(
+                "[Monitor] Could not initialize prober task for game {}",
+                game_id
+            );
             if let Some(overlay) = app.get_webview_window("achievement-overlay") {
                 overlay.hide().ok();
             }

@@ -27,6 +27,8 @@ export const useExtensionStore = create<ExtensionState>((set) => ({
     isLoading: false,
 
     fetchExtensions: async () => {
+        if (!window.__TAURI_INTERNALS__) return; // Guard for web browser testing
+
         set({ isLoading: true });
         try {
             const extensions = await invoke<ExtensionInfo[]>('get_extensions');
@@ -67,15 +69,17 @@ export const useExtensionStore = create<ExtensionState>((set) => ({
     },
 }));
 
-// Listen for hot-reload events
-listen<string>('theme-changed', (event) => {
-    const styleTag = document.getElementById('chira-dynamic-theme');
-    if (styleTag) {
-        styleTag.innerHTML = event.payload;
-        toast.info('Theme hot-reloaded');
-    }
-});
+// Only attach native listeners if running in the Tauri window
+if (window.__TAURI_INTERNALS__) {
+    listen<string>('theme-changed', (event) => {
+        const styleTag = document.getElementById('chira-dynamic-theme');
+        if (styleTag) {
+            styleTag.innerHTML = event.payload;
+            toast.info('Theme hot-reloaded');
+        }
+    }).catch(console.error);
 
-listen<string>('theme-error', (event) => {
-    toast.error(`Theme Error: ${event.payload}`);
-});
+    listen<string>('theme-error', (event) => {
+        toast.error(`Theme Error: ${event.payload}`);
+    }).catch(console.error);
+}
