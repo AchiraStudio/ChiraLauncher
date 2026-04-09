@@ -1,0 +1,74 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300..800&display=swap');
+@import "tailwindcss";
+
+@theme {
+  /* Premium Layering */
+  --color-background: #09101f;
+  /* Deepest Navy */
+  --color-surface: #111b2f;
+  /* Base Surface */
+  --color-surface-elevated: #1a2942;
+  /* Elevated Cards */
+  --color-surface-overlay: rgba(17, 27, 47, 0.7);
+
+  /* Light/Dark Blue Accents */
+  --color-accent: #3b82f6;
+  /* Premium Blue */
+  --color-accent-hover: #60a5fa;
+  /* Lighter Blue */
+  --color-accentsubtle: rgba(59, 130, 246, 0.15);
+
+  --color-ring-subtle: rgba(59, 130, 246, 0.35);
+  --color-success: #10b981;
+  --color-danger: #f43f5e;
+  --color-warning: #f59e0b;
+
+  /* Text */
+  --color-text-primary: #f8fafc;
+  --color-text-secondary: #94a3b8;
+  --color-muted: #64748b;
+
+  /* Custom Blur Utilities */
+  --blur-glass: blur(24px);
+  --blur-heavy: blur(48px);
+}
+
+@layer base {
+  body {
+    @apply bg-background text-text-primary overflow-hidden select-none;
+    font-family: 'Inter', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    /* Cleaner background gradient base */
+    background: radial-gradient(circle at top right, #111b2f 0%, #09101f 100%);
+  }
+
+  /* Sleek Scrollbars */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: rgba(59, 130, 246, 0.2);
+    border-radius: 8px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(59, 130, 246, 0.5);
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+@layer utilities {
+  .glass-panel {
+    @apply bg-surface/60 border border-white/5 backdrop-blur-xl shadow-lg;
+  }
+
+  .glass-button {
+    @apply bg-white/5 border border-white/5 backdrop-blur-md hover:bg-white/10 transition-colors duration-200;
+  }
+}
