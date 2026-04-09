@@ -239,3 +239,60 @@ pub async fn get_achievement_diagnostics(
         probe_log:           log,
     })
 }
+
+#[tauri::command]
+pub async fn patch_achievement_percentages(
+    state: State<'_, AppState>,
+    game_id: String,
+    percentages: std::collections::HashMap<String, f32>,
+) -> Result<bool, String> {
+    let pool = &state.read_pool;
+    let game = crate::db::queries::get_game_by_id(pool, &game_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Game not found: {}", game_id))?;
+
+    let install_dir = match &game.install_dir {
+        Some(d) => PathBuf::from(d),
+        None => return Ok(false),
+    };
+    let db_app_id = game.steam_app_id.map(|id| id.to_string());
+    
+    let crack_type_db: Option<CrackType> = game.crack_type.as_deref()
+        .and_then(|s| serde_json::from_str(&format!("\"{}\"", s)).ok());
+
+    let opts = SyncOptions {
+        crack_type: crack_type_db,
+        known_app_id: db_app_id.as_deref(),
+        manual_path: game.manual_achievement_path.as_deref(),
+        scan_roots: &crate::settings::default_scan_roots(),
+        ..Default::default()
+    };
+
+    let discovery = discover_achievements(&install_dir, db_app_id.as_deref(), &opts);
+    
+    if let Some(path) = discovery.metadata_path {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(arr) = json.as_array_mut() {
+                    let mut modified = false;
+                    for item in arr.iter_mut() {
+                        if let Some(name) = item.get("name").and_then(|n| n.as_str()) {
+                            if let Some(pct) = percentages.get(name) {
+                                item["globalPercent"] = serde_json::json!(pct);
+                                modified = true;
+                            }
+                        }
+                    }
+                    if modified {
+                        if let Ok(new_content) = serde_json::to_string_pretty(&json) {
+                            let _ = std::fs::write(&path, new_content);
+                            crate::achievements::cache::clear_cache(&game_id);
+                            return Ok(true);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(false)
+}

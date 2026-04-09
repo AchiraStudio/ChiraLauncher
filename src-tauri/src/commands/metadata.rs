@@ -52,3 +52,40 @@ pub async fn read_image_base64(path: String) -> Result<String, String> {
     let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
     Ok(format!("data:{};base64,{}", mime, b64))
 }
+
+// NEW: Steam Metadata Fetchers
+#[tauri::command]
+pub async fn fetch_steam_app_details(app_id: String) -> Result<serde_json::Value, String> {
+    let url = format!(
+        "https://store.steampowered.com/api/appdetails?appids={}",
+        app_id
+    );
+    let client = reqwest::Client::new();
+    let res = client.get(&url).send().await.map_err(|e| e.to_string())?;
+    let json: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
+    Ok(json)
+}
+
+#[tauri::command]
+pub async fn fetch_steam_reviews(app_id: String) -> Result<serde_json::Value, String> {
+    let url = format!(
+        "https://store.steampowered.com/appreviews/{}?json=1",
+        app_id
+    );
+    let client = reqwest::Client::new();
+    let res = client.get(&url).send().await.map_err(|e| e.to_string())?;
+    let json: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
+    Ok(json)
+}
+
+#[tauri::command]
+pub async fn fetch_global_achievement_percentages(app_id: String) -> Result<serde_json::Value, String> {
+    let url = format!(
+        "https://api.steampowered.com/ISteamUserStats/GetGlobalAchievementPercentagesForApp/v2/?gameid={}",
+        app_id
+    );
+    let client = reqwest::Client::new();
+    let res = client.get(&url).send().await.map_err(|e| e.to_string())?;
+    let json: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
+    Ok(json)
+}

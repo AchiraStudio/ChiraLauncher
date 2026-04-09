@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useUiStore } from "../../store/uiStore";
+import { useSettingsStore } from "../../store/settingsStore";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { X, CheckSquare, Square, Frown, Loader2, Download, Folder, Play } from "lucide-react";
@@ -29,28 +30,26 @@ function formatBytes(bytes: number, decimals = 2) {
 
 export function TorrentFileModal() {
     const { isTorrentModalOpen, currentMagnet, setTorrentModalOpen } = useUiStore();
+    const settings = useSettingsStore(s => s.settings);
 
     const [isLoading, setIsLoading] = useState(true);
     const [elapsedTime, setElapsedTime] = useState(0);
     const [metadata, setMetadata] = useState<TorrentInfo | null>(null);
     const [error, setError] = useState<string | null>(null);
 
-    // Set of selected file indices
     const [selectedFiles, setSelectedFiles] = useState<Set<number>>(new Set());
     const [savePath, setSavePath] = useState<string | null>(null);
 
-    // Smart default selection logic
     const applySmartDefaults = (files: TorrentFileEntry[]) => {
         const selected = new Set<number>();
         files.forEach(file => {
             const name = file.name.toLowerCase();
-            // Automatically uncheck known optional/extra files
             const isOptional = name.includes('optional') ||
                 name.includes('bonus') ||
                 name.includes('ost') ||
                 name.includes('soundtrack') ||
                 name.includes('artbook') ||
-                name.includes('fg-selective-') && !name.includes('english'); // FitGirl selective language (keep English)
+                (name.includes('fg-selective-') && !name.includes('english'));
 
             if (!isOptional) {
                 selected.add(file.index);
@@ -67,7 +66,7 @@ export function TorrentFileModal() {
         setMetadata(null);
         setElapsedTime(0);
         setSelectedFiles(new Set());
-        setSavePath(null); // Reset path so backend uses default
+        setSavePath(null);
 
         const timer = setInterval(() => {
             setElapsedTime(prev => prev + 1);
@@ -122,17 +121,19 @@ export function TorrentFileModal() {
     const handleStartDownload = async () => {
         if (!currentMagnet) return;
 
+        // Uses the explicitly chosen path, or falls back to the AppSettings download path
+        const finalPath = savePath || settings?.download_path || null;
+
         try {
             await invoke("start_download", {
                 magnetUrl: currentMagnet,
                 selectedFiles: Array.from(selectedFiles),
-                savePath: savePath
+                savePath: finalPath
             });
             toast.success("Download started!", {
                 description: metadata?.name || "Torrent added to queue."
             });
             setTorrentModalOpen(false);
-            // TODO: Route user to Downloads page
         } catch (err) {
             toast.error("Failed to start download", { description: String(err) });
         }
@@ -140,46 +141,46 @@ export function TorrentFileModal() {
 
     if (!isTorrentModalOpen) return null;
 
-    // Calculate total selected size
     const totalSelectedBytes = metadata?.files
         .filter(f => selectedFiles.has(f.index))
         .reduce((acc, f) => acc + f.length, 0) || 0;
 
-    return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden ring-1 ring-white/10">
+    const defaultPath = settings?.download_path || "Default Application Data";
 
+    return (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-[#12141c] border border-white/10 rounded-[2rem] shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden">
                 {/* Header */}
-                <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 bg-zinc-900/50">
+                <div className="flex items-center justify-between px-8 py-6 border-b border-white/5 bg-white/[0.02]">
                     <div>
-                        <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                            <Download className="w-5 h-5 text-chira-500" />
+                        <h2 className="text-2xl font-black text-white uppercase tracking-tight flex items-center gap-3">
+                            <Download className="w-6 h-6 text-accent" />
                             New Download
                         </h2>
                         {metadata && (
-                            <p className="text-sm text-zinc-400 mt-1 truncate max-w-md" title={metadata.name}>
+                            <p className="text-xs font-bold tracking-widest uppercase text-white/40 mt-1 truncate max-w-md" title={metadata.name}>
                                 {metadata.name}
                             </p>
                         )}
                     </div>
                     <button
                         onClick={() => setTorrentModalOpen(false)}
-                        className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+                        className="p-2 text-white/30 hover:text-white hover:bg-white/5 rounded-xl transition-colors"
                     >
-                        <X className="w-5 h-5" />
+                        <X className="w-6 h-6" />
                     </button>
                 </div>
 
                 {/* Content */}
-                <div className="flex-1 overflow-auto p-6 bg-zinc-900/50">
+                <div className="flex-1 overflow-auto p-8 custom-scrollbar">
                     {isLoading ? (
                         <div className="flex flex-col items-center justify-center py-20 text-center">
-                            <Loader2 className="w-12 h-12 text-chira-500 animate-spin mb-4" />
-                            <h3 className="text-lg font-medium text-white mb-2">Fetching Metadata...</h3>
-                            <p className="text-zinc-400 text-sm max-w-sm mb-4">
+                            <Loader2 className="w-12 h-12 text-accent animate-spin mb-4" />
+                            <h3 className="text-lg font-black text-white uppercase tracking-widest mb-2">Fetching Metadata</h3>
+                            <p className="text-white/40 text-sm max-w-sm mb-4">
                                 Connecting to peers to retrieve the file list. This can take a moment depending on the swarm health.
                             </p>
-                            <div className="text-xs font-mono text-zinc-500 bg-zinc-800/50 px-3 py-1 rounded-full">
+                            <div className="text-xs font-mono font-bold text-accent bg-accent/10 px-4 py-1.5 rounded-full">
                                 Elapsed: {elapsedTime}s
                             </div>
                         </div>
@@ -188,7 +189,7 @@ export function TorrentFileModal() {
                             <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mb-4">
                                 <Frown className="w-8 h-8 text-red-500" />
                             </div>
-                            <h3 className="text-lg font-medium text-white mb-2">Failed to load torrent</h3>
+                            <h3 className="text-lg font-black text-white uppercase tracking-widest mb-2">Failed to load torrent</h3>
                             <p className="text-red-400 text-sm max-w-md bg-red-500/5 p-4 rounded-lg border border-red-500/20">
                                 {error}
                             </p>
@@ -198,36 +199,36 @@ export function TorrentFileModal() {
 
                             {/* File Tree */}
                             <div>
-                                <div className="flex items-center justify-between mb-3">
-                                    <h3 className="text-sm font-semibold text-zinc-300 uppercase tracking-wider">
+                                <div className="flex items-center justify-between mb-4">
+                                    <h3 className="text-xs font-black text-white/50 uppercase tracking-widest">
                                         Files to Download
                                     </h3>
                                     <button
                                         onClick={handleSelectAll}
-                                        className="text-xs text-chira-400 hover:text-chira-300 hover:underline flex items-center gap-1"
+                                        className="text-[10px] font-black uppercase tracking-widest text-accent hover:text-white transition-colors"
                                     >
                                         {selectedFiles.size === metadata.files.length ? "Deselect All" : "Select All"}
                                     </button>
                                 </div>
 
-                                <div className="bg-black/40 border border-zinc-800 rounded-lg max-h-[40vh] overflow-y-auto">
+                                <div className="bg-black/40 border border-white/5 rounded-2xl max-h-[35vh] overflow-y-auto custom-scrollbar">
                                     {metadata.files.map(file => {
                                         const isSelected = selectedFiles.has(file.index);
                                         return (
                                             <div
                                                 key={file.index}
                                                 onClick={() => handleToggleFile(file.index)}
-                                                className={`flex items-center justify-between p-3 border-b border-zinc-800/50 hover:bg-zinc-800/50 cursor-pointer transition-colors ${isSelected ? 'bg-chira-500/5' : ''}`}
+                                                className={`flex items-center justify-between p-3 border-b border-white/5 hover:bg-white/[0.03] cursor-pointer transition-colors ${isSelected ? 'bg-accent/5' : ''}`}
                                             >
                                                 <div className="flex items-center gap-3 min-w-0 pr-4">
-                                                    <div className="text-chira-500 shrink-0">
-                                                        {isSelected ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4 text-zinc-600" />}
+                                                    <div className="text-accent shrink-0">
+                                                        {isSelected ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4 text-white/20" />}
                                                     </div>
-                                                    <span className={`text-sm truncate ${isSelected ? 'text-zinc-200' : 'text-zinc-500 line-through'}`}>
+                                                    <span className={`text-sm truncate font-medium ${isSelected ? 'text-white' : 'text-white/30 line-through'}`}>
                                                         {file.name}
                                                     </span>
                                                 </div>
-                                                <span className="text-xs text-zinc-500 shrink-0 font-mono">
+                                                <span className="text-[11px] font-bold text-white/30 shrink-0 uppercase tracking-widest">
                                                     {formatBytes(file.length)}
                                                 </span>
                                             </div>
@@ -238,19 +239,19 @@ export function TorrentFileModal() {
 
                             {/* Save Path */}
                             <div>
-                                <h3 className="text-sm font-semibold text-zinc-300 uppercase tracking-wider mb-3">
+                                <h3 className="text-xs font-black text-white/50 uppercase tracking-widest mb-3">
                                     Save Location
                                 </h3>
                                 <div className="flex items-center gap-3">
-                                    <div className="flex-1 bg-black/40 border border-zinc-800 rounded-lg px-4 py-3 text-sm text-zinc-300 truncate font-mono">
-                                        {savePath || "Default Download Directory (App Data)"}
+                                    <div className="flex-1 bg-black/40 border border-white/5 rounded-xl px-4 py-3.5 text-xs text-white/70 truncate font-mono shadow-inner">
+                                        {savePath || defaultPath}
                                     </div>
                                     <button
                                         onClick={handlePickFolder}
-                                        className="px-4 py-3 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg transition-colors flex items-center gap-2 whitespace-nowrap"
+                                        className="px-5 py-3.5 bg-white/5 hover:bg-white/10 text-white rounded-xl transition-colors flex items-center gap-2 whitespace-nowrap text-xs font-black uppercase tracking-widest"
                                     >
                                         <Folder className="w-4 h-4" />
-                                        Browse...
+                                        Browse
                                     </button>
                                 </div>
                             </div>
@@ -259,13 +260,13 @@ export function TorrentFileModal() {
                 </div>
 
                 {/* Footer */}
-                <div className="px-6 py-4 border-t border-zinc-800 bg-zinc-900/80 flex items-center justify-between">
-                    <div className="text-sm text-zinc-400">
+                <div className="px-8 py-5 border-t border-white/5 bg-black/20 flex items-center justify-between">
+                    <div className="text-[11px] font-black uppercase tracking-widest text-white/40">
                         {metadata && (
                             <>
-                                <span className="text-white font-medium">{formatBytes(totalSelectedBytes)}</span> selected
-                                <span className="text-zinc-600 mx-2">/</span>
-                                <span className="text-zinc-500">{formatBytes(metadata.total_bytes)} total</span>
+                                <span className="text-white">{formatBytes(totalSelectedBytes)}</span> selected
+                                <span className="text-white/20 mx-2">•</span>
+                                <span className="text-white/40">{formatBytes(metadata.total_bytes)} total</span>
                             </>
                         )}
                     </div>
@@ -273,16 +274,16 @@ export function TorrentFileModal() {
                     <div className="flex gap-3">
                         <button
                             onClick={() => setTorrentModalOpen(false)}
-                            className="px-5 py-2.5 rounded-lg text-sm font-medium text-zinc-300 hover:text-white hover:bg-zinc-800 transition-colors"
+                            className="px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest text-white/40 hover:text-white hover:bg-white/5 transition-colors"
                         >
                             Cancel
                         </button>
                         <button
                             disabled={isLoading || !metadata || selectedFiles.size === 0}
                             onClick={handleStartDownload}
-                            className="px-6 py-2.5 rounded-lg text-sm font-bold text-white bg-chira-600 hover:bg-chira-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-lg shadow-chira-900/20 flex items-center gap-2"
+                            className="px-8 py-3 rounded-xl text-[10px] uppercase tracking-widest font-black text-white bg-accent hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-accent/20 flex items-center gap-2"
                         >
-                            <Play className="w-4 h-4 fill-current" />
+                            <Play className="w-3 h-3 fill-current" />
                             Start Download
                         </button>
                     </div>

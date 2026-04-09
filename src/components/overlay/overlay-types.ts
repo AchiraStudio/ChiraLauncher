@@ -1,20 +1,3 @@
-/**
- * overlay-types.ts
- *
- * Shared type definitions for the achievement and game-start overlay system.
- * Extracted to break the circular dependency between AchievementOverlay.tsx
- * (which imports the toast components) and the toast components (which need
- * the payload types).
- *
- * Import chain BEFORE fix (circular — causes TDZ crash in production build):
- *   AchievementOverlay → AchievementToast → AchievementOverlay (for AchievementPayload)
- *
- * Import chain AFTER fix (linear — no cycle):
- *   overlay-types ← AchievementOverlay
- *   overlay-types ← AchievementToast
- *   overlay-types ← GameStartToast
- */
-
 export interface AchievementPayload {
     api_name: string;
     display_name: string;
@@ -22,7 +5,7 @@ export interface AchievementPayload {
     icon: string | null;
     icon_gray: string | null;
     xp?: number;
-    rarity?: "common" | "rare" | "epic" | "legendary";
+    global_percent: number | null; // NEW: Triggers Rarity logic
     earned_time: number;
 }
 

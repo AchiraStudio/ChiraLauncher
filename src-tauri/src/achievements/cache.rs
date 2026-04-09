@@ -56,3 +56,9 @@ pub fn save_cache(game_id: &str, achievements: &[Achievement]) {
         Err(e) => log::warn!("[AchCache] Serialization error for {}: {}", game_id, e),
     }
 }
+
+/// Remove the cached achievement list for a game, forcing a fresh load.
+pub fn clear_cache(game_id: &str) {
+    let path = cache_path(game_id);
+    let _ = std::fs::remove_file(path);
+}

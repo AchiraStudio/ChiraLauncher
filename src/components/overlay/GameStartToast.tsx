@@ -38,174 +38,162 @@ export default function GameStartToast({ payload, onDone }: Props) {
 
     const coverSrc = !imgError && payload.coverBase64 ? payload.coverBase64 : undefined;
 
-    // Pull platform from payload if available
-    const platform = (payload as any).platform ?? "Steam";
-    // Achievement progress if available
+    const platform = (payload as any).platform ?? "System";
     const achDone = (payload as any).achievementsDone as number | undefined;
     const achTotal = (payload as any).achievementsTotal as number | undefined;
     const achPct = achDone != null && achTotal ? Math.round((achDone / achTotal) * 100) : undefined;
 
     return (
         <div style={{
-            position: "relative", width: 400,
+            position: "relative", width: 420,
             transform: `translateY(${ty}) scale(${sc})`,
             opacity: op, transition: tr,
             willChange: "transform, opacity", pointerEvents: "none",
         }}>
             {/* Card */}
             <div style={{
-                position: "relative", borderRadius: 14, overflow: "hidden",
-                background: "#0a0f18",
-                border: "1px solid rgba(255,255,255,0.08)",
-                boxShadow: "0 24px 64px rgba(0,0,0,0.85), 0 0 0 1px rgba(255,255,255,0.03)",
+                position: "relative", borderRadius: 20, overflow: "hidden",
+                background: "rgba(10, 15, 24, 0.95)",
+                border: "1px solid rgba(255,255,255,0.05)",
+                boxShadow: "0 24px 64px rgba(0,0,0,0.85), 0 0 0 1px rgba(34,211,238,0.15), 0 0 40px rgba(34,211,238,0.1)",
             }}>
-                {/* Blurred cover as ambient background */}
                 {coverSrc && (
                     <div style={{
                         position: "absolute", inset: 0,
                         backgroundImage: `url(${coverSrc})`,
                         backgroundSize: "cover", backgroundPosition: "center",
-                        filter: "blur(28px) brightness(0.35) saturate(1.4)",
-                        transform: "scale(1.15)",
+                        filter: "blur(30px) brightness(0.4) saturate(1.5)",
+                        transform: "scale(1.2)",
                     }} />
                 )}
-                {/* Dark overlay */}
+
                 <div style={{
                     position: "absolute", inset: 0,
-                    background: "linear-gradient(160deg, rgba(5,10,20,0.80) 0%, rgba(5,10,20,0.60) 100%)",
+                    background: "linear-gradient(160deg, rgba(10,15,24,0.90) 0%, rgba(10,15,24,0.70) 100%)",
                 }} />
 
                 {/* Top shimmer bar */}
                 <div style={{
-                    position: "absolute", top: 0, left: 0, right: 0, height: 1.5,
-                    backgroundImage: "linear-gradient(90deg, transparent 0%, rgba(82,196,26,0.65) 30%, rgba(160,240,100,0.9) 50%, rgba(82,196,26,0.65) 70%, transparent 100%)",
+                    position: "absolute", top: 0, left: 0, right: 0, height: 2,
+                    backgroundImage: "linear-gradient(90deg, transparent 0%, rgba(34,211,238,0.65) 30%, rgba(103,232,249,0.9) 50%, rgba(34,211,238,0.65) 70%, transparent 100%)",
                     backgroundSize: "200% 100%",
                     animation: "gs-shimmer 2.5s linear infinite",
                     zIndex: 4,
                 }} />
+
                 {/* Scan sweep */}
                 <div style={{
-                    position: "absolute", top: 0, left: 0, right: 0, height: 1.5,
-                    background: "linear-gradient(90deg, transparent, rgba(82,196,26,0.5), transparent)",
+                    position: "absolute", top: 0, left: 0, right: 0, height: 2,
+                    background: "linear-gradient(90deg, transparent, rgba(34,211,238,0.5), transparent)",
                     animation: "gs-scan 3s linear infinite 0.5s",
                     zIndex: 5, opacity: 0.5,
                 }} />
 
-                {/* Inner layout */}
                 <div style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "stretch" }}>
-                    {/* Cover art strip */}
-                    <div style={{ position: "relative", flexShrink: 0, width: 86, overflow: "hidden" }}>
+                    <div style={{ position: "relative", flexShrink: 0, width: 90, overflow: "hidden" }}>
                         {coverSrc ? (
                             <>
-                                {/* Blurred layer behind for depth */}
                                 <div style={{
                                     position: "absolute", inset: 0,
                                     backgroundImage: `url(${coverSrc})`,
                                     backgroundSize: "cover", backgroundPosition: "center",
-                                    filter: "blur(8px) brightness(0.6)",
+                                    filter: "blur(10px) brightness(0.6)",
                                     transform: "scale(1.1)",
                                 }} />
                                 <img
                                     src={coverSrc}
                                     alt={payload.title}
                                     onError={() => setImgError(true)}
-                                    style={{ position: "relative", width: "100%", height: "100%", objectFit: "cover", display: "block", minHeight: 110 }}
+                                    style={{ position: "relative", width: "100%", height: "100%", objectFit: "cover", display: "block", minHeight: 120 }}
                                 />
                             </>
                         ) : (
                             <div style={{
-                                width: "100%", minHeight: 110,
-                                background: "linear-gradient(160deg,#1a2a3a,#0d1525)",
-                                display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28,
+                                width: "100%", minHeight: 120,
+                                background: "linear-gradient(160deg,#164e63,#083344)",
+                                display: "flex", alignItems: "center", justifyContent: "center", fontSize: 32,
                             }}>
                                 🎮
                             </div>
                         )}
-                        {/* Right-edge dissolve into card bg */}
                         <div style={{
-                            position: "absolute", top: 0, right: 0, bottom: 0, width: 44,
-                            background: "linear-gradient(to right, transparent, #0a0f18)",
+                            position: "absolute", top: 0, right: 0, bottom: 0, width: 40,
+                            background: "linear-gradient(to right, transparent, rgba(10,15,24,0.9))",
                         }} />
                     </div>
 
-                    {/* Text body */}
-                    <div style={{ flex: 1, padding: "15px 18px 14px 10px", display: "flex", flexDirection: "column", gap: 7 }}>
-                        {/* Live row */}
-                        <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                    <div style={{ flex: 1, padding: "18px 20px 16px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                             <span style={{
-                                width: 7, height: 7, borderRadius: "50%",
-                                background: "#52c41a", boxShadow: "0 0 8px #52c41a",
+                                width: 8, height: 8, borderRadius: "50%",
+                                background: "#22d3ee", boxShadow: "0 0 10px #22d3ee",
                                 animation: "gs-pulse 1.8s ease-in-out infinite",
                                 flexShrink: 0, display: "inline-block",
                             }} />
                             <span style={{
                                 fontFamily: "'JetBrains Mono','Fira Code',monospace",
-                                fontSize: 9, fontWeight: 500, letterSpacing: "0.18em", textTransform: "uppercase",
-                                color: "rgba(82,196,26,0.75)",
+                                fontSize: 10, fontWeight: 700, letterSpacing: "0.2em", textTransform: "uppercase",
+                                color: "rgba(34,211,238,0.85)",
                             }}>
-                                Now Playing
+                                Game Initiated
                             </span>
-                            {/* Platform badge */}
                             <span style={{
                                 marginLeft: "auto",
                                 fontFamily: "'JetBrains Mono','Fira Code',monospace",
-                                fontSize: 8, letterSpacing: "0.10em", textTransform: "uppercase",
-                                color: "rgba(255,255,255,0.28)",
-                                background: "rgba(255,255,255,0.07)",
-                                border: "1px solid rgba(255,255,255,0.09)",
-                                borderRadius: 4, padding: "2px 6px",
+                                fontSize: 8, letterSpacing: "0.15em", textTransform: "uppercase", fontWeight: 700,
+                                color: "rgba(255,255,255,0.4)",
+                                background: "rgba(255,255,255,0.05)",
+                                border: "1px solid rgba(255,255,255,0.1)",
+                                borderRadius: 6, padding: "3px 8px",
                             }}>
                                 {platform}
                             </span>
                         </div>
 
-                        {/* Title */}
                         <div style={{
-                            fontSize: 17, fontWeight: 800, color: "#fff",
+                            fontSize: 18, fontWeight: 900, color: "#fff",
                             whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-                            letterSpacing: "-0.02em", lineHeight: 1.1,
+                            letterSpacing: "-0.02em", lineHeight: 1.2,
                             animation: "gs-reveal 0.45s ease-out 0.5s both",
-                            textShadow: "0 2px 12px rgba(0,0,0,0.6)",
+                            textShadow: "0 4px 16px rgba(0,0,0,0.8)",
                         }}>
                             {payload.title}
                         </div>
 
-                        {/* Meta row */}
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                             <span style={{
                                 fontFamily: "'JetBrains Mono','Fira Code',monospace",
-                                fontSize: 10, color: "rgba(255,255,255,0.32)",
+                                fontSize: 10, color: "rgba(255,255,255,0.4)", fontWeight: 500,
                                 animation: "gs-reveal 0.4s ease-out 0.62s both",
-                                display: "flex", alignItems: "center", gap: 4,
+                                display: "flex", alignItems: "center", gap: 6,
                             }}>
-                                <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-                                    <circle cx="5" cy="5" r="4" stroke="rgba(255,255,255,0.3)" strokeWidth="1" />
-                                    <path d="M5 2.5V5l1.5 1" stroke="rgba(255,255,255,0.3)" strokeWidth="1" strokeLinecap="round" />
+                                <svg width="12" height="12" viewBox="0 0 10 10" fill="none">
+                                    <circle cx="5" cy="5" r="4" stroke="rgba(255,255,255,0.4)" strokeWidth="1" />
+                                    <path d="M5 2.5V5l1.5 1" stroke="rgba(255,255,255,0.4)" strokeWidth="1" strokeLinecap="round" />
                                 </svg>
-                                Just started
+                                Tracking Output
                             </span>
                             {achPct != null && (
                                 <>
-                                    <span style={{ width: 3, height: 3, borderRadius: "50%", background: "rgba(255,255,255,0.14)", display: "inline-block" }} />
+                                    <span style={{ width: 4, height: 4, borderRadius: "50%", background: "rgba(255,255,255,0.15)", display: "inline-block" }} />
                                     <span style={{
                                         fontFamily: "'JetBrains Mono','Fira Code',monospace",
-                                        fontSize: 10, color: "rgba(255,255,255,0.32)",
+                                        fontSize: 10, color: "rgba(255,255,255,0.4)", fontWeight: 500,
                                         animation: "gs-reveal 0.4s ease-out 0.68s both",
                                     }}>
-                                        {achPct}% complete
+                                        {achPct}% Archive
                                     </span>
                                 </>
                             )}
                         </div>
 
-                        {/* Achievement progress bar (shown only if data is present) */}
                         {achPct != null && (
-                            <div style={{ display: "flex", alignItems: "center", gap: 8, animation: "gs-reveal 0.4s ease-out 0.76s both" }}>
-                                <div style={{ flex: 1, height: 3, background: "rgba(255,255,255,0.08)", borderRadius: 2, overflow: "hidden" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 10, animation: "gs-reveal 0.4s ease-out 0.76s both", marginTop: 2 }}>
+                                <div style={{ flex: 1, height: 4, background: "rgba(255,255,255,0.1)", borderRadius: 2, overflow: "hidden" }}>
                                     <div style={{
                                         height: "100%",
                                         width: `${achPct}%`,
-                                        background: "linear-gradient(90deg,#52c41a,#a8e063)",
+                                        background: "linear-gradient(90deg,#22d3ee,#67e8f9)",
                                         borderRadius: 2,
                                         animation: "gs-bar 0.65s ease-out 0.9s both",
                                         transformOrigin: "left",
@@ -213,7 +201,7 @@ export default function GameStartToast({ payload, onDone }: Props) {
                                 </div>
                                 <span style={{
                                     fontFamily: "'JetBrains Mono','Fira Code',monospace",
-                                    fontSize: 9, color: "rgba(82,196,26,0.5)", whiteSpace: "nowrap",
+                                    fontSize: 9, color: "rgba(34,211,238,0.6)", whiteSpace: "nowrap", fontWeight: 700
                                 }}>
                                     {achDone} / {achTotal} G
                                 </span>
@@ -225,9 +213,9 @@ export default function GameStartToast({ payload, onDone }: Props) {
 
             <style>{`
                 @keyframes gs-shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
-                @keyframes gs-scan    { 0%{transform:translateX(-100%)} 100%{transform:translateX(400px)} }
-                @keyframes gs-pulse   { 0%,100%{opacity:1;transform:scale(1);box-shadow:0 0 6px #52c41a} 50%{opacity:.65;transform:scale(1.4);box-shadow:0 0 16px #52c41a} }
-                @keyframes gs-reveal  { from{opacity:0;transform:translateX(-6px)} to{opacity:1;transform:translateX(0)} }
+                @keyframes gs-scan    { 0%{transform:translateX(-100%)} 100%{transform:translateX(450px)} }
+                @keyframes gs-pulse   { 0%,100%{opacity:1;transform:scale(1);box-shadow:0 0 8px #22d3ee} 50%{opacity:.65;transform:scale(1.5);box-shadow:0 0 20px #22d3ee} }
+                @keyframes gs-reveal  { from{opacity:0;transform:translateX(-8px)} to{opacity:1;transform:translateX(0)} }
                 @keyframes gs-bar     { from{transform:scaleX(0)} to{transform:scaleX(1)} }
             `}</style>
         </div>

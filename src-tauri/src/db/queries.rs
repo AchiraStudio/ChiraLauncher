@@ -45,9 +45,7 @@ pub struct Game {
     pub manual_achievement_path: Option<String>,
 
     // Crack detection (set at scan/add time, never changes)
-    /// "codex" | "goldberg" | "anadius" | "unknown"
     pub crack_type: Option<String>,
-    /// Steam app_id or Anadius ContentId detected at scan time
     pub app_id: Option<String>,
     pub detected_metadata_path: Option<String>,
     pub detected_earned_state_path: Option<String>,
@@ -80,7 +78,6 @@ pub struct NewGame {
     pub manual_achievement_path: Option<String>,
     pub steam_app_id: Option<u32>,
 
-    // New fields from scanner
     pub crack_type: Option<String>,
     pub app_id: Option<String>,
     pub detected_metadata_path: Option<String>,
@@ -143,11 +140,14 @@ fn map_game_row(row: &rusqlite::Row) -> rusqlite::Result<Game> {
         manual_achievement_path: row
             .get::<_, Option<String>>("manual_achievement_path")
             .unwrap_or(None),
-        // New crack detection fields — graceful fallback for old rows
         crack_type: row.get::<_, Option<String>>("crack_type").unwrap_or(None),
         app_id: row.get::<_, Option<String>>("app_id").unwrap_or(None),
-        detected_metadata_path: row.get::<_, Option<String>>("detected_metadata_path").unwrap_or(None),
-        detected_earned_state_path: row.get::<_, Option<String>>("detected_earned_state_path").unwrap_or(None),
+        detected_metadata_path: row
+            .get::<_, Option<String>>("detected_metadata_path")
+            .unwrap_or(None),
+        detected_earned_state_path: row
+            .get::<_, Option<String>>("detected_earned_state_path")
+            .unwrap_or(None),
     })
 }
 
@@ -205,7 +205,6 @@ pub fn get_game_exe_map(
 }
 
 pub fn insert_game_conn(conn: &Connection, game: NewGame) -> rusqlite::Result<usize> {
-    // Normalised title key for orphan restore
     let title_key: String = game
         .title
         .chars()
@@ -218,7 +217,6 @@ pub fn insert_game_conn(conn: &Connection, game: NewGame) -> rusqlite::Result<us
         })
         .collect();
 
-    // Restore mutable stats from the orphans table if the game was previously removed
     let (
         restored_secs,
         restored_sessions,
@@ -288,8 +286,8 @@ pub fn insert_game_conn(conn: &Connection, game: NewGame) -> rusqlite::Result<us
             game.run_as_admin as i32,
             game.manual_achievement_path,
             game.steam_app_id,
-            game.crack_type,   // ?23
-            game.app_id,       // ?24
+            game.crack_type,
+            game.app_id,
             restored_secs,
             restored_sessions,
             restored_first,
@@ -303,7 +301,6 @@ pub fn insert_game_conn(conn: &Connection, game: NewGame) -> rusqlite::Result<us
 }
 
 pub fn delete_game_conn(conn: &Connection, id: &str) -> rusqlite::Result<usize> {
-    // Snapshot all mutable stats before delete so re-adding restores them
     let _ = conn.execute(
         "INSERT INTO playtime_orphans (
              steam_app_id, title_key,
@@ -324,7 +321,7 @@ pub fn delete_game_conn(conn: &Connection, id: &str) -> rusqlite::Result<usize> 
              playtime_seconds      = MAX(excluded.playtime_seconds,      playtime_orphans.playtime_seconds),
              session_count         = MAX(excluded.session_count,          playtime_orphans.session_count),
              first_played          = COALESCE(playtime_orphans.first_played,  excluded.first_played),
-             last_played           = COALESCE(excluded.last_played,           playtime_orphans.last_played),
+             last_played           = COALESCE(excluded.last_played,            playtime_orphans.last_played),
              achievements_unlocked = MAX(excluded.achievements_unlocked,  playtime_orphans.achievements_unlocked),
              achievements_total    = MAX(excluded.achievements_total,     playtime_orphans.achievements_total)",
         params![id],
@@ -332,10 +329,7 @@ pub fn delete_game_conn(conn: &Connection, id: &str) -> rusqlite::Result<usize> 
     conn.execute("DELETE FROM games WHERE id = ?1", params![id])
 }
 
-pub fn update_game_conn(
-    conn: &Connection,
-    game: Game,
-) -> rusqlite::Result<usize> {
+pub fn update_game_conn(conn: &Connection, game: Game) -> rusqlite::Result<usize> {
     conn.execute(
         "UPDATE games SET 
             title = ?1, 
@@ -344,16 +338,26 @@ pub fn update_game_conn(
             background_path = ?4, 
             developer = ?5, 
             publisher = ?6, 
-            release_date = ?7 
-         WHERE id = ?8",
+            release_date = ?7,
+            description = ?8,
+            genre = ?9,
+            steam_app_id = ?10,
+            run_as_admin = ?11,
+            manual_achievement_path = ?12
+         WHERE id = ?13",
         params![
-            game.title, 
-            game.exe_path, 
-            game.cover_path, 
-            game.background_path, 
-            game.developer, 
-            game.publisher, 
-            game.release_date, 
+            game.title,
+            game.exe_path,
+            game.cover_path,
+            game.background_path,
+            game.developer,
+            game.publisher,
+            game.release_date,
+            game.description,
+            game.genre,
+            game.steam_app_id,
+            game.run_as_admin as i32,
+            game.manual_achievement_path,
             game.id
         ],
     )?;

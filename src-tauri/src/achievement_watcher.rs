@@ -20,6 +20,7 @@ pub struct AchievementUnlockedPayload {
     pub icon: Option<String>,
     pub icon_gray: Option<String>,
     pub earned_time: u64,
+    pub global_percent: Option<f32>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -41,6 +42,8 @@ pub struct AchievementMeta {
     pub icon: String,
     #[serde(rename = "icongray", default)]
     pub icon_gray: String,
+    #[serde(rename = "globalPercent", default)]
+    pub global_percent: Option<f32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -197,6 +200,8 @@ struct GenAchievement {
     icon: String,
     icongray: String,
     name: String,
+    #[serde(rename = "globalPercent")]
+    global_percent: f32,
 }
 
 async fn download_image(client: &reqwest::Client, url: &str, dest: &Path) -> Result<(), String> {
@@ -237,11 +242,17 @@ pub async fn generate_achievements_json(
         "https://api.steampowered.com/ISteamUserStats/GetSchemaForGame/v2/?key={}&appid={}",
         api_key, app_id
     );
+    let global_pct_url = format!(
+        "https://api.steampowered.com/ISteamUserStats/GetGlobalAchievementPercentagesForApp/v2/?gameid={}",
+        app_id
+    );
+
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
         .build()
         .map_err(|e| e.to_string())?;
 
+    // 1. Fetch Schema
     let resp: SteamSchemaResponse = client
         .get(&url)
         .send()
@@ -257,6 +268,33 @@ pub async fn generate_achievements_json(
         .ok_or_else(|| format!("No achievements on Steam for app_id={}", app_id))?
         .achievements;
 
+    // 2. Fetch Global Percentages
+    let mut pct_map: HashMap<String, f32> = HashMap::new();
+    if let Ok(pct_res) = client.get(&global_pct_url).send().await {
+        if let Ok(pct_json) = pct_res.json::<serde_json::Value>().await {
+            if let Some(achs) = pct_json
+                .pointer("/achievementpercentages/achievements")
+                .and_then(|v| v.as_array())
+            {
+                for a in achs {
+                    if let (Some(name), Some(pct)) =
+                        (a.get("name").and_then(|n| n.as_str()), a.get("percent"))
+                    {
+                        let parsed_pct = if pct.is_number() {
+                            pct.as_f64().unwrap_or(0.0) as f32
+                        } else if pct.is_string() {
+                            pct.as_str().unwrap_or("0").parse::<f32>().unwrap_or(0.0)
+                        } else {
+                            0.0
+                        };
+                        pct_map.insert(name.to_string(), parsed_pct);
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Merge and Build
     let mut generated: Vec<GenAchievement> = Vec::new();
     for ach in steam_achs {
         let icon_url = ach.icon.unwrap_or_default();
@@ -279,6 +317,8 @@ pub async fn generate_achievements_json(
             log::warn!("[AutoGen] Gray icon failed ({}): {}", gray_url, e);
         }
 
+        let global_pct = pct_map.get(&ach.name).copied().unwrap_or(0.0);
+
         generated.push(GenAchievement {
             description: ach.description.unwrap_or_default(),
             display_name: ach.display_name.unwrap_or_else(|| ach.name.clone()),
@@ -294,13 +334,14 @@ pub async fn generate_achievements_json(
                 format!("images/{}", gray_file)
             },
             name: ach.name,
+            global_percent: global_pct,
         });
     }
 
     let json = serde_json::to_string_pretty(&generated).map_err(|e| e.to_string())?;
     std::fs::write(&json_path, json).map_err(|e| e.to_string())?;
     log::info!(
-        "[AutoGen] Wrote {} achievements → {}",
+        "[AutoGen] Wrote {} achievements (with global rarities) → {}",
         generated.len(),
         json_path.display()
     );
@@ -581,16 +622,18 @@ fn payload_api(
     earned_time: u64,
 ) -> AchievementUnlockedPayload {
     let icon_base = meta_path.parent().unwrap_or(Path::new(""));
-    let (display_name, description, icon, icon_gray) = match meta.get(api_name) {
+    let (display_name, description, icon, icon_gray, global_percent) = match meta.get(api_name) {
         Some(m) => (
             m.display_name.clone(),
             m.description.clone(),
             resolve_icon(icon_base, &m.icon),
             resolve_icon(icon_base, &m.icon_gray),
+            m.global_percent,
         ),
         None => (
             api_name.replace('_', " ").trim().to_string(),
             String::new(),
+            None,
             None,
             None,
         ),
@@ -602,6 +645,7 @@ fn payload_api(
         icon,
         icon_gray,
         earned_time,
+        global_percent,
     }
 }
 
@@ -623,14 +667,15 @@ fn payload_display(
             .find(|m| m.display_name.eq_ignore_ascii_case(display_name))
     });
 
-    let (resolved_display, description, icon, icon_gray) = match found {
+    let (resolved_display, description, icon, icon_gray, global_percent) = match found {
         Some(m) => (
             m.display_name.clone(),
             m.description.clone(),
             resolve_icon(icon_base, &m.icon),
             resolve_icon(icon_base, &m.icon_gray),
+            m.global_percent,
         ),
-        None => (display_name.to_string(), String::new(), None, None),
+        None => (display_name.to_string(), String::new(), None, None, None),
     };
 
     AchievementUnlockedPayload {
@@ -640,6 +685,7 @@ fn payload_display(
         icon,
         icon_gray,
         earned_time,
+        global_percent,
     }
 }
 
@@ -982,6 +1028,7 @@ pub fn debug_fire_achievement(app: AppHandle, format_type: String) -> Result<(),
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs(),
+        global_percent: Some(2.1), // Ultra Rare mock
     };
     fire_overlay(&app, &payload);
     if let Some(ov) = app.get_webview_window("achievement-overlay") {

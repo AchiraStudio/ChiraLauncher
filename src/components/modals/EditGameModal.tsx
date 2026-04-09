@@ -4,26 +4,24 @@ import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { motion, AnimatePresence } from "framer-motion";
 import { useGameStore } from "../../store/gameStore";
+import { fetchSteamMetadata, parseSteamDate, fetchSteamAchievementPercentages } from "../../services/steamService";
 import { toast } from "sonner";
 import {
-    X, FolderOpen, Image, Monitor, User2, Building2, Calendar,
-    Save, Gamepad2, FileText, StickyNote, Pencil
+    X, FolderOpen, Image, Monitor, User2, Calendar,
+    Save, Gamepad2, FileText, StickyNote, Pencil, Globe, Hash
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { useLocalImage } from "../../hooks/useLocalImage";
 
-// ---------- small helper ----------
 function ImagePreview({ path, aspect, placeholder }: { path: string; aspect: string; placeholder: string }) {
     const { src, error } = useLocalImage(path);
+    const [, focalStr] = path.split("?pos=");
+    const objectPosition = focalStr?.replace("-", " ") || "center";
 
     return (
         <div className={cn("rounded-xl bg-black/40 border border-white/5 overflow-hidden flex items-center justify-center text-white/10 shrink-0 relative", aspect)}>
             {src && !error ? (
-                <img
-                    src={src}
-                    alt=""
-                    className="absolute inset-0 w-full h-full object-cover"
-                />
+                <img src={src} alt="" className="absolute inset-0 w-full h-full object-cover" style={{ objectPosition }} />
             ) : (
                 <span className="relative z-10 text-2xl select-none">{placeholder}</span>
             )}
@@ -31,54 +29,68 @@ function ImagePreview({ path, aspect, placeholder }: { path: string; aspect: str
     );
 }
 
-// ---------- small section label ----------
 function Label({ children }: { children: React.ReactNode }) {
     return <label className="text-white/35 text-[10px] font-black tracking-widest uppercase block mb-2">{children}</label>;
 }
 
-// ---------- shared input style ----------
 const inputCls = "w-full bg-black/30 border border-white/10 focus:border-accent/60 rounded-xl px-4 py-3 text-white text-sm font-medium outline-none transition-all placeholder:text-white/15";
 
 type Tab = "general" | "images" | "extra";
 
 export function EditGameModal() {
-    const isOpen = useUiStore((s) => s.isEditGameModalOpen);
-    const gameToEdit = useUiStore((s) => s.gameToEdit);
-    const setEditGameModalOpen = useUiStore((s) => s.setEditGameModalOpen);
-    const fetchGames = useGameStore((s) => s.fetchGames);
+    const isOpen = useUiStore((s: any) => s.isEditGameModalOpen);
+    const gameToEdit = useUiStore((s: any) => s.gameToEdit);
+    const setEditGameModalOpen = useUiStore((s: any) => s.setEditGameModalOpen);
+    const fetchGames = useGameStore((s: any) => s.fetchGames);
 
     const [tab, setTab] = useState<Tab>("general");
     const [title, setTitle] = useState("");
     const [exePath, setExePath] = useState("");
     const [coverPath, setCoverPath] = useState("");
     const [backgroundPath, setBackgroundPath] = useState("");
+    const [focalPoint, setFocalPoint] = useState("center");
     const [developer, setDeveloper] = useState("");
     const [publisher, setPublisher] = useState("");
     const [releaseDate, setReleaseDate] = useState("");
     const [description, setDescription] = useState("");
     const [notes, setNotes] = useState("");
     const [genre, setGenre] = useState("");
-    const [isSaving, setIsSaving] = useState(false);
+    const [appIdInput, setAppIdInput] = useState("");
 
-    // Reset to tab "general" whenever modal opens with new game
+    const [isSaving, setIsSaving] = useState(false);
+    const [isFetching, setIsFetching] = useState(false);
+
     useEffect(() => {
         if (gameToEdit) {
             setTab("general");
             setTitle(gameToEdit.title || "");
             setExePath(gameToEdit.executable_path || "");
-            // Support both field names that might exist
             setCoverPath(gameToEdit.cover_image_path || (gameToEdit as any).cover_path || "");
-            setBackgroundPath(gameToEdit.background_image_path || (gameToEdit as any).background_path || "");
+
+            const rawBg = gameToEdit.background_image_path || (gameToEdit as any).background_path || "";
+            const [urlPart, posPart] = rawBg.split("?pos=");
+            setBackgroundPath(urlPart);
+            setFocalPoint(posPart || "center");
+
             setDeveloper(gameToEdit.developer || "");
             setPublisher(gameToEdit.publisher || "");
             setReleaseDate(gameToEdit.release_date || "");
             setDescription(gameToEdit.description || "");
             setNotes(gameToEdit.notes || "");
             setGenre(gameToEdit.genre || "");
+            setAppIdInput(gameToEdit.steam_app_id?.toString() || "");
         }
     }, [gameToEdit?.id]);
 
     const close = useCallback(() => setEditGameModalOpen(false), [setEditGameModalOpen]);
+
+    const [steamDataToImport, setSteamDataToImport] = useState<any>(null);
+    const [importOptions, setImportOptions] = useState({
+        title: true,
+        details: true,
+        description: true,
+        images: true
+    });
 
     if (!isOpen || !gameToEdit) return null;
 
@@ -86,29 +98,28 @@ export function EditGameModal() {
         setIsSaving(true);
         try {
             let finalCover = coverPath;
-            let finalBg = backgroundPath;
+            let finalBgRaw = backgroundPath;
 
             const originalCover = gameToEdit.cover_image_path || (gameToEdit as any).cover_path || "";
-            const originalBg = gameToEdit.background_image_path || (gameToEdit as any).background_path || "";
+            const originalBg = (gameToEdit.background_image_path || (gameToEdit as any).background_path || "").split("?pos=")[0];
 
-            // If the user picked a local file AND it changed, route it through the Rust image processor
             if (finalCover && finalCover !== originalCover && !finalCover.startsWith("http") && !finalCover.startsWith("data:")) {
                 try {
                     finalCover = await invoke("upload_custom_cover", { gameId: gameToEdit.id, filePath: finalCover });
                 } catch (e) {
                     console.error("Cover processing failed", e);
-                    toast.error("Failed to process cover image.");
                 }
             }
 
-            if (finalBg && finalBg !== originalBg && !finalBg.startsWith("http") && !finalBg.startsWith("data:")) {
+            if (finalBgRaw && finalBgRaw !== originalBg && !finalBgRaw.startsWith("http") && !finalBgRaw.startsWith("data:")) {
                 try {
-                    finalBg = await invoke("upload_custom_background", { gameId: gameToEdit.id, filePath: finalBg });
+                    finalBgRaw = await invoke("upload_custom_background", { gameId: gameToEdit.id, filePath: finalBgRaw });
                 } catch (e) {
                     console.error("Background processing failed", e);
-                    toast.error("Failed to process background image.");
                 }
             }
+
+            const finalBg = finalBgRaw ? `${finalBgRaw}?pos=${focalPoint}` : null;
 
             const updatedGame = {
                 ...gameToEdit,
@@ -124,6 +135,7 @@ export function EditGameModal() {
                 description: description || null,
                 notes: notes || null,
                 genre: genre || null,
+                steam_app_id: appIdInput ? parseInt(appIdInput) : null,
             };
 
             await invoke("update_game", { game: updatedGame });
@@ -131,10 +143,67 @@ export function EditGameModal() {
             close();
         } catch (e) {
             console.error(e);
-            toast.error("Failed to update game metadata:\n" + e);
+            toast.error("Failed to update game metadata");
         } finally {
             setIsSaving(false);
         }
+    };
+
+    const handleFetchSteam = async () => {
+        if (!appIdInput) {
+            toast.error("No Steam App ID found", { description: "Please enter an App ID in the General tab." });
+            return;
+        }
+
+        setIsFetching(true);
+        try {
+            const data = await fetchSteamMetadata(appIdInput);
+            setSteamDataToImport(data);
+        } catch (error) {
+            toast.error("Failed to pull from Steam", { description: "Please ensure the App ID is correct." });
+        } finally {
+            setIsFetching(false);
+        }
+    };
+
+    const applySteamData = async () => {
+        if (!steamDataToImport) return;
+        const data = steamDataToImport;
+        
+        if (importOptions.title && data.name) {
+            setTitle(data.name);
+        }
+        if (importOptions.description) {
+            setDescription(data.detailed_description || data.short_description || description);
+        }
+        if (importOptions.details) {
+            setDeveloper(data.developers?.[0] || developer);
+            setPublisher(data.publishers?.[0] || publisher);
+            setReleaseDate(parseSteamDate(data.release_date?.date) || releaseDate);
+            setGenre(data.genres?.map((g: any) => g.description).join(", ") || genre);
+        }
+        if (importOptions.images) {
+            const bgPref = localStorage.getItem("steam_bg_pref") || "hero";
+            setCoverPath(`https://cdn.cloudflare.steamstatic.com/steam/apps/${appIdInput}/library_600x900.jpg`);
+            setBackgroundPath(bgPref === "hero" ? `https://cdn.cloudflare.steamstatic.com/steam/apps/${appIdInput}/library_hero.jpg` : data.header_image);
+            setFocalPoint("center");
+        }
+        
+        // Patch local JSON achievement rarity
+        try {
+            const pcts = await fetchSteamAchievementPercentages(appIdInput);
+            if (Object.keys(pcts).length > 0 && gameToEdit) {
+                await invoke("patch_achievement_percentages", { 
+                    gameId: gameToEdit.id, 
+                    percentages: pcts 
+                });
+            }
+        } catch (e) {
+            console.error("Failed to patch achievement rarity:", e);
+        }
+        
+        setSteamDataToImport(null);
+        toast.success("Metadata Placed", { description: "Review and save your changes. Achievement rarities mapped." });
     };
 
     const handlePickExe = async () => {
@@ -174,7 +243,6 @@ export function EditGameModal() {
                         className="bg-[#161a26] w-full max-w-[620px] max-h-[88vh] rounded-2xl shadow-2xl border border-white/8 flex flex-col overflow-hidden"
                         onClick={(e) => e.stopPropagation()}
                     >
-                        {/* Header */}
                         <div className="px-7 pt-6 pb-5 border-b border-white/5 flex items-center justify-between shrink-0">
                             <div className="flex items-center gap-3">
                                 <div className="w-9 h-9 rounded-xl bg-accent/10 border border-accent/20 flex items-center justify-center text-accent shrink-0">
@@ -185,12 +253,18 @@ export function EditGameModal() {
                                     <p className="text-white/30 text-xs font-semibold mt-0.5 truncate max-w-[300px]">{gameToEdit.title}</p>
                                 </div>
                             </div>
-                            <button onClick={close} className="text-white/20 hover:text-white transition-colors w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/5">
-                                <X size={18} strokeWidth={2.5} />
-                            </button>
+                            <div className="flex gap-2">
+                                {appIdInput && (
+                                    <button onClick={handleFetchSteam} disabled={isFetching} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 rounded-lg text-[10px] font-bold uppercase transition-colors shadow-lg">
+                                        <Globe size={12} /> {isFetching ? "Syncing..." : "Steam Sync"}
+                                    </button>
+                                )}
+                                <button onClick={close} className="text-white/20 hover:text-white transition-colors w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/5">
+                                    <X size={18} strokeWidth={2.5} />
+                                </button>
+                            </div>
                         </div>
 
-                        {/* Tabs */}
                         <div className="px-7 pt-4 flex gap-1 shrink-0">
                             {TABS.map((t) => (
                                 <button
@@ -198,9 +272,7 @@ export function EditGameModal() {
                                     onClick={() => setTab(t.id)}
                                     className={cn(
                                         "flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all",
-                                        tab === t.id
-                                            ? "bg-accent/15 text-accent border border-accent/25"
-                                            : "text-white/30 hover:text-white/60 hover:bg-white/5 border border-transparent"
+                                        tab === t.id ? "bg-accent/15 text-accent border border-accent/25" : "text-white/30 hover:text-white/60 hover:bg-white/5 border border-transparent"
                                     )}
                                 >
                                     {t.icon} {t.label}
@@ -208,47 +280,68 @@ export function EditGameModal() {
                             ))}
                         </div>
 
-                        {/* Body */}
                         <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-white/10 p-7 space-y-5">
-                            <AnimatePresence mode="wait">
-                                {tab === "general" && (
-                                    <motion.div key="general" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }} className="space-y-5">
-                                        {/* Title */}
-                                        <div>
-                                            <Label>Game Title</Label>
-                                            <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} className={inputCls} placeholder="e.g. Cyberpunk 2077" />
+                            {steamDataToImport ? (
+                                <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="space-y-6">
+                                    <div className="p-5 bg-black/40 border border-white/10 rounded-2xl">
+                                        <h3 className="text-sm font-black text-white uppercase tracking-widest mb-4">Import Metadata from Steam</h3>
+                                        <div className="space-y-4">
+                                            <label className="flex items-center gap-3 p-3 bg-white/5 rounded-xl border border-transparent hover:border-white/10 cursor-pointer transition-colors">
+                                                <input type="checkbox" checked={importOptions.title} onChange={(e) => setImportOptions(o => ({ ...o, title: e.target.checked }))} className="w-4 h-4 accent-accent" />
+                                                <span className="text-sm font-bold text-white">Title</span>
+                                            </label>
+                                            <label className="flex items-center gap-3 p-3 bg-white/5 rounded-xl border border-transparent hover:border-white/10 cursor-pointer transition-colors">
+                                                <input type="checkbox" checked={importOptions.details} onChange={(e) => setImportOptions(o => ({ ...o, details: e.target.checked }))} className="w-4 h-4 accent-accent" />
+                                                <span className="text-sm font-bold text-white">Details (Developer, Date, Genre)</span>
+                                            </label>
+                                            <label className="flex items-center gap-3 p-3 bg-white/5 rounded-xl border border-transparent hover:border-white/10 cursor-pointer transition-colors">
+                                                <input type="checkbox" checked={importOptions.description} onChange={(e) => setImportOptions(o => ({ ...o, description: e.target.checked }))} className="w-4 h-4 accent-accent" />
+                                                <span className="text-sm font-bold text-white">Rich Description</span>
+                                            </label>
+                                            <label className="flex items-center gap-3 p-3 bg-white/5 rounded-xl border border-transparent hover:border-white/10 cursor-pointer transition-colors">
+                                                <input type="checkbox" checked={importOptions.images} onChange={(e) => setImportOptions(o => ({ ...o, images: e.target.checked }))} className="w-4 h-4 accent-accent" />
+                                                <span className="text-sm font-bold text-white">Assets (Cover & Background)</span>
+                                            </label>
                                         </div>
-
-                                        {/* Executable */}
-                                        <div>
-                                            <Label>Executable Path</Label>
-                                            <div className="flex gap-2">
-                                                <input type="text" value={exePath} onChange={(e) => setExePath(e.target.value)} className={cn(inputCls, "flex-1 font-mono text-xs")} placeholder="C:\Games\game.exe" />
-                                                <button onClick={handlePickExe} className="shrink-0 bg-white/5 hover:bg-white/10 text-white/60 hover:text-white px-4 rounded-xl font-bold text-xs transition-all border border-white/10 flex items-center gap-2">
-                                                    <FolderOpen size={14} /> Browse
-                                                </button>
+                                    </div>
+                                    <div className="flex gap-3 mt-6">
+                                        <button onClick={() => setSteamDataToImport(null)} className="flex-1 py-3 rounded-xl bg-white/5 hover:bg-white/10 text-white font-bold text-sm transition-colors border border-white/10">Discard</button>
+                                        <button onClick={applySteamData} className="flex-[2] py-3 rounded-xl bg-accent hover:brightness-110 text-white font-black uppercase tracking-widest text-sm shadow-xl shadow-accent/20 transition-transform active:scale-95">Apply Selected</button>
+                                    </div>
+                                </motion.div>
+                            ) : (
+                                <AnimatePresence mode="wait">
+                                    {tab === "general" && (
+                                        <motion.div key="general" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }} className="space-y-5">
+                                            <div>
+                                                <Label>Game Title</Label>
+                                                <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} className={inputCls} />
                                             </div>
-                                        </div>
-
-                                        {/* Developer / Publisher */}
+                                            <div>
+                                                <Label>Executable Path</Label>
+                                                <div className="flex gap-2">
+                                                    <input type="text" value={exePath} onChange={(e) => setExePath(e.target.value)} className={cn(inputCls, "flex-1 font-mono text-xs")} />
+                                                    <button onClick={handlePickExe} className="shrink-0 bg-white/5 hover:bg-white/10 text-white/60 hover:text-white px-4 rounded-xl font-bold text-xs transition-all border border-white/10 flex items-center gap-2">
+                                                        <FolderOpen size={14} /> Browse
+                                                    </button>
+                                                </div>
+                                            </div>
                                         <div className="grid grid-cols-2 gap-4">
+                                            <div>
+                                                <Label>Steam App ID</Label>
+                                                <div className="relative">
+                                                    <Hash size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/20" />
+                                                    <input type="number" value={appIdInput} onChange={(e) => setAppIdInput(e.target.value)} className={cn(inputCls, "pl-9 font-mono")} placeholder="e.g. 123456" />
+                                                </div>
+                                            </div>
                                             <div>
                                                 <Label>Developer</Label>
                                                 <div className="relative">
                                                     <User2 size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/20" />
-                                                    <input type="text" value={developer} onChange={(e) => setDeveloper(e.target.value)} className={cn(inputCls, "pl-9")} placeholder="CD Projekt Red" />
-                                                </div>
-                                            </div>
-                                            <div>
-                                                <Label>Publisher</Label>
-                                                <div className="relative">
-                                                    <Building2 size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/20" />
-                                                    <input type="text" value={publisher} onChange={(e) => setPublisher(e.target.value)} className={cn(inputCls, "pl-9")} placeholder="CD Projekt" />
+                                                    <input type="text" value={developer} onChange={(e) => setDeveloper(e.target.value)} className={cn(inputCls, "pl-9")} />
                                                 </div>
                                             </div>
                                         </div>
-
-                                        {/* Release Date & Genre */}
                                         <div className="grid grid-cols-2 gap-4">
                                             <div>
                                                 <Label>Release Date</Label>
@@ -258,10 +351,10 @@ export function EditGameModal() {
                                                 </div>
                                             </div>
                                             <div>
-                                                <Label>Genre</Label>
+                                                <Label>Genre / Publisher</Label>
                                                 <div className="relative">
                                                     <Monitor size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/20" />
-                                                    <input type="text" value={genre} onChange={(e) => setGenre(e.target.value)} className={cn(inputCls, "pl-9")} placeholder="RPG, Action..." />
+                                                    <input type="text" value={genre} onChange={(e) => setGenre(e.target.value)} className={cn(inputCls, "pl-9")} />
                                                 </div>
                                             </div>
                                         </div>
@@ -270,7 +363,6 @@ export function EditGameModal() {
 
                                 {tab === "images" && (
                                     <motion.div key="images" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }} className="space-y-6">
-                                        {/* Cover */}
                                         <div className="flex gap-5 items-start">
                                             <ImagePreview path={coverPath} aspect="w-20 h-28" placeholder="🖼️" />
                                             <div className="flex-1 space-y-2">
@@ -282,7 +374,6 @@ export function EditGameModal() {
                                                         value={coverPath}
                                                         onChange={(e) => setCoverPath(e.target.value)}
                                                         className={cn(inputCls, "flex-1 text-xs font-mono")}
-                                                        placeholder="https://... or C:\path\cover.jpg"
                                                     />
                                                     <button onClick={() => handlePickImage("cover")} className="shrink-0 bg-white/5 hover:bg-white/10 text-white/60 hover:text-white px-3 rounded-xl font-bold text-xs transition-all border border-white/10 flex items-center gap-1.5">
                                                         <FolderOpen size={13} /> Browse
@@ -295,22 +386,27 @@ export function EditGameModal() {
                                                 )}
                                             </div>
                                         </div>
-
                                         <div className="border-t border-white/5" />
-
-                                        {/* Background */}
                                         <div className="flex gap-5 items-start">
-                                            <ImagePreview path={backgroundPath} aspect="w-32 h-20" placeholder="🌄" />
+                                            <ImagePreview path={backgroundPath ? `${backgroundPath}?pos=${focalPoint}` : ""} aspect="w-32 h-20" placeholder="🌄" />
                                             <div className="flex-1 space-y-2">
-                                                <Label>Background / Hero Image</Label>
-                                                <p className="text-white/25 text-[10px] mb-3">This is the large cinematic image shown on the library hero.</p>
+                                                <div className="flex items-center justify-between">
+                                                    <Label>Background / Hero Image</Label>
+                                                    <select value={focalPoint} onChange={(e) => setFocalPoint(e.target.value)} className="bg-white/5 border border-white/10 text-[9px] font-bold uppercase tracking-widest px-2 py-1 rounded outline-none text-white/60 focus:text-white">
+                                                        <option value="center">Center</option>
+                                                        <option value="top">Top</option>
+                                                        <option value="bottom">Bottom</option>
+                                                        <option value="left">Left</option>
+                                                        <option value="right">Right</option>
+                                                    </select>
+                                                </div>
+                                                <p className="text-white/25 text-[10px] mb-3">Adjust the focal point if the main subject is cropped.</p>
                                                 <div className="flex gap-2">
                                                     <input
                                                         type="text"
                                                         value={backgroundPath}
                                                         onChange={(e) => setBackgroundPath(e.target.value)}
                                                         className={cn(inputCls, "flex-1 text-xs font-mono")}
-                                                        placeholder="https://... or C:\path\background.jpg"
                                                     />
                                                     <button onClick={() => handlePickImage("bg")} className="shrink-0 bg-white/5 hover:bg-white/10 text-white/60 hover:text-white px-3 rounded-xl font-bold text-xs transition-all border border-white/10 flex items-center gap-1.5">
                                                         <FolderOpen size={13} /> Browse
@@ -332,62 +428,26 @@ export function EditGameModal() {
                                             <Label>Description / Summary</Label>
                                             <div className="relative">
                                                 <FileText size={14} className="absolute left-3.5 top-3.5 text-white/20" />
-                                                <textarea
-                                                    value={description}
-                                                    onChange={(e) => setDescription(e.target.value)}
-                                                    rows={5}
-                                                    className={cn(inputCls, "pl-9 resize-none")}
-                                                    placeholder="Game summary or description..."
-                                                />
+                                                <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={5} className={cn(inputCls, "pl-9 resize-none")} />
                                             </div>
                                         </div>
-
                                         <div>
                                             <Label>Personal Notes</Label>
                                             <div className="relative">
                                                 <StickyNote size={14} className="absolute left-3.5 top-3.5 text-white/20" />
-                                                <textarea
-                                                    value={notes}
-                                                    onChange={(e) => setNotes(e.target.value)}
-                                                    rows={4}
-                                                    className={cn(inputCls, "pl-9 resize-none")}
-                                                    placeholder="Private notes about this game..."
-                                                />
+                                                <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={4} className={cn(inputCls, "pl-9 resize-none")} />
                                             </div>
-                                        </div>
-
-                                        {/* Read-only info */}
-                                        <div className="bg-white/[0.02] border border-white/5 rounded-xl p-4 space-y-2 text-xs text-white/30">
-                                            <p className="font-black text-[10px] uppercase tracking-widest text-white/20 mb-3">Read-only Info</p>
-                                            <div className="flex justify-between"><span>Game ID</span><span className="font-mono text-white/40">{gameToEdit.id}</span></div>
-                                            <div className="flex justify-between"><span>Added</span><span className="text-white/40">{gameToEdit.added_at ? new Date(gameToEdit.added_at).toLocaleDateString() : "—"}</span></div>
-                                            <div className="flex justify-between"><span>Playtime</span><span className="text-white/40">{Math.round((gameToEdit.playtime_seconds || 0) / 3600)}h {Math.round(((gameToEdit.playtime_seconds || 0) % 3600) / 60)}m</span></div>
-                                            <div className="flex justify-between"><span>Last Played</span><span className="text-white/40">{gameToEdit.last_played ? new Date(gameToEdit.last_played).toLocaleDateString() : "Never"}</span></div>
-                                            {gameToEdit.steam_app_id && <div className="flex justify-between"><span>Steam App ID</span><span className="font-mono text-white/40">{gameToEdit.steam_app_id}</span></div>}
                                         </div>
                                     </motion.div>
                                 )}
                             </AnimatePresence>
+                            )}
                         </div>
 
-                        {/* Footer */}
                         <div className="px-7 py-5 bg-black/20 border-t border-white/5 flex items-center justify-between shrink-0 gap-3">
-                            <button
-                                onClick={close}
-                                className="px-5 py-2.5 rounded-xl text-white/40 hover:text-white font-bold text-sm transition-colors hover:bg-white/5"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                onClick={handleSave}
-                                disabled={isSaving}
-                                className="bg-accent hover:brightness-110 disabled:opacity-50 text-white px-7 py-2.5 rounded-xl font-black text-sm tracking-wide transition-all shadow-lg shadow-accent/20 active:scale-95 flex items-center gap-2"
-                            >
-                                {isSaving ? (
-                                    <><div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" /> Saving…</>
-                                ) : (
-                                    <><Save size={15} /> Save Changes</>
-                                )}
+                            <button onClick={close} className="px-5 py-2.5 rounded-xl text-white/40 hover:text-white font-bold text-sm transition-colors hover:bg-white/5">Cancel</button>
+                            <button onClick={handleSave} disabled={isSaving} className="bg-accent hover:brightness-110 disabled:opacity-50 text-white px-7 py-2.5 rounded-xl font-black text-sm tracking-wide transition-all shadow-lg shadow-accent/20 active:scale-95 flex items-center gap-2">
+                                {isSaving ? <><div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" /> Saving…</> : <><Save size={15} /> Save Changes</>}
                             </button>
                         </div>
                     </motion.div>

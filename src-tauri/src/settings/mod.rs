@@ -23,6 +23,7 @@ pub struct AppSettings {
     pub sequential_download: bool,
     pub steam_api_key: String,
     pub auto_fetch_achievements: bool,
+    pub accent_color: String, // NEW
 }
 
 impl Default for AppSettings {
@@ -44,20 +45,25 @@ impl Default for AppSettings {
             sequential_download: false,
             steam_api_key: String::new(),
             auto_fetch_achievements: true,
+            accent_color: "#22d3ee".to_string(), // Default Cyan
         }
     }
 }
 
 pub fn default_scan_roots() -> Vec<std::path::PathBuf> {
     let drive = std::env::var("SYSTEMDRIVE").unwrap_or_else(|_| "C:".into());
-    let drive_root = if drive.ends_with('\\') { drive.clone() } else { format!("{}\\", drive) };
+    let drive_root = if drive.ends_with('\\') {
+        drive.clone()
+    } else {
+        format!("{}\\", drive)
+    };
 
     let appdata = std::env::var("APPDATA")
         .unwrap_or_else(|_| format!(r"{}Users\Default\AppData\Roaming", drive_root));
 
     vec![
-        std::path::PathBuf::from(format!(r"{}\GSE Saves", appdata)),                          // Priority 1: Goldberg GSE (flat pattern)
-        std::path::PathBuf::from(format!(r"{}Users\Public\Documents\Steam", drive_root)),         // Priority 2: CODEX, RLD!, Skidrow
-        std::path::PathBuf::from(format!(r"{}Users\Public\Documents", drive_root)),               // Priority 3: catch-all
+        std::path::PathBuf::from(format!(r"{}\GSE Saves", appdata)),
+        std::path::PathBuf::from(format!(r"{}Users\Public\Documents\Steam", drive_root)),
+        std::path::PathBuf::from(format!(r"{}Users\Public\Documents", drive_root)),
     ]
 }

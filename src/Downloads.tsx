@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useDownloadsStore, DownloadStatus } from "./store/downloadsStore";
+import { useUiStore } from "./store/uiStore";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-    Play, Pause, X, HardDriveDownload,
+    Play, Pause, X, HardDriveDownload, Link as LinkIcon,
     Activity, Clock, ArrowDownToLine, ArrowUpToLine, Users, CheckCircle2, AlertCircle
 } from "lucide-react";
 import { cn } from "./lib/utils";
@@ -38,13 +39,11 @@ function DownloadCard({ item, index }: { item: DownloadStatus; index: number }) 
             transition={{ duration: 0.35, delay: index * 0.05 }}
             className="group relative glass-panel rounded-3xl p-8 hover:border-accent/40 transition-all duration-500 hover:shadow-3xl bg-surface/30 backdrop-blur-3xl overflow-hidden border border-white/5"
         >
-            {/* Background Glow */}
             <div className={cn(
                 "absolute -right-20 -top-20 w-64 h-64 blur-[100px] opacity-0 group-hover:opacity-10 transition-opacity duration-700 pointer-events-none",
                 isCompleted ? 'bg-green-500' : isPaused ? 'bg-yellow-500' : 'bg-accent'
             )} />
 
-            {/* Header */}
             <div className="flex justify-between items-start mb-6 relative z-10">
                 <div className="flex-1 min-w-0 pr-6">
                     <h3 className="font-bold text-white text-xl truncate group-hover:text-accent transition-colors" title={item.name}>
@@ -73,7 +72,6 @@ function DownloadCard({ item, index }: { item: DownloadStatus; index: number }) 
                     </div>
                 </div>
 
-                {/* Actions */}
                 <div className="flex gap-3 opacity-0 group-hover:opacity-100 transition-all duration-300">
                     {!isCompleted && (
                         <button
@@ -94,7 +92,6 @@ function DownloadCard({ item, index }: { item: DownloadStatus; index: number }) 
                 </div>
             </div>
 
-            {/* Progress Bar Container */}
             <div className="relative mb-6 z-10">
                 <div className="h-2.5 bg-black/40 rounded-full overflow-hidden border border-white/5 shadow-inner">
                     <motion.div
@@ -111,13 +108,11 @@ function DownloadCard({ item, index }: { item: DownloadStatus; index: number }) 
                         )}
                     </motion.div>
                 </div>
-                {/* Percentage hint */}
                 <div className="absolute -top-7 right-0 text-xs font-bold text-white/40">
                     {Math.round(item.progress_percent)}%
                 </div>
             </div>
 
-            {/* Stats Footer */}
             {!isCompleted && (
                 <div className="flex items-center justify-between text-xs font-medium text-white/50 relative z-10">
                     <div className="flex items-center gap-10">
@@ -149,7 +144,9 @@ function DownloadCard({ item, index }: { item: DownloadStatus; index: number }) 
 
 export function Downloads() {
     const { downloads, startPolling, stopPolling } = useDownloadsStore();
+    const { setTorrentModalOpen } = useUiStore();
     const [filter, setFilter] = useState<'all' | 'active' | 'completed'>('all');
+    const [magnetInput, setMagnetInput] = useState("");
 
     useEffect(() => {
         startPolling();
@@ -167,34 +164,65 @@ export function Downloads() {
         <div className="absolute inset-0 overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
             <div className="flex flex-col min-h-full px-14 pt-14 pb-32 max-w-[1200px] mx-auto w-full">
 
-                <header className="flex items-end justify-between mb-16 px-2">
-                    <motion.div
-                        initial={{ opacity: 0, y: 12 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.35 }}
-                    >
-                        <h1 className="text-4xl font-bold text-white flex items-center gap-4">
-                            <HardDriveDownload size={40} className="text-accent drop-shadow-[0_0_15px_rgba(192,38,211,0.3)]" />
-                            Downloads
-                        </h1>
-                    </motion.div>
+                <header className="flex flex-col gap-6 mb-16 px-2">
+                    <div className="flex items-end justify-between">
+                        <motion.div
+                            initial={{ opacity: 0, y: 12 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.35 }}
+                        >
+                            <h1 className="text-4xl font-bold text-white flex items-center gap-4">
+                                <HardDriveDownload size={40} className="text-accent drop-shadow-[0_0_15px_rgba(192,38,211,0.3)]" />
+                                Downloads
+                            </h1>
+                        </motion.div>
 
-                    <div className="flex bg-black/40 backdrop-blur-3xl rounded-2xl p-1.5 border border-white/5 shadow-3xl">
-                        {(['all', 'active', 'completed'] as const).map(f => (
-                            <button
-                                key={f}
-                                onClick={() => setFilter(f)}
-                                className={cn(
-                                    "px-5 py-2 rounded-lg text-sm font-semibold transition-all",
-                                    filter === f
-                                        ? "bg-white/10 text-white shadow-xl"
-                                        : "text-white/20 hover:text-white/50"
-                                )}
-                            >
-                                {f}
-                            </button>
-                        ))}
+                        <div className="flex bg-black/40 backdrop-blur-3xl rounded-2xl p-1.5 border border-white/5 shadow-3xl">
+                            {(['all', 'active', 'completed'] as const).map(f => (
+                                <button
+                                    key={f}
+                                    onClick={() => setFilter(f)}
+                                    className={cn(
+                                        "px-5 py-2 rounded-lg text-sm font-semibold transition-all capitalize",
+                                        filter === f
+                                            ? "bg-white/10 text-white shadow-xl"
+                                            : "text-white/20 hover:text-white/50"
+                                    )}
+                                >
+                                    {f}
+                                </button>
+                            ))}
+                        </div>
                     </div>
+
+                    {/* Manual Magnet Input Bar */}
+                    <motion.div
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.4, delay: 0.1 }}
+                        className="flex items-center gap-3 bg-black/40 border border-white/10 rounded-2xl px-5 py-3 w-full max-w-2xl shadow-inner"
+                    >
+                        <LinkIcon size={18} className="text-accent" />
+                        <input
+                            type="text"
+                            placeholder="Paste Magnet Link to add a new download..."
+                            value={magnetInput}
+                            onChange={(e) => setMagnetInput(e.target.value)}
+                            className="bg-transparent border-none outline-none text-sm text-white flex-1 placeholder:text-white/30"
+                        />
+                        <button
+                            onClick={() => {
+                                if (magnetInput.trim()) {
+                                    setTorrentModalOpen(true, magnetInput.trim());
+                                    setMagnetInput("");
+                                }
+                            }}
+                            disabled={!magnetInput.trim()}
+                            className="bg-accent hover:bg-accent/80 disabled:opacity-50 disabled:hover:bg-accent text-white px-5 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all"
+                        >
+                            Add Task
+                        </button>
+                    </motion.div>
                 </header>
 
                 <div className="flex flex-col gap-8">
@@ -226,14 +254,14 @@ export function Downloads() {
                 </div>
 
                 {filteredDownloads.length > 0 && (
-                    <motion.div 
+                    <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         transition={{ delay: 0.5 }}
                         className="mt-20 pt-10 border-t border-white/5 flex flex-col items-center gap-5 text-white/10"
                     >
                         <AlertCircle size={24} className="opacity-20" />
-                        <p className="text-xs text-white/40">End of Downloads</p>
+                        <p className="text-xs text-white/40 uppercase tracking-widest font-black">End of Queue</p>
                     </motion.div>
                 )}
             </div>

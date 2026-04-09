@@ -17,6 +17,7 @@ export interface AppSettings {
     sequential_download: boolean;
     steam_api_key: string;
     auto_fetch_achievements: boolean;
+    accent_color: string; // NEW
 }
 
 export async function getAppSettings(): Promise<AppSettings> {

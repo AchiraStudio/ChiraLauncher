@@ -1,20 +1,19 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
-import { listen, UnlistenFn } from "@tauri-apps/api/event";
-import { toast } from "sonner";
-import { useGameStore } from "./gameStore";
-import { useSettingsStore } from "./settingsStore";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+
+export type DownloadStateEnum = "Initializing" | "Downloading" | "Paused" | "Finished" | "Error";
 
 export interface DownloadStatus {
     id: number;
     name: string;
-    progress_percent: number;
+    state: DownloadStateEnum;
     downloaded_bytes: number;
     total_bytes: number;
     download_speed: number;
     upload_speed: number;
+    progress_percent: number;
     peers: number;
-    state: string;
 }
 
 interface DownloadsState {
@@ -25,12 +24,12 @@ interface DownloadsState {
     pauseDownload: (id: number) => Promise<void>;
     resumeDownload: (id: number) => Promise<void>;
     cancelDownload: (id: number) => Promise<void>;
-    startPolling: () => void;
+    startPolling: () => Promise<void>;
     stopPolling: () => void;
 }
 
-let progressUnlisten: UnlistenFn | null = null;
-let eventUnlisten: UnlistenFn | null = null;
+let unlistenProgress: UnlistenFn | null = null;
+let isPolling = false;
 
 export const useDownloadsStore = create<DownloadsState>((set, get) => ({
     downloads: [],
@@ -38,91 +37,72 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
     error: null,
 
     fetchDownloads: async () => {
+        // SAFETY GUARD: Prevent crashes in web browsers
+        if (!window.__TAURI_INTERNALS__) return;
+
         try {
-            const list = await invoke<DownloadStatus[]>("get_downloads");
-            set({ downloads: list, error: null });
-        } catch (err) {
+            const data = await invoke<DownloadStatus[]>("get_downloads");
+            set({ downloads: data, error: null });
+        } catch (err: any) {
             console.error("Failed to fetch downloads:", err);
-            set({ error: String(err) });
+            set({ error: err.toString() });
         }
     },
 
-    pauseDownload: async (id) => {
+    pauseDownload: async (id: number) => {
+        if (!window.__TAURI_INTERNALS__) return;
         try {
             await invoke("pause_download", { id });
-            await get().fetchDownloads();
+            get().fetchDownloads();
         } catch (err) {
-            toast.error("Failed to pause", { description: String(err) });
+            console.error("Pause failed", err);
         }
     },
 
-    resumeDownload: async (id) => {
+    resumeDownload: async (id: number) => {
+        if (!window.__TAURI_INTERNALS__) return;
         try {
             await invoke("resume_download", { id });
-            await get().fetchDownloads();
+            get().fetchDownloads();
         } catch (err) {
-            toast.error("Failed to resume", { description: String(err) });
+            console.error("Resume failed", err);
         }
     },
 
-    cancelDownload: async (id) => {
+    cancelDownload: async (id: number) => {
+        if (!window.__TAURI_INTERNALS__) return;
         try {
             await invoke("cancel_download", { id });
-            await get().fetchDownloads();
-            toast.info("Download cancelled");
+            get().fetchDownloads();
         } catch (err) {
-            toast.error("Failed to cancel", { description: String(err) });
+            console.error("Cancel failed", err);
         }
     },
 
-    startPolling: () => {
-        if (progressUnlisten) return; // Already listening
+    startPolling: async () => {
+        // SAFETY GUARD: Prevent event listener crashes in web browsers
+        if (!window.__TAURI_INTERNALS__) return;
+        if (isPolling) return;
 
-        // Initial fetch
+        isPolling = true;
         get().fetchDownloads();
 
-        // Listen for live progress updates broadcast by the Rust backend roughly every second
-        listen<DownloadStatus[]>("download-progress", (event) => {
-            set({ downloads: event.payload, error: null });
-        }).then(unlisten => {
-            progressUnlisten = unlisten;
-        });
-
-        // Listen for completion events from backend (if we set them up later)
-        listen<{ id: number; name: string }>("download-completed", async (event) => {
-            toast.success("Download Complete!", { description: event.payload.name });
-            get().fetchDownloads();
-
-            // Lazy-load stores inside the callback to avoid cross-store TDZ crash at module init
-            const settings = useSettingsStore.getState().settings;
-            if (settings?.auto_add_to_library) {
-                try {
-                    // Quick debounce to let file handles close
-                    await new Promise(resolve => setTimeout(resolve, 2000));
-
-                    // Trigger a scan of the download directory
-                    // Since we don't know the exact path of the game inside the download, 
-                    // we scan the root downloads folder to pick up new nested executables.
-                    await invoke("scan_directory", { path: settings.download_path });
-                    useGameStore.getState().fetchGames();
-                    toast.success("Scan Complete", { description: `${event.payload.name} added to library.` });
-                } catch (err) {
-                    console.error("Auto-add to library failed:", err);
-                }
+        if (!unlistenProgress) {
+            try {
+                unlistenProgress = await listen<DownloadStatus[]>("download-progress", (event) => {
+                    set({ downloads: event.payload });
+                });
+            } catch (e) {
+                console.error("Failed to listen to download progress", e);
             }
-        }).then(unlisten => {
-            eventUnlisten = unlisten;
-        });
+        }
     },
 
     stopPolling: () => {
-        if (progressUnlisten) {
-            progressUnlisten();
-            progressUnlisten = null;
-        }
-        if (eventUnlisten) {
-            eventUnlisten();
-            eventUnlisten = null;
+        isPolling = false;
+        if (unlistenProgress) {
+            unlistenProgress();
+            unlistenProgress = null;
         }
     }
 }));

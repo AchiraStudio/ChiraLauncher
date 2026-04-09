@@ -2,11 +2,13 @@ import { Outlet } from "react-router-dom";
 import { Toaster } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
 import { useUiStore } from "../../store/uiStore";
+import { useSettingsStore } from "../../store/settingsStore";
 import { AddGameModal } from "../modals/AddGameModal";
 import { EditGameModal } from "../modals/EditGameModal";
 import { DirectoryScannerModal } from "../modals/DirectoryScannerModal";
 import { FolderBuilderModal } from "../modals/FolderBuilderModal";
 import { LibrarySettingsModal } from "../modals/LibrarySettingsModal";
+import { AppIdManagerModal } from "../modals/AppIdManagerModal";
 import { DownloadManager } from "../ui/DownloadManager";
 import { Sidebar } from "./Sidebar";
 import { useLocalImage } from "../../hooks/useLocalImage";
@@ -19,6 +21,7 @@ function Modals() {
             <DirectoryScannerModal />
             <FolderBuilderModal />
             <LibrarySettingsModal />
+            <AppIdManagerModal />
             <DownloadManager />
         </>
     );
@@ -50,7 +53,6 @@ function GlobalBackground() {
                             alt=""
                             className="w-full h-full object-cover brightness-[0.6] saturate-[1.2] blur-[2px]"
                         />
-                        {/* Vignette for the image layer */}
                         <div className="absolute inset-0 bg-gradient-to-t from-background via-background/20 to-transparent" />
                         <div className="absolute inset-0 bg-gradient-to-r from-background/40 via-transparent to-background/40" />
                     </motion.div>
@@ -65,15 +67,19 @@ function GlobalBackground() {
 }
 
 export function AppLayout() {
+    const settings = useSettingsStore(s => s.settings);
+
+    // Inject the user's custom accent color natively into the DOM variables!
+    const customStyle = {
+        '--color-accent': settings?.accent_color || '#3b82f6'
+    } as React.CSSProperties;
+
     return (
-        <div className="h-screen w-screen bg-background text-text-primary overflow-hidden selection:bg-accent/30 selection:text-white flex flex-row relative">
+        <div style={customStyle} className="h-screen w-screen bg-background text-text-primary overflow-hidden selection:bg-accent/30 selection:text-white flex flex-row relative">
             <GlobalBackground />
             <Toaster theme="dark" position="bottom-right" />
-
             <Sidebar />
-
             <Modals />
-
             <div className="flex-1 relative z-0 bg-transparent h-screen overflow-x-hidden overflow-y-auto scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
                 <Outlet />
             </div>

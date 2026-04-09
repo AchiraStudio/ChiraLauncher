@@ -156,6 +156,7 @@ export default function Library() {
 
     // Prepare local cover url for the left panel
     const { src: coverUrl } = useLocalImage(activeGame?.cover_image_path || (activeGame as any)?.cover_path);
+    const { src: bgUrl } = useLocalImage(activeGame?.background_image_path || (activeGame as any)?.background_path || activeGame?.cover_image_path || (activeGame as any)?.cover_path);
 
     const handleAction = async () => {
         if (!activeGame) return;
@@ -221,12 +222,34 @@ export default function Library() {
     }
 
     return (
-        <div className="flex h-full w-full relative" onClick={() => setContextMenu(null)}>
+        <div className="flex h-full w-full relative bg-background" onClick={() => setContextMenu(null)}>
             {contextMenu && <ContextMenu x={contextMenu.x} y={contextMenu.y} items={contextMenu.items} onClose={() => setContextMenu(null)} />}
 
-            {/* Subtle overlay gradients so text remains readable against bright backgrounds */}
-            <div className="absolute inset-0 bg-gradient-to-t from-background/80 via-background/20 to-transparent z-10 pointer-events-none" />
-            <div className="absolute inset-0 bg-gradient-to-r from-background/90 via-background/40 to-background/60 z-10 pointer-events-none" />
+            {/* ── CINEMATIC BACKGROUND ── */}
+            <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
+                <AnimatePresence mode="wait">
+                    {bgUrl && (
+                        <motion.div
+                            key={bgUrl}
+                            initial={{ opacity: 0, scale: 1.05 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0 }}
+                            transition={{ duration: 0.8, ease: "easeOut" }}
+                            className="absolute inset-0"
+                        >
+                            <img
+                                src={bgUrl}
+                                alt=""
+                                className="w-full h-full object-cover brightness-[0.5] saturate-[1.2]"
+                            />
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+
+                {/* Subtle overlay gradients so text remains readable against bright backgrounds */}
+                <div className="absolute inset-0 bg-gradient-to-t from-background via-background/40 to-transparent" />
+                <div className="absolute inset-0 bg-gradient-to-r from-background/90 via-background/30 to-transparent" />
+            </div>
 
             {/* ── Hero / Detail Panel (left) ── */}
             <div className="flex-1 relative z-20 flex flex-col justify-end p-12 pointer-events-auto">

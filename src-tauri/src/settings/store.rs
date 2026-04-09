@@ -1,12 +1,10 @@
 use crate::settings::AppSettings;
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
-use rusqlite::OptionalExtension;
 use rusqlite::params;
+use rusqlite::OptionalExtension;
 
-// Initialize the settings table
 pub fn init_table(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
-    // 1. Base table creation (only oldest columns)
     conn.execute(
         "CREATE TABLE IF NOT EXISTS settings (
             id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -22,26 +20,53 @@ pub fn init_table(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
         [],
     )?;
 
-    // 2. Migrate: safely add all newer columns (fails silently if they already exist)
-    let _ = conn.execute("ALTER TABLE settings ADD COLUMN rawg_api_key TEXT NOT NULL DEFAULT ''", []);
-    let _ = conn.execute("ALTER TABLE settings ADD COLUMN developer_mode BOOLEAN NOT NULL DEFAULT 0", []);
-    let _ = conn.execute("ALTER TABLE settings ADD COLUMN max_download_speed_kbps INTEGER NOT NULL DEFAULT 0", []);
-    let _ = conn.execute("ALTER TABLE settings ADD COLUMN max_upload_speed_kbps INTEGER NOT NULL DEFAULT 0", []);
-    let _ = conn.execute("ALTER TABLE settings ADD COLUMN max_concurrent_downloads INTEGER NOT NULL DEFAULT 3", []);
-    let _ = conn.execute("ALTER TABLE settings ADD COLUMN auto_add_to_library BOOLEAN NOT NULL DEFAULT 1", []);
-    let _ = conn.execute("ALTER TABLE settings ADD COLUMN sequential_download BOOLEAN NOT NULL DEFAULT 0", []);
-    let _ = conn.execute("ALTER TABLE settings ADD COLUMN steam_api_key TEXT NOT NULL DEFAULT ''", []);
-    let _ = conn.execute("ALTER TABLE settings ADD COLUMN auto_fetch_achievements BOOLEAN NOT NULL DEFAULT 1", []);
+    // Safe schema migrations (Ignores errors if columns already exist)
+    let _ = conn.execute(
+        "ALTER TABLE settings ADD COLUMN rawg_api_key TEXT NOT NULL DEFAULT ''",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE settings ADD COLUMN developer_mode BOOLEAN NOT NULL DEFAULT 0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE settings ADD COLUMN max_download_speed_kbps INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE settings ADD COLUMN max_upload_speed_kbps INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE settings ADD COLUMN max_concurrent_downloads INTEGER NOT NULL DEFAULT 3",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE settings ADD COLUMN auto_add_to_library BOOLEAN NOT NULL DEFAULT 1",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE settings ADD COLUMN sequential_download BOOLEAN NOT NULL DEFAULT 0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE settings ADD COLUMN steam_api_key TEXT NOT NULL DEFAULT ''",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE settings ADD COLUMN auto_fetch_achievements BOOLEAN NOT NULL DEFAULT 1",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE settings ADD COLUMN accent_color TEXT NOT NULL DEFAULT '#22d3ee'",
+        [],
+    );
 
-    // 3. Now that schema is guaranteed fully up to date, insert default row
     conn.execute(
         "INSERT OR IGNORE INTO settings (
             id, theme, language, download_path, auto_launch_on_boot, 
-            minimize_to_tray, enable_notifications, volume_sfx, volume_bgm,
-            rawg_api_key, developer_mode, max_download_speed_kbps, max_upload_speed_kbps,
-            max_concurrent_downloads, auto_add_to_library, sequential_download,
-            steam_api_key, auto_fetch_achievements
-        ) VALUES (1, 'dark', 'en', 'C:\\Downloads\\ChiraLauncher', 0, 1, 1, 80, 50, '', 0, 0, 0, 3, 1, 0, '', 1)",
+            minimize_to_tray, enable_notifications, volume_sfx, volume_bgm
+        ) VALUES (1, 'dark', 'en', 'C:\\Downloads\\ChiraLauncher', 0, 1, 1, 80, 50)",
         [],
     )?;
 
@@ -51,38 +76,35 @@ pub fn init_table(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
 pub fn get_settings(pool: &Pool<SqliteConnectionManager>) -> Result<AppSettings, rusqlite::Error> {
     let conn = pool.get().unwrap();
 
-    let mut stmt = conn.prepare(
-        "SELECT theme, language, download_path, auto_launch_on_boot, 
-         minimize_to_tray, enable_notifications, volume_sfx, volume_bgm,
-         developer_mode, max_download_speed_kbps, max_upload_speed_kbps,
-         max_concurrent_downloads, auto_add_to_library, sequential_download,
-         steam_api_key, auto_fetch_achievements
-         FROM settings WHERE id = 1",
-    )?;
+    // Ensure table is initialized before querying
+    let _ = init_table(&conn);
+
+    let mut stmt = conn.prepare("SELECT * FROM settings WHERE id = 1")?;
 
     let settings = stmt
         .query_row([], |row| {
             Ok(AppSettings {
-                theme: row.get(0)?,
-                language: row.get(1)?,
-                download_path: row.get(2)?,
-                auto_launch_on_boot: row.get(3)?,
-                minimize_to_tray: row.get(4)?,
-                enable_notifications: row.get(5)?,
-                volume_sfx: row.get(6)?,
-                volume_bgm: row.get(7)?,
-                developer_mode: row.get(8).unwrap_or_default(),
-                max_download_speed_kbps: row.get(9).unwrap_or(0),
-                max_upload_speed_kbps: row.get(10).unwrap_or(0),
-                max_concurrent_downloads: row.get(11).unwrap_or(3),
-                auto_add_to_library: row.get(12).unwrap_or(true),
-                sequential_download: row.get(13).unwrap_or(false),
-                steam_api_key: row.get(14).unwrap_or_default(),
-                auto_fetch_achievements: row.get(15).unwrap_or(true),
+                theme: row.get::<&str, String>("theme").unwrap_or_else(|_| "dark".to_string()),
+                language: row.get::<&str, String>("language").unwrap_or_else(|_| "en".to_string()),
+                download_path: row.get::<&str, String>("download_path").unwrap_or_else(|_| "C:\\Downloads\\ChiraLauncher".to_string()),
+                auto_launch_on_boot: row.get::<&str, bool>("auto_launch_on_boot").unwrap_or(false),
+                minimize_to_tray: row.get::<&str, bool>("minimize_to_tray").unwrap_or(true),
+                enable_notifications: row.get::<&str, bool>("enable_notifications").unwrap_or(true),
+                volume_sfx: row.get::<&str, u32>("volume_sfx").unwrap_or(80),
+                volume_bgm: row.get::<&str, u32>("volume_bgm").unwrap_or(50),
+                developer_mode: row.get::<&str, bool>("developer_mode").unwrap_or(false),
+                max_download_speed_kbps: row.get::<&str, u32>("max_download_speed_kbps").unwrap_or(0),
+                max_upload_speed_kbps: row.get::<&str, u32>("max_upload_speed_kbps").unwrap_or(0),
+                max_concurrent_downloads: row.get::<&str, u32>("max_concurrent_downloads").unwrap_or(3),
+                auto_add_to_library: row.get::<&str, bool>("auto_add_to_library").unwrap_or(true),
+                sequential_download: row.get::<&str, bool>("sequential_download").unwrap_or(false),
+                steam_api_key: row.get::<&str, String>("steam_api_key").unwrap_or_default(),
+                auto_fetch_achievements: row.get::<&str, bool>("auto_fetch_achievements").unwrap_or(true),
+                accent_color: row.get::<&str, String>("accent_color").unwrap_or_else(|_| "#22d3ee".to_string()),
             })
         })
         .optional()?
-        .unwrap_or_default();
+        .unwrap_or_default(); // Fallback to default if totally missing
 
     Ok(settings)
 }
@@ -94,22 +116,11 @@ pub fn update_settings(
     let tx = conn.transaction()?;
     tx.execute(
         "UPDATE settings SET 
-            theme = ?1, 
-            language = ?2, 
-            download_path = ?3, 
-            auto_launch_on_boot = ?4, 
-            minimize_to_tray = ?5, 
-            enable_notifications = ?6, 
-            volume_sfx = ?7, 
-            volume_bgm = ?8,
-            developer_mode = ?9,
-            max_download_speed_kbps = ?10,
-            max_upload_speed_kbps = ?11,
-            max_concurrent_downloads = ?12,
-            auto_add_to_library = ?13,
-            sequential_download = ?14,
-            steam_api_key = ?15,
-            auto_fetch_achievements = ?16
+            theme = ?1, language = ?2, download_path = ?3, auto_launch_on_boot = ?4, 
+            minimize_to_tray = ?5, enable_notifications = ?6, volume_sfx = ?7, volume_bgm = ?8,
+            developer_mode = ?9, max_download_speed_kbps = ?10, max_upload_speed_kbps = ?11,
+            max_concurrent_downloads = ?12, auto_add_to_library = ?13, sequential_download = ?14,
+            steam_api_key = ?15, auto_fetch_achievements = ?16, accent_color = ?17
          WHERE id = 1",
         params![
             &settings.theme,
@@ -128,6 +139,7 @@ pub fn update_settings(
             settings.sequential_download,
             &settings.steam_api_key,
             settings.auto_fetch_achievements,
+            &settings.accent_color
         ],
     )?;
     tx.commit()?;
