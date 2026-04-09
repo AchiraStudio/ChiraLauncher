@@ -19,6 +19,28 @@ import { AchievementGrid } from "../components/game/AchievementGrid";
 import type { Game } from "../types/game";
 import { useLocalImage } from "../hooks/useLocalImage";
 
+const steamHtml = [
+    "text-white/80 text-[14px] leading-relaxed font-medium",
+    "[&_h1]:text-white [&_h1]:text-3xl [&_h1]:font-black [&_h1]:uppercase [&_h1]:tracking-tighter",
+    "[&_h1]:border-b [&_h1]:border-white/15 [&_h1]:pb-4 [&_h1]:mt-14 [&_h1]:mb-6 [&_h1:first-child]:mt-0",
+    "[&_h2]:text-white [&_h2]:text-xl [&_h2]:font-bold [&_h2]:mt-10 [&_h2]:mb-4",
+    "[&_h3]:text-white/90 [&_h3]:text-lg [&_h3]:font-bold [&_h3]:mt-8 [&_h3]:mb-3",
+    "[&_p]:mb-5 [&_p]:text-white/70",
+    "[&_strong]:text-white [&_strong]:font-bold",
+    "[&_b]:text-white [&_b]:font-bold",
+    "[&_i]:text-white/60 [&_em]:text-white/60",
+    "[&_.bb_ul]:list-none [&_.bb_ul]:ml-0 [&_.bb_ul]:mb-6 [&_.bb_ul]:space-y-2",
+    "[&_.bb_ul>li]:text-white/70 [&_.bb_ul>li]:flex [&_.bb_ul>li]:items-start [&_.bb_ul>li]:gap-3",
+    "[&_.bb_ul>li]:before:content-['▸'] [&_.bb_ul>li]:before:text-accent [&_.bb_ul>li]:before:text-sm [&_.bb_ul>li]:before:shrink-0 [&_.bb_ul>li]:before:mt-0.5",
+    "[&_ul]:list-disc [&_ul]:ml-6 [&_ul]:mb-6 [&_ul]:space-y-2 [&_li]:text-white/70",
+    "[&_.bb_img_ctn]:block [&_.bb_img_ctn]:my-8 [&_.bb_img_ctn]:rounded-2xl [&_.bb_img_ctn]:overflow-hidden [&_.bb_img_ctn]:shadow-[0_10px_40px_rgba(0,0,0,0.6)] [&_.bb_img_ctn]:border [&_.bb_img_ctn]:border-white/10",
+    "[&_img]:w-full [&_img]:h-auto [&_img]:block",
+    "[&_video]:w-full [&_video]:h-auto [&_video]:block",
+    "[&_a]:text-accent [&_a]:underline [&_a]:underline-offset-4 [&_a]:decoration-accent/40 hover:[&_a]:decoration-accent",
+    "[&_br]:leading-none",
+].join(" ");
+
+
 // ─────────────────────────────────────────────────────────
 //  Sidebar list item
 // ─────────────────────────────────────────────────────────
@@ -112,7 +134,6 @@ export default function Library() {
     const [achievements, setAchievements] = useState<Achievement[]>([]);
     const [achievementsLoading, setAchievementsLoading] = useState(false);
     const [search, setSearch] = useState("");
-    const [showDescription, setShowDescription] = useState(false);
     const [showAchievements, setShowAchievements] = useState(false);
 
     const [contextMenu, setContextMenu] = useState<{
@@ -131,7 +152,6 @@ export default function Library() {
     // Reset modals when active game changes
     useEffect(() => {
         setShowAchievements(false);
-        setShowDescription(false);
     }, [activeGame?.id]);
 
     // Fetch achievements when active game changes
@@ -252,7 +272,7 @@ export default function Library() {
             </div>
 
             {/* ── Hero / Detail Panel (left) ── */}
-            <div className="flex-1 relative z-20 flex flex-col justify-end p-12 pointer-events-auto">
+            <div className="flex-1 relative z-20 flex flex-col overflow-y-auto custom-scrollbar pointer-events-auto items-center">
                 <AnimatePresence mode="wait">
                     {activeGame && (
                         <motion.div
@@ -261,9 +281,12 @@ export default function Library() {
                             animate={{ opacity: 1, y: 0 }}
                             exit={{ opacity: 0, y: -10 }}
                             transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+                            className="w-full max-w-6xl p-12 min-h-full flex flex-col"
                         >
-                            <div className="flex items-start gap-10">
-
+                            <div className="flex-1" /> {/* Spacer pushed up naturally */}
+                            
+                            {/* Main Hero Overview */}
+                            <div className="flex items-start gap-10 mt-24">
                                 {/* ── Left Column: Cover & Primary Actions ── */}
                                 <div className="flex flex-col gap-5 w-[200px] shrink-0">
                                     {/* Box-art cover */}
@@ -350,12 +373,14 @@ export default function Library() {
                                     </div>
 
                                     {/* Detail Cards Row */}
-                                    <div className="flex gap-4 items-stretch max-w-4xl">
+                                    <div className="flex gap-4 items-stretch max-w-2xl">
 
                                         {/* Metadata Grid */}
                                         {(activeGame.developer || activeGame.publisher || activeGame.release_date || activeGame.genre) && (
                                             <div className="bg-black/40 backdrop-blur-2xl border border-white/10 rounded-2xl p-5 flex-1 min-w-[240px] space-y-3.5 shadow-xl hover:bg-black/60 transition-colors">
-                                                <h4 className="text-[10px] font-black text-white/30 uppercase tracking-widest mb-2">Game Info</h4>
+                                                <h4 className="text-[10px] font-black text-white/30 uppercase tracking-widest mb-2 flex items-center gap-1.5">
+                                                    <Building2 size={12} className="text-purple-400" /> GAME INFO
+                                                </h4>
                                                 <MetaRow icon={<User2 size={14} />} label="Developer" value={activeGame.developer || "Unknown"} />
                                                 <MetaRow icon={<Building2 size={14} />} label="Publisher" value={activeGame.publisher || "Unknown"} />
                                                 <MetaRow icon={<Calendar size={14} />} label="Released" value={activeGame.release_date ? new Date(activeGame.release_date).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }) : "Unknown"} />
@@ -364,57 +389,58 @@ export default function Library() {
                                         )}
 
                                         {/* Achievement Summary Card */}
-                                        {achievements.length > 0 && (
-                                            <div
-                                                onClick={() => setShowAchievements(true)}
-                                                className="bg-gradient-to-br from-black/60 to-black/40 backdrop-blur-2xl border border-white/10 hover:border-accent/50 rounded-2xl p-6 flex-1 min-w-[240px] shadow-xl hover:shadow-[0_0_30px_rgba(102,192,244,0.15)] transition-all cursor-pointer group flex flex-col justify-between"
-                                            >
-                                                <div className="flex items-start justify-between mb-4">
-                                                    <div>
-                                                        <h4 className="text-[10px] font-black text-white/40 uppercase tracking-widest mb-1 flex items-center gap-1.5">
-                                                            <Trophy size={12} className="text-yellow-400" /> Progress
-                                                        </h4>
-                                                        <div className="text-2xl font-black text-white">
-                                                            {earnedAchievements} <span className="text-white/30 text-lg">/ {achievements.length}</span>
-                                                        </div>
+                                        <div
+                                            onClick={() => achievements.length > 0 && setShowAchievements(true)}
+                                            className={cn(
+                                                "bg-gradient-to-br from-black/60 to-black/40 backdrop-blur-2xl border border-white/10 hover:border-white/20 rounded-2xl p-6 flex-1 min-w-[240px] shadow-xl flex flex-col justify-between transition-all",
+                                                achievements.length > 0 ? "cursor-pointer group hover:shadow-[0_0_30px_rgba(102,192,244,0.15)]" : "opacity-60"
+                                            )}
+                                        >
+                                            <div className="flex items-start justify-between mb-4">
+                                                <div>
+                                                    <h4 className="text-[10px] font-black text-white/40 uppercase tracking-widest mb-1 flex items-center gap-1.5">
+                                                        <Trophy size={12} className="text-yellow-400" /> PROGRESS
+                                                    </h4>
+                                                    <div className="text-3xl mt-1 font-black text-white">
+                                                        {earnedAchievements} <span className="text-white/30 text-xl font-bold">/ {achievements.length || "--"}</span>
                                                     </div>
+                                                </div>
+                                                {achievements.length > 0 && (
                                                     <div className="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-white/30 group-hover:bg-accent/20 group-hover:text-accent transition-colors">
                                                         <ExternalLink size={14} />
                                                     </div>
-                                                </div>
-
-                                                <div>
-                                                    <div className="h-2 w-full bg-white/10 rounded-full overflow-hidden mb-2">
-                                                        <motion.div
-                                                            className="h-full bg-gradient-to-r from-yellow-500 to-yellow-300 rounded-full"
-                                                            initial={{ width: 0 }}
-                                                            animate={{ width: `${achievePct}%` }}
-                                                            transition={{ duration: 0.8, ease: "circOut", delay: 0.2 }}
-                                                        />
-                                                    </div>
-                                                    <p className="text-white/40 text-[10px] font-bold uppercase tracking-wider">{achievePct}% Completed</p>
-                                                </div>
+                                                )}
                                             </div>
-                                        )}
 
-                                        {/* Description Snippet */}
-                                        {activeGame.description && (
-                                            <div
-                                                onClick={() => setShowDescription(true)}
-                                                className="bg-black/40 backdrop-blur-2xl border border-white/10 hover:border-white/25 rounded-2xl p-5 flex-[1.5] relative overflow-hidden cursor-pointer group shadow-xl transition-all"
-                                            >
-                                                <div className="flex items-center gap-2 text-white/40 text-[10px] font-black uppercase tracking-widest mb-3">
-                                                    <Info size={12} /> Summary
+                                            <div>
+                                                <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden mb-2 border border-white/5">
+                                                    <motion.div
+                                                        className="h-full bg-gradient-to-r from-yellow-500 to-yellow-300 rounded-full"
+                                                        initial={{ width: 0 }}
+                                                        animate={{ width: `${achievePct}%` }}
+                                                        transition={{ duration: 0.8, ease: "circOut", delay: 0.2 }}
+                                                    />
                                                 </div>
-                                                <p className="text-white/60 text-xs leading-loose line-clamp-4 group-hover:text-white/80 transition-colors pr-2">
-                                                    {activeGame.description}
-                                                </p>
-                                                <div className="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-black/80 to-transparent" />
+                                                <p className="text-white/40 text-[10px] font-bold uppercase tracking-wider">{achievePct}% Completed</p>
                                             </div>
-                                        )}
+                                        </div>
                                     </div>
                                 </div>
                             </div>
+                            
+                            {/* Game Details & HTML Renderer */}
+                            {activeGame.description && (
+                                <div className="mt-16 pt-12 border-t border-white/[0.08]">
+                                    <h4 className="text-[11px] font-black text-white/40 uppercase tracking-widest mb-8 flex items-center gap-2">
+                                        <Info size={14} className="text-white/60" /> ABOUT THIS GAME
+                                    </h4>
+                                    <div
+                                        className={cn("bg-black/40 backdrop-blur-3xl rounded-3xl p-10 border border-white/[0.08] shadow-2xl", steamHtml)}
+                                        dangerouslySetInnerHTML={{ __html: activeGame.description }}
+                                    />
+                                </div>
+                            )}
+                            
                         </motion.div>
                     )}
                 </AnimatePresence>
@@ -482,36 +508,6 @@ export default function Library() {
 
             {/* ── Modals ── */}
             <AnimatePresence>
-                {/* Description Modal */}
-                {showDescription && activeGame?.description && (
-                    <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-8"
-                        onClick={() => setShowDescription(false)}
-                    >
-                        <motion.div
-                            initial={{ scale: 0.95, y: 12 }}
-                            animate={{ scale: 1, y: 0 }}
-                            exit={{ scale: 0.95, y: 12 }}
-                            className="bg-[#11141d] rounded-[2rem] border border-white/10 p-10 max-w-2xl w-full shadow-[0_30px_100px_rgba(0,0,0,0.8)]"
-                            onClick={(e) => e.stopPropagation()}
-                        >
-                            <div className="flex items-center justify-between mb-6">
-                                <h3 className="text-white font-black text-2xl tracking-tight flex items-center gap-3">
-                                    <Info className="text-accent" /> About {activeGame.title}
-                                </h3>
-                                <button onClick={() => setShowDescription(false)} className="w-10 h-10 bg-white/5 hover:bg-white/10 rounded-full flex items-center justify-center text-white/50 hover:text-white transition-colors">
-                                    <X size={20} />
-                                </button>
-                            </div>
-                            <div className="text-white/70 text-sm leading-loose whitespace-pre-wrap max-h-[60vh] overflow-y-auto custom-scrollbar pr-4">
-                                {activeGame.description}
-                            </div>
-                        </motion.div>
-                    </motion.div>
-                )}
 
                 {/* Achievements Modal */}
                 {showAchievements && activeGame && (

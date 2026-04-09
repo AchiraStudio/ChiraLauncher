@@ -4,9 +4,9 @@ export interface AchievementPayload {
     description: string;
     icon: string | null;
     icon_gray: string | null;
-    xp?: number;
-    global_percent: number | null; // NEW: Triggers Rarity logic
+    global_percent: number | null;
     earned_time: number;
+    xp: number; // For triggering the XP visual on the toast
 }
 
 export interface GameStartPayload {

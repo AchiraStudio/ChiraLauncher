@@ -42,14 +42,55 @@ pub async fn run_db_writer(db_path: PathBuf, mut rx: mpsc::UnboundedReceiver<DbW
             ),
             DbWrite::Game(GameDbWrite::UpdateDetectedAchievementPaths { game_id, metadata, earned_state }) => 
                 queries::update_detected_achievement_paths_conn(&conn, &game_id, metadata, earned_state),
-            DbWrite::Profile(ProfileDbWrite::UnlockAchievement { game_id, api_name, unlock_time }) => conn.execute(
-                "UPDATE achievements SET unlocked = 1, unlock_time = ?1 WHERE game_id = ?2 AND api_name = ?3",
-                rusqlite::params![unlock_time, game_id, api_name],
+            
+            DbWrite::Profile(ProfileDbWrite::UnlockAchievement { game_id, api_name, title, desc, unlock_time }) => conn.execute(
+                "INSERT INTO achievements (game_id, api_name, title, description, unlocked, unlock_time) 
+                 VALUES (?1, ?2, ?3, ?4, 1, ?5) 
+                 ON CONFLICT(game_id, api_name) DO UPDATE SET unlocked = 1, unlock_time = excluded.unlock_time",
+                rusqlite::params![game_id, api_name, title, desc, unlock_time],
+            ),
+            DbWrite::Profile(ProfileDbWrite::SyncEarnedAchievements { game_id, earned }) => {
+                let res: rusqlite::Result<usize> = (|| {
+                    let mut total_new_xp = 0;
+                    let tx = conn.transaction()?;
+                    {
+                        let mut check_stmt = tx.prepare("SELECT unlocked FROM achievements WHERE game_id = ?1 AND api_name = ?2")?;
+                        let mut insert_stmt = tx.prepare("INSERT INTO achievements (game_id, api_name, title, description, unlocked, unlock_time) VALUES (?1, ?2, ?3, ?4, 1, ?5) ON CONFLICT(game_id, api_name) DO UPDATE SET unlocked = 1, unlock_time = excluded.unlock_time")?;
+                        
+                        for ach in earned {
+                            let is_unlocked: Result<i32, _> = check_stmt.query_row(rusqlite::params![&game_id, &ach.api_name], |row| row.get(0));
+                            
+                            if is_unlocked.unwrap_or(0) == 0 {
+                                total_new_xp += ach.xp;
+                                insert_stmt.execute(rusqlite::params![
+                                    &game_id,
+                                    &ach.api_name,
+                                    &ach.title,
+                                    &ach.description,
+                                    &ach.earned_time.to_string()
+                                ])?;
+                            }
+                        }
+                    }
+                    if total_new_xp > 0 {
+                        tx.execute(
+                            "UPDATE profiles SET xp = xp + ?1 WHERE is_default = 1",
+                            rusqlite::params![total_new_xp],
+                        )?;
+                    }
+                    tx.commit()?;
+                    Ok(0)
+                })();
+                res
+            },
+            DbWrite::Profile(ProfileDbWrite::AddXp(amount)) => conn.execute(
+                "UPDATE profiles SET xp = xp + ?1 WHERE is_default = 1",
+                rusqlite::params![amount],
             ),
             DbWrite::Profile(ProfileDbWrite::UpdateProfile(profile)) => conn.execute(
-                "INSERT INTO profiles (id, username, steam_id, avatar_url, is_default) VALUES (?1, ?2, ?3, ?4, ?5) 
+                "INSERT INTO profiles (id, username, steam_id, avatar_url, is_default, xp) VALUES (?1, ?2, ?3, ?4, ?5, ?6) 
                  ON CONFLICT(id) DO UPDATE SET username = excluded.username, steam_id = excluded.steam_id, avatar_url = excluded.avatar_url, is_default = excluded.is_default",
-                rusqlite::params![profile.id, profile.username, profile.steam_id, profile.avatar_url, 1],
+                rusqlite::params![profile.id, profile.username, profile.steam_id, profile.avatar_url, 1, profile.xp],
             ),
             DbWrite::Settings(SettingsDbWrite::UpdateSettings(settings)) => {
                 crate::settings::update_settings(&mut conn, &settings).map(|_| 0)

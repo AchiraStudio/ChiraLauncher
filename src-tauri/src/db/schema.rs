@@ -146,7 +146,6 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
             [],
         )?;
 
-        // Expand games table with RAWG metadata fields
         let _ = tx.execute("ALTER TABLE games ADD COLUMN publisher TEXT", []);
         let _ = tx.execute("ALTER TABLE games ADD COLUMN release_date TEXT", []);
         let _ = tx.execute("ALTER TABLE games ADD COLUMN genres TEXT", []);
@@ -218,7 +217,7 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         tx.commit()?;
     }
 
-    // Migration 13: Extensions (Themes & Plugins)
+    // Migration 13: Extensions
     if current_version < 13 {
         let tx = conn.unchecked_transaction()?;
         tx.execute(
@@ -226,11 +225,11 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
                 version TEXT NOT NULL,
-                kind TEXT NOT NULL, -- 'theme' | 'plugin'
+                kind TEXT NOT NULL,
                 checksum TEXT NOT NULL,
                 enabled INTEGER DEFAULT 0,
                 consent_given INTEGER DEFAULT 0,
-                permissions TEXT -- JSON array of PluginPermission
+                permissions TEXT
             )",
             [],
         )?;
@@ -238,7 +237,7 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         tx.commit()?;
     }
 
-    // Migration 14: Settings - Steam API and Achievement Toggles
+    // Migration 14: Settings - Steam API
     if current_version < 14 {
         crate::settings::init_table(conn)?;
         let tx = conn.unchecked_transaction()?;
@@ -249,16 +248,23 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     // Migration 15: Game Stats columns
     if current_version < 15 {
         let tx = conn.unchecked_transaction()?;
-        let _ = tx.execute("ALTER TABLE games ADD COLUMN session_count INTEGER DEFAULT 0", []);
+        let _ = tx.execute(
+            "ALTER TABLE games ADD COLUMN session_count INTEGER DEFAULT 0",
+            [],
+        );
         let _ = tx.execute("ALTER TABLE games ADD COLUMN first_played TEXT", []);
-        let _ = tx.execute("ALTER TABLE games ADD COLUMN achievements_unlocked INTEGER DEFAULT 0", []);
-        let _ = tx.execute("ALTER TABLE games ADD COLUMN achievements_total INTEGER DEFAULT 0", []);
-        
+        let _ = tx.execute(
+            "ALTER TABLE games ADD COLUMN achievements_unlocked INTEGER DEFAULT 0",
+            [],
+        );
+        let _ = tx.execute(
+            "ALTER TABLE games ADD COLUMN achievements_total INTEGER DEFAULT 0",
+            [],
+        );
         tx.execute("INSERT INTO schema_migrations (version) VALUES (15)", [])?;
         tx.commit()?;
     }
 
-    // Migration 16: Settings - Achievement Scan Roots
     if current_version < 16 {
         crate::settings::init_table(conn)?;
         let tx = conn.unchecked_transaction()?;
@@ -266,16 +272,16 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         tx.commit()?;
     }
 
-    // Migration 17: Manual Achievement Path
     if current_version < 17 {
         let tx = conn.unchecked_transaction()?;
-        let _ = tx.execute("ALTER TABLE games ADD COLUMN manual_achievement_path TEXT", []);
+        let _ = tx.execute(
+            "ALTER TABLE games ADD COLUMN manual_achievement_path TEXT",
+            [],
+        );
         tx.execute("INSERT INTO schema_migrations (version) VALUES (17)", [])?;
         tx.commit()?;
     }
 
-    // Migration 18: Playtime orphans — preserve playtime when a game is deleted
-    // so re-adding the same game by steam_app_id or title restores its history.
     if current_version < 18 {
         let tx = conn.unchecked_transaction()?;
         tx.execute(
@@ -294,16 +300,17 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         tx.commit()?;
     }
 
-    // Migration 19: Add achievement counts to playtime_orphans
     if current_version < 19 {
         let tx = conn.unchecked_transaction()?;
         let _ = tx.execute("ALTER TABLE playtime_orphans ADD COLUMN achievements_unlocked INTEGER NOT NULL DEFAULT 0", []);
-        let _ = tx.execute("ALTER TABLE playtime_orphans ADD COLUMN achievements_total INTEGER NOT NULL DEFAULT 0", []);
+        let _ = tx.execute(
+            "ALTER TABLE playtime_orphans ADD COLUMN achievements_total INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
         tx.execute("INSERT INTO schema_migrations (version) VALUES (19)", [])?;
         tx.commit()?;
     }
 
-    // Migration 20: Crack detection fields (crack_type, app_id)
     if current_version < 20 {
         let tx = conn.unchecked_transaction()?;
         let _ = tx.execute("ALTER TABLE games ADD COLUMN crack_type TEXT", []);
@@ -312,12 +319,28 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         tx.commit()?;
     }
 
-    // Migration 21: Persistent detected achievement paths
     if current_version < 21 {
         let tx = conn.unchecked_transaction()?;
-        let _ = tx.execute("ALTER TABLE games ADD COLUMN detected_metadata_path TEXT", []);
-        let _ = tx.execute("ALTER TABLE games ADD COLUMN detected_earned_state_path TEXT", []);
+        let _ = tx.execute(
+            "ALTER TABLE games ADD COLUMN detected_metadata_path TEXT",
+            [],
+        );
+        let _ = tx.execute(
+            "ALTER TABLE games ADD COLUMN detected_earned_state_path TEXT",
+            [],
+        );
         tx.execute("INSERT INTO schema_migrations (version) VALUES (21)", [])?;
+        tx.commit()?;
+    }
+
+    // Migration 22: Add XP tracking to User Profile
+    if current_version < 22 {
+        let tx = conn.unchecked_transaction()?;
+        let _ = tx.execute(
+            "ALTER TABLE profiles ADD COLUMN xp INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
+        tx.execute("INSERT INTO schema_migrations (version) VALUES (22)", [])?;
         tx.commit()?;
     }
 

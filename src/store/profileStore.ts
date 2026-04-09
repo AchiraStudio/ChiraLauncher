@@ -1,11 +1,14 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import type { AchievementPayload } from "../components/overlay/overlay-types";
 
 export interface UserProfile {
     id: string;
     username: string;
     steam_id: string | null;
     avatar_url: string | null;
+    xp: number; // NEW
 }
 
 interface ProfileState {
@@ -43,3 +46,16 @@ export const useProfileStore = create<ProfileState>((set) => ({
         }
     },
 }));
+
+// Real-time synchronization
+if (window.__TAURI_INTERNALS__) {
+    listen<AchievementPayload>('achievement-unlocked', (event) => {
+        useProfileStore.setState((state) => {
+            if (state.profile) {
+                // Instantly sync the XP gained from the popup into our store
+                return { profile: { ...state.profile, xp: state.profile.xp + (event.payload.xp || 0) } };
+            }
+            return state;
+        });
+    });
+}

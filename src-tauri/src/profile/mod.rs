@@ -1,7 +1,7 @@
 use crate::state::{AppState, DbWrite, ProfileDbWrite, UserProfile};
+use anyhow::Result;
 use tauri::{command, State};
 use uuid::Uuid;
-use anyhow::Result;
 
 #[command]
 pub async fn get_profile(state: State<'_, AppState>) -> Result<Option<UserProfile>, String> {
@@ -9,7 +9,7 @@ pub async fn get_profile(state: State<'_, AppState>) -> Result<Option<UserProfil
     let conn = pool.get().map_err(|e| e.to_string())?;
 
     let mut stmt = conn
-        .prepare("SELECT id, username, steam_id, avatar_url FROM profiles WHERE is_default = 1 LIMIT 1")
+        .prepare("SELECT id, username, steam_id, avatar_url, xp FROM profiles WHERE is_default = 1 LIMIT 1")
         .map_err(|e| e.to_string())?;
 
     let profile = stmt.query_row([], |row| {
@@ -18,6 +18,7 @@ pub async fn get_profile(state: State<'_, AppState>) -> Result<Option<UserProfil
             username: row.get(1)?,
             steam_id: row.get(2)?,
             avatar_url: row.get(3)?,
+            xp: row.get(4).unwrap_or(0),
         })
     });
 
@@ -35,20 +36,17 @@ pub async fn update_profile(
     steam_id: Option<String>,
     avatar_url: Option<String>,
 ) -> Result<UserProfile, String> {
-    // Get existing profile or create new ID
+    // Get existing profile or create new ID, preserving XP
     let existing = get_profile(state.clone()).await?;
-    
-    let id = match existing {
-        Some(p) => p.id,
-        None => Uuid::new_v4().to_string(),
+
+    let (id, current_xp) = match existing {
+        Some(p) => (p.id, p.xp),
+        None => (Uuid::new_v4().to_string(), 0),
     };
 
-    // Auto-generate Steam ID if missing
     let final_steam_id = match steam_id {
         Some(sid) if !sid.trim().is_empty() => Some(sid),
         _ => {
-            // Generate a fake but valid-format Steam ID (17 digits starting with 7656119)
-            // 7656119 followed by 10 random digits
             use rand::Rng;
             let mut rng = rand::thread_rng();
             let suffix: u64 = rng.gen_range(1000000000..9999999999);
@@ -61,10 +59,14 @@ pub async fn update_profile(
         username,
         steam_id: final_steam_id,
         avatar_url,
+        xp: current_xp,
     };
 
-    state.db_tx
-        .send(DbWrite::Profile(ProfileDbWrite::UpdateProfile(profile.clone())))
+    state
+        .db_tx
+        .send(DbWrite::Profile(ProfileDbWrite::UpdateProfile(
+            profile.clone(),
+        )))
         .map_err(|e| e.to_string())?;
 
     Ok(profile)

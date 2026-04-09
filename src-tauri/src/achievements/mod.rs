@@ -1,21 +1,31 @@
 pub mod cache;
 pub mod fetcher;
 
+use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use base64::{Engine as _, engine::general_purpose};
 
 pub use crate::commands::scanner::{CrackType, EmulatorInfo};
 
 // ── Shared location constants ────────────────────────────────────────────────
 
 pub const PUBLIC_EMU_DIRS: &[&str] = &[
-    "CODEX", "RLD!", "Skidrow", "PLAZA", "CPY", "FLT", "DARKSiDERS",
+    "CODEX",
+    "RLD!",
+    "Skidrow",
+    "PLAZA",
+    "CPY",
+    "FLT",
+    "DARKSiDERS",
 ];
-pub const GOLDBERG_APPDATA_DIRS: &[&str] =
-    &["Goldberg SteamEmu Saves", "GSE Saves", "steam_settings", "Goldberg SteamEmu"];
+pub const GOLDBERG_APPDATA_DIRS: &[&str] = &[
+    "Goldberg SteamEmu Saves",
+    "GSE Saves",
+    "steam_settings",
+    "Goldberg SteamEmu",
+];
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -30,6 +40,8 @@ pub struct Achievement {
     pub icon_path: Option<String>,
     pub icon_gray_path: Option<String>,
     pub global_percent: Option<f32>,
+    #[serde(default)]
+    pub xp: u64, // NEW
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -49,9 +61,6 @@ pub struct AchievementDef {
     pub global_percent: Option<f32>,
 }
 
-
-
-/// The result of the discovery phase.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AchievementDiscovery {
     pub emulator: EmulatorInfo,
@@ -60,7 +69,6 @@ pub struct AchievementDiscovery {
     pub probe_log: Vec<String>,
 }
 
-/// Options for `sync_achievements`.
 #[derive(Debug, Default)]
 pub struct SyncOptions<'a> {
     pub crack_type: Option<CrackType>,
@@ -71,9 +79,27 @@ pub struct SyncOptions<'a> {
     pub db_tx: Option<&'a crate::state::DbWriteSender>,
 }
 
+// ── XP Calculation ────────────────────────────────────────────────────────────
+pub fn calculate_xp(pct: Option<f32>) -> u64 {
+    if let Some(p) = pct {
+        if p <= 5.0 {
+            200
+        } else if p <= 10.0 {
+            100
+        } else if p <= 25.0 {
+            50
+        } else if p <= 50.0 {
+            20
+        } else {
+            10
+        }
+    } else {
+        15 // Default offline fallback
+    }
+}
+
 // ── Phase 1: Discovery ────────────────────────────────────────────────────────
 
-/// Run the full discovery pipeline for a game.
 pub fn discover_achievements(
     install_dir: &Path,
     db_app_id: Option<&str>,
@@ -82,12 +108,18 @@ pub fn discover_achievements(
     let mut probe_log = Vec::new();
     probe_log.push(format!("Starting discovery in: {}", install_dir.display()));
 
-    // 1. Detect Emulator & App ID
     let (crack_type, app_id_detected) = crate::commands::scanner::detect_crack(install_dir);
-    let app_id = opts.known_app_id
+    let app_id = opts
+        .known_app_id
         .map(|s| s.to_string())
         .filter(|s| !s.is_empty())
-        .or_else(|| if !app_id_detected.is_empty() { Some(app_id_detected) } else { None })
+        .or_else(|| {
+            if !app_id_detected.is_empty() {
+                Some(app_id_detected)
+            } else {
+                None
+            }
+        })
         .or_else(|| db_app_id.map(|s| s.to_string()));
 
     let emu_info = EmulatorInfo {
@@ -96,19 +128,25 @@ pub fn discover_achievements(
         install_dir: install_dir.to_string_lossy().to_string(),
     };
 
-    probe_log.push(format!("Emulator: {:?}, App ID: {}", emu_info.crack_type, emu_info.app_id));
+    probe_log.push(format!(
+        "Emulator: {:?}, App ID: {}",
+        emu_info.crack_type, emu_info.app_id
+    ));
 
-    // 2. Discover Metadata (achievements.json)
-    let meta_path = find_metadata_path(install_dir, app_id.as_deref(), opts.manual_path, &mut probe_log);
+    let meta_path = find_metadata_path(
+        install_dir,
+        app_id.as_deref(),
+        opts.manual_path,
+        &mut probe_log,
+    );
 
-    // 3. Discover Save Path (.ini, .json, .xml)
     let save_path = find_save_path(
         app_id.as_deref(),
         install_dir,
         opts.manual_path,
         opts.scan_roots,
         Some(&emu_info.crack_type),
-        &mut probe_log
+        &mut probe_log,
     );
 
     AchievementDiscovery {
@@ -121,7 +159,11 @@ pub fn discover_achievements(
 
 pub fn resolve_app_id(install_dir: &Path) -> Option<String> {
     let (_, app_id) = crate::commands::scanner::detect_crack(install_dir);
-    if app_id.is_empty() { None } else { Some(app_id) }
+    if app_id.is_empty() {
+        None
+    } else {
+        Some(app_id)
+    }
 }
 
 pub fn resolve_save_path(
@@ -165,7 +207,7 @@ fn find_metadata_path(
     if let Some(manual) = manual_path.filter(|p| !p.is_empty()) {
         let p = Path::new(manual);
         if p.is_file() {
-            candidates.push(p.to_path_buf()); // Accept exact file
+            candidates.push(p.to_path_buf());
         } else {
             candidates.push(p.join("achievements.json"));
         }
@@ -173,25 +215,45 @@ fn find_metadata_path(
 
     candidates.extend(vec![
         base.join("steam_settings").join("achievements.json"),
-        base.join("OfflineStorage").join("User").join("remote").join("achievements.json"),
+        base.join("OfflineStorage")
+            .join("User")
+            .join("remote")
+            .join("achievements.json"),
         base.join("achievements.json"),
-        base.join("steam_settings").join("user_stats").join("achievements.json"),
+        base.join("steam_settings")
+            .join("user_stats")
+            .join("achievements.json"),
     ]);
 
     if let Some(id) = app_id {
         if let Some(local) = std::env::var_os("LOCALAPPDATA") {
-            candidates.push(PathBuf::from(&local).join("anadius").join("LSX emu").join(id).join("achievements.json"));
+            candidates.push(
+                PathBuf::from(&local)
+                    .join("anadius")
+                    .join("LSX emu")
+                    .join(id)
+                    .join("achievements.json"),
+            );
         }
         for var in &["APPDATA", "LOCALAPPDATA"] {
             if let Some(appdata) = std::env::var_os(var) {
                 for sub in GOLDBERG_APPDATA_DIRS {
-                    candidates.push(PathBuf::from(&appdata).join(sub).join(id).join("achievements.json"));
+                    candidates.push(
+                        PathBuf::from(&appdata)
+                            .join(sub)
+                            .join(id)
+                            .join("achievements.json"),
+                    );
                 }
             }
         }
         if let Some(sys_drive) = std::env::var_os("SystemDrive") {
             let drive_root = PathBuf::from(&sys_drive);
-            let drive_root = if drive_root.to_string_lossy().ends_with('\\') { drive_root } else { PathBuf::from(format!(r"{}\", sys_drive.to_string_lossy())) };
+            let drive_root = if drive_root.to_string_lossy().ends_with('\\') {
+                drive_root
+            } else {
+                PathBuf::from(format!(r"{}\", sys_drive.to_string_lossy()))
+            };
             let public_paths = [
                 drive_root.join("Users\\Public\\Documents\\Steam"),
                 drive_root.join("Users\\Public\\Documents\\Steam\\CODEX"),
@@ -203,7 +265,12 @@ fn find_metadata_path(
                     candidates.push(dir.join("steam_settings").join("achievements.json"));
                 }
                 candidates.push(public.join(id).join("achievements.json"));
-                candidates.push(public.join(id).join("steam_settings").join("achievements.json"));
+                candidates.push(
+                    public
+                        .join(id)
+                        .join("steam_settings")
+                        .join("achievements.json"),
+                );
             }
         }
     }
@@ -231,7 +298,7 @@ fn find_save_path(
     if let Some(manual) = manual_path.filter(|p| !p.is_empty()) {
         let p = Path::new(manual);
         if p.is_file() {
-            candidates.push(p.to_path_buf()); // Accept exact file
+            candidates.push(p.to_path_buf());
         } else {
             candidates.push(p.join("achievements.ini"));
             candidates.push(p.join("achievements.json"));
@@ -261,8 +328,14 @@ fn find_save_path(
                     if let Ok(entries) = fs::read_dir(&dir) {
                         for entry in entries.flatten() {
                             let p = entry.path();
-                            let name = p.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
-                            if name.starts_with("achievement-") && name.contains(id) && name.ends_with(".xml") {
+                            let name = p
+                                .file_name()
+                                .map(|n| n.to_string_lossy().to_lowercase())
+                                .unwrap_or_default();
+                            if name.starts_with("achievement-")
+                                && name.contains(id)
+                                && name.ends_with(".xml")
+                            {
                                 candidates.push(p);
                             }
                         }
@@ -274,7 +347,11 @@ fn find_save_path(
         if is_codex || try_all {
             if let Some(sys_drive) = std::env::var_os("SystemDrive") {
                 let drive_root = PathBuf::from(&sys_drive);
-                let drive_root = if drive_root.to_string_lossy().ends_with('\\') { drive_root } else { PathBuf::from(format!(r"{}\", sys_drive.to_string_lossy())) };
+                let drive_root = if drive_root.to_string_lossy().ends_with('\\') {
+                    drive_root
+                } else {
+                    PathBuf::from(format!(r"{}\", sys_drive.to_string_lossy()))
+                };
                 let public_paths = [
                     drive_root.join("Users\\Public\\Documents\\Steam"),
                     drive_root.join("Users\\Public\\Documents\\Steam\\CODEX"),
@@ -326,7 +403,12 @@ fn find_save_path(
         }
     }
 
-    candidates.push(game_dir.join("steam_settings").join("user_stats").join("achievements.json"));
+    candidates.push(
+        game_dir
+            .join("steam_settings")
+            .join("user_stats")
+            .join("achievements.json"),
+    );
     candidates.push(game_dir.join("steam_settings").join("achievements.ini"));
     candidates.push(game_dir.join("steam_settings").join("achievements.json"));
     candidates.push(game_dir.join("achievements.ini"));
@@ -334,30 +416,30 @@ fn find_save_path(
     candidates.push(game_dir.join("achievement.ini"));
 
     for p in candidates {
-        if !p.exists() { continue; }
+        if !p.exists() {
+            continue;
+        }
         match p.extension().and_then(|e| e.to_str()) {
             Some("ini") => {
                 log.push(format!("Found save file (INI) at: {}", p.display()));
                 return Some(p);
-            },
+            }
             Some("xml") => {
                 log.push(format!("Found save file (XML) at: {}", p.display()));
                 return Some(p);
-            },
+            }
             Some("json") => {
                 if looks_like_save_state(&p) {
                     log.push(format!("Found save file (JSON) at: {}", p.display()));
                     return Some(p);
                 }
-            },
+            }
             _ => {}
         }
     }
     log.push("No save file discovered.".to_string());
     None
 }
-
-// ── Phase 2: Metadata Discovery (Helper) ───────────────────────────────────────
 
 pub fn looks_like_metadata(path: &Path) -> bool {
     fs::read_to_string(path)
@@ -378,15 +460,15 @@ pub fn looks_like_save_state(path: &Path) -> bool {
         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
         .map(|v| {
             if let Some(arr) = v.as_array() {
-                arr.first().map_or(false, |e| e.get("achieved").is_some() || e.get("earned").is_some())
+                arr.first().map_or(false, |e| {
+                    e.get("achieved").is_some() || e.get("earned").is_some()
+                })
             } else {
                 v.is_object()
             }
         })
         .unwrap_or(false)
 }
-
-// ── Phase 3: Earned State Parsing (Helper) ─────────────────────────────────────
 
 pub fn load_earned_map(save_path: &Path) -> HashMap<String, u64> {
     match save_path.extension().and_then(|e| e.to_str()) {
@@ -397,22 +479,28 @@ pub fn load_earned_map(save_path: &Path) -> HashMap<String, u64> {
     }
 }
 
-// ── Phase 4: Icon resolution ───────────────────────────────────────────────────
-
 fn resolve_icon(base: &Path, relative: &str) -> Option<String> {
-    if relative.is_empty() { return None; }
+    if relative.is_empty() {
+        return None;
+    }
     let mut full = base.join(relative);
     if !full.exists() {
         let alt = base.join("steam_settings").join(relative);
-        if alt.exists() { full = alt; } else { return None; }
+        if alt.exists() {
+            full = alt;
+        } else {
+            return None;
+        }
     }
     let bytes = fs::read(&full).ok()?;
     let b64 = general_purpose::STANDARD.encode(&bytes);
-    let mime = if relative.to_lowercase().ends_with(".png") { "image/png" } else { "image/jpeg" };
+    let mime = if relative.to_lowercase().ends_with(".png") {
+        "image/png"
+    } else {
+        "image/jpeg"
+    };
     Some(format!("data:{};base64,{}", mime, b64))
 }
-
-// ── Phase 5: Build Result List ───────────────────────────────────────────────
 
 fn build_list(
     defs: Vec<AchievementDef>,
@@ -423,14 +511,23 @@ fn build_list(
     defs.into_iter()
         .map(|def| {
             let earned_time = if is_anadius {
-                let display = if def.display_name.is_empty() { &def.name } else { &def.display_name };
+                let display = if def.display_name.is_empty() {
+                    &def.name
+                } else {
+                    &def.display_name
+                };
                 earned_map.get(display.as_str()).copied()
             } else {
                 earned_map.get(&def.name).copied()
             };
+            let xp = calculate_xp(def.global_percent);
             Achievement {
                 api_name: def.name.clone(),
-                display_name: if def.display_name.is_empty() { def.name.clone() } else { def.display_name },
+                display_name: if def.display_name.is_empty() {
+                    def.name.clone()
+                } else {
+                    def.display_name
+                },
                 description: def.description,
                 hidden: def.hidden == 1,
                 earned: earned_time.is_some(),
@@ -438,12 +535,11 @@ fn build_list(
                 icon_path: resolve_icon(icon_base, &def.icon),
                 icon_gray_path: resolve_icon(icon_base, &def.icon_gray),
                 global_percent: def.global_percent,
+                xp,
             }
         })
         .collect()
 }
-
-// ── Shared Functionality & Main Sync ─────────────────────────────────────────
 
 pub async fn try_auto_generate(
     app_id: &str,
@@ -451,27 +547,34 @@ pub async fn try_auto_generate(
     crack_type: Option<&CrackType>,
     steam_api_key: Option<&str>,
 ) -> bool {
-    let Some(key) = steam_api_key.filter(|k| !k.is_empty()) else { return false; };
-    
-    // Use the discovery logic to find where to put the generated file
+    let Some(key) = steam_api_key.filter(|k| !k.is_empty()) else {
+        return false;
+    };
+
     let _log: Vec<String> = Vec::new();
     let save_dir = find_save_dir(app_id, game_dir, crack_type);
-    
+
     let Some(dest_dir) = save_dir else {
         log::info!("[AutoGen] No existing save dir for app_id={}", app_id);
         return false;
     };
 
-    if dest_dir.join("achievements.json").exists() { return false; }
+    if dest_dir.join("achievements.json").exists() {
+        return false;
+    }
 
-    log::info!("[AutoGen] Generating for app_id={} → {}", app_id, dest_dir.display());
+    log::info!(
+        "[AutoGen] Generating for app_id={} → {}",
+        app_id,
+        dest_dir.display()
+    );
 
     match crate::achievement_watcher::generate_achievements_json(key, app_id, &dest_dir).await {
         Ok(true) => {
             log::info!("[AutoGen] Done for app_id={}", app_id);
             true
         }
-        _ => false
+        _ => false,
     }
 }
 
@@ -482,8 +585,13 @@ pub fn find_save_dir(
 ) -> Option<PathBuf> {
     if matches!(crack_type, Some(CrackType::Anadius)) {
         if let Some(local) = std::env::var_os("LOCALAPPDATA") {
-            let dir = PathBuf::from(&local).join("anadius").join("LSX emu").join(app_id);
-            if dir.exists() { return Some(dir); }
+            let dir = PathBuf::from(&local)
+                .join("anadius")
+                .join("LSX emu")
+                .join(app_id);
+            if dir.exists() {
+                return Some(dir);
+            }
         }
     }
     if matches!(crack_type, Some(CrackType::Goldberg)) {
@@ -491,22 +599,32 @@ pub fn find_save_dir(
             if let Some(appdata) = std::env::var_os(var) {
                 for sub in GOLDBERG_APPDATA_DIRS {
                     let dir = PathBuf::from(&appdata).join(sub).join(app_id);
-                    if dir.exists() { return Some(dir); }
+                    if dir.exists() {
+                        return Some(dir);
+                    }
                 }
             }
         }
     }
     if let Some(sys_drive) = std::env::var_os("SystemDrive") {
         let drive_root = PathBuf::from(&sys_drive);
-        let drive_root = if drive_root.to_string_lossy().ends_with('\\') { drive_root } else { PathBuf::from(format!(r"{}\", sys_drive.to_string_lossy())) };
+        let drive_root = if drive_root.to_string_lossy().ends_with('\\') {
+            drive_root
+        } else {
+            PathBuf::from(format!(r"{}\", sys_drive.to_string_lossy()))
+        };
         let public = drive_root.join("Users\\Public\\Documents\\Steam");
         for sub in PUBLIC_EMU_DIRS {
             let dir = public.join(sub).join(app_id);
-            if dir.exists() { return Some(dir); }
+            if dir.exists() {
+                return Some(dir);
+            }
         }
     }
     let local = game_dir.join("steam_settings");
-    if local.exists() { return Some(local); }
+    if local.exists() {
+        return Some(local);
+    }
     None
 }
 
@@ -521,59 +639,97 @@ pub fn sync_achievements(
 
     let is_anadius = matches!(discovery.emulator.crack_type, CrackType::Anadius);
 
-    // 1. Load definitions
-    let defs: Vec<AchievementDef> = discovery.metadata_path.as_ref()
+    let defs: Vec<AchievementDef> = discovery
+        .metadata_path
+        .as_ref()
         .and_then(|p| fs::read_to_string(p).ok())
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
 
-    let icon_base = discovery.metadata_path.as_ref()
+    let icon_base = discovery
+        .metadata_path
+        .as_ref()
         .and_then(|p| p.parent())
         .unwrap_or(base);
 
-    // 2. Load earned state
-    let earned_map = discovery.save_path.as_deref()
+    let earned_map = discovery
+        .save_path
+        .as_deref()
         .map(load_earned_map)
         .unwrap_or_default();
 
-    // 3. Persist discovered paths
     if let Some(tx) = opts.db_tx {
         if discovery.metadata_path.is_some() || discovery.save_path.is_some() {
             use crate::state::{DbWrite, GameDbWrite};
             let _ = tx.send(DbWrite::Game(GameDbWrite::UpdateDetectedAchievementPaths {
                 game_id: game_id.to_string(),
-                metadata: discovery.metadata_path.as_ref().map(|p| p.to_string_lossy().to_string()),
-                earned_state: discovery.save_path.as_ref().map(|p| p.to_string_lossy().to_string()),
+                metadata: discovery
+                    .metadata_path
+                    .as_ref()
+                    .map(|p| p.to_string_lossy().to_string()),
+                earned_state: discovery
+                    .save_path
+                    .as_ref()
+                    .map(|p| p.to_string_lossy().to_string()),
             }));
         }
     }
 
-    // 4. Construct final list
     let mut list = if !defs.is_empty() {
         build_list(defs, &earned_map, icon_base, is_anadius)
     } else if !earned_map.is_empty() {
-        earned_map.iter().map(|(name, &ts)| Achievement {
-            api_name: name.clone(),
-            display_name: name.replace('_', " ").trim().to_string(),
-            description: String::new(),
-            hidden: false,
-            earned: true,
-            earned_time: Some(ts),
-            icon_path: None,
-            icon_gray_path: None,
-            global_percent: None,
-        }).collect()
+        earned_map
+            .iter()
+            .map(|(name, &ts)| Achievement {
+                api_name: name.clone(),
+                display_name: name.replace('_', " ").trim().to_string(),
+                description: String::new(),
+                hidden: false,
+                earned: true,
+                earned_time: Some(ts),
+                icon_path: None,
+                icon_gray_path: None,
+                global_percent: None,
+                xp: calculate_xp(None),
+            })
+            .collect()
     } else {
         vec![]
     };
 
-    // 5. Cache & return
+    // ── FIRE OFF RETROACTIVE XP SYNC ──
+    if let Some(tx) = opts.db_tx {
+        let earned_sync: Vec<crate::state::AchSync> = list
+            .iter()
+            .filter(|a| a.earned)
+            .map(|a| crate::state::AchSync {
+                api_name: a.api_name.clone(),
+                title: a.display_name.clone(),
+                description: a.description.clone(),
+                earned_time: a.earned_time.unwrap_or(0),
+                xp: a.xp,
+            })
+            .collect();
+
+        if !earned_sync.is_empty() {
+            let _ = tx.send(crate::state::DbWrite::Profile(
+                crate::state::ProfileDbWrite::SyncEarnedAchievements {
+                    game_id: game_id.to_string(),
+                    earned: earned_sync,
+                },
+            ));
+        }
+    }
+
     if !list.is_empty() {
-        // Merge with existing cache for metadata if available
         if let Some(cached) = cache::load_cache(game_id) {
             for c in cached {
                 if !list.iter().any(|a| a.api_name == c.api_name) {
-                    list.push(Achievement { earned: false, earned_time: None, ..c });
+                    list.push(Achievement {
+                        earned: false,
+                        earned_time: None,
+                        ..c
+                    });
                 }
             }
         }

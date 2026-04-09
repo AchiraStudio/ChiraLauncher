@@ -10,8 +10,6 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::achievements::{GOLDBERG_APPDATA_DIRS, PUBLIC_EMU_DIRS};
 use crate::commands::scanner::CrackType;
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AchievementUnlockedPayload {
     pub api_name: String,
@@ -21,6 +19,7 @@ pub struct AchievementUnlockedPayload {
     pub icon_gray: Option<String>,
     pub earned_time: u64,
     pub global_percent: Option<f32>,
+    pub xp: u64,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -65,8 +64,6 @@ impl Default for ActiveWatchers {
         Self(Mutex::new(HashMap::new()))
     }
 }
-
-// ── Anadius XML helpers ───────────────────────────────────────────────────────
 
 pub fn anadius_save_dir(content_id: &str) -> Option<PathBuf> {
     let local = std::env::var_os("LOCALAPPDATA")?;
@@ -166,8 +163,6 @@ fn parse_iso8601(s: &str) -> Option<u64> {
     }
 }
 
-// ── Steam API auto-generation ─────────────────────────────────────────────────
-
 #[derive(Debug, Deserialize)]
 struct SteamSchemaResponse {
     game: SteamSchemaGame,
@@ -252,7 +247,6 @@ pub async fn generate_achievements_json(
         .build()
         .map_err(|e| e.to_string())?;
 
-    // 1. Fetch Schema
     let resp: SteamSchemaResponse = client
         .get(&url)
         .send()
@@ -268,7 +262,6 @@ pub async fn generate_achievements_json(
         .ok_or_else(|| format!("No achievements on Steam for app_id={}", app_id))?
         .achievements;
 
-    // 2. Fetch Global Percentages
     let mut pct_map: HashMap<String, f32> = HashMap::new();
     if let Ok(pct_res) = client.get(&global_pct_url).send().await {
         if let Ok(pct_json) = pct_res.json::<serde_json::Value>().await {
@@ -294,7 +287,6 @@ pub async fn generate_achievements_json(
         }
     }
 
-    // 3. Merge and Build
     let mut generated: Vec<GenAchievement> = Vec::new();
     for ach in steam_achs {
         let icon_url = ach.icon.unwrap_or_default();
@@ -347,8 +339,6 @@ pub async fn generate_achievements_json(
     );
     Ok(true)
 }
-
-// ── Metadata loading ──────────────────────────────────────────────────────────
 
 fn load_meta(
     game_dir: &Path,
@@ -426,8 +416,6 @@ fn build_display_map(meta: &HashMap<String, AchievementMeta>) -> HashMap<String,
         .map(|m| (m.display_name.to_lowercase(), m.name.clone()))
         .collect()
 }
-
-// ── Earned readers ────────────────────────────────────────────────────────────
 
 pub fn read_goldberg_earned(path: &Path) -> HashMap<String, u64> {
     let mut unlocked = HashMap::new();
@@ -583,8 +571,6 @@ fn read_candidate_earned(cand: &AchievementCandidate) -> HashMap<String, u64> {
     }
 }
 
-// ── Payload builders ──────────────────────────────────────────────────────────
-
 fn resolve_icon(icon_base: &Path, relative: &str) -> Option<String> {
     if relative.is_empty() {
         return None;
@@ -646,6 +632,7 @@ fn payload_api(
         icon_gray,
         earned_time,
         global_percent,
+        xp: crate::achievements::calculate_xp(global_percent),
     }
 }
 
@@ -686,6 +673,7 @@ fn payload_display(
         icon_gray,
         earned_time,
         global_percent,
+        xp: crate::achievements::calculate_xp(global_percent),
     }
 }
 
@@ -697,8 +685,6 @@ fn fire_overlay(app: &AppHandle, payload: &AchievementUnlockedPayload) {
     let _ = app.emit("achievement-unlocked", payload);
 }
 
-// ── Background Probing Loop ───────────────────────────────────────────────────
-
 fn find_active_candidate(
     app_id: &str,
     game_dir: &Path,
@@ -706,14 +692,12 @@ fn find_active_candidate(
     manual_path: Option<&str>,
     crack_type: Option<&CrackType>,
 ) -> Option<AchievementCandidate> {
-    // 1. Manual Path
     if let Some(manual) = manual_path.filter(|p| !p.is_empty()) {
         if let Some(c) = probe_dir(Path::new(manual)) {
             return Some(c);
         }
     }
 
-    // 2. Anadius Specific Search
     if matches!(crack_type, Some(CrackType::Anadius)) {
         if !app_id.is_empty() {
             if let Some(dir) = anadius_save_dir(app_id) {
@@ -727,7 +711,6 @@ fn find_active_candidate(
         }
     }
 
-    // 3. SteamEmu Public Documents
     if !matches!(crack_type, Some(CrackType::Goldberg)) {
         if let Some(sys_drive) = std::env::var_os("SystemDrive") {
             let public = PathBuf::from(&sys_drive).join("Users\\Public\\Documents\\Steam");
@@ -744,7 +727,6 @@ fn find_active_candidate(
         }
     }
 
-    // 4. Goldberg AppData Search
     if !matches!(crack_type, Some(CrackType::Codex)) {
         for var in &["APPDATA", "LOCALAPPDATA"] {
             if let Some(appdata) = std::env::var_os(var) {
@@ -764,7 +746,6 @@ fn find_active_candidate(
         }
     }
 
-    // 5. Game Directory Root
     probe_dir(game_dir)
 }
 
@@ -772,7 +753,6 @@ fn probe_dir(dir: &Path) -> Option<AchievementCandidate> {
     if !dir.exists() {
         return None;
     }
-    // If the path is a direct file, probe it
     if dir.is_file() {
         match dir.extension().and_then(|s| s.to_str()) {
             Some("ini") => {
@@ -842,8 +822,6 @@ fn emulator_label(path: &Path) -> String {
     .to_string()
 }
 
-// ── Watcher Entry Point ───────────────────────────────────────────────────────
-
 pub fn start_watching_for_game(
     app: AppHandle,
     game_id: String,
@@ -864,6 +842,8 @@ pub fn start_watching_for_game(
     let sf = stop_flag.clone();
     let is_anadius = matches!(crack_type, Some(CrackType::Anadius));
 
+    let db_tx = app.state::<crate::state::AppState>().db_tx.clone();
+
     tauri::async_runtime::spawn(async move {
         let mut active_cand: Option<AchievementCandidate> = None;
         let mut seen: HashSet<String> = HashSet::new();
@@ -871,9 +851,7 @@ pub fn start_watching_for_game(
         let mut meta_path = PathBuf::new();
         let mut display_map: HashMap<String, String> = HashMap::new();
 
-        // Run the loop while the game process is tracked as running
         while !sf.load(Ordering::Relaxed) {
-            // 1. Probe for metadata file if we haven't found it yet
             if meta.is_empty() {
                 let (m, p) = load_meta(
                     &game_path,
@@ -891,7 +869,6 @@ pub fn start_watching_for_game(
                 }
             }
 
-            // 2. Probe for the achievement save file (ini/json/xml)
             if active_cand.is_none() {
                 let cand = find_active_candidate(
                     &app_id,
@@ -923,9 +900,7 @@ pub fn start_watching_for_game(
                 }
             }
 
-            // 3. If we have a file, read its state and fire the overlay for any diffs
             if let Some(ref cand) = active_cand {
-                // If the file was deleted mid-game, reset so we start probing again
                 if !cand.path.exists() {
                     log::warn!("[Prober] Save file was deleted mid-session. Resuming probe...");
                     active_cand = None;
@@ -936,7 +911,7 @@ pub fn start_watching_for_game(
                         .iter()
                         .filter(|(k, _)| !seen.contains(*k))
                         .map(|(k, t)| (k.clone(), *t))
-                        .take(8) // limit burst to 8 at a time
+                        .take(8)
                         .collect();
 
                     for (name, t) in new_unlocks {
@@ -945,18 +920,32 @@ pub fn start_watching_for_game(
                         } else {
                             payload_api(&name, &meta, &meta_path, t)
                         };
+
                         fire_overlay(&app, &p);
-                        log::info!("[Prober] Unlock detected: {}", name);
+
+                        let _ = db_tx.send(crate::state::DbWrite::Profile(
+                            crate::state::ProfileDbWrite::UnlockAchievement {
+                                game_id: game_id.clone(),
+                                api_name: p.api_name.clone(),
+                                title: p.display_name.clone(),
+                                desc: p.description.clone(),
+                                unlock_time: p.earned_time.to_string(),
+                            },
+                        ));
+
+                        let _ = db_tx.send(crate::state::DbWrite::Profile(
+                            crate::state::ProfileDbWrite::AddXp(p.xp),
+                        ));
+
+                        log::info!("[Prober] Unlock detected: {} (+{} XP)", name, p.xp);
                         seen.insert(name.clone());
                     }
 
-                    // Prune achievements that might have been revoked (rare but happens if the user restores a save)
                     seen.retain(|k| now.contains_key(k));
                     seen.extend(now.into_keys());
                 }
             }
 
-            // Polling interval
             tokio::time::sleep(Duration::from_secs(2)).await;
         }
 
@@ -965,8 +954,6 @@ pub fn start_watching_for_game(
 
     Some(stop_flag)
 }
-
-// ── Tauri commands ────────────────────────────────────────────────────────────
 
 #[tauri::command]
 pub fn watch_game_achievements(
@@ -1029,6 +1016,7 @@ pub fn debug_fire_achievement(app: AppHandle, format_type: String) -> Result<(),
             .unwrap_or_default()
             .as_secs(),
         global_percent: Some(2.1), // Ultra Rare mock
+        xp: 200,
     };
     fire_overlay(&app, &payload);
     if let Some(ov) = app.get_webview_window("achievement-overlay") {

@@ -79,7 +79,9 @@ pub async fn fetch_steam_reviews(app_id: String) -> Result<serde_json::Value, St
 }
 
 #[tauri::command]
-pub async fn fetch_global_achievement_percentages(app_id: String) -> Result<serde_json::Value, String> {
+pub async fn fetch_global_achievement_percentages(
+    app_id: String,
+) -> Result<serde_json::Value, String> {
     let url = format!(
         "https://api.steampowered.com/ISteamUserStats/GetGlobalAchievementPercentagesForApp/v2/?gameid={}",
         app_id

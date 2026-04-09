@@ -1,7 +1,7 @@
 pub mod achievement_watcher;
 pub mod achievements;
 mod commands;
-mod db;
+pub mod db;
 pub mod extensions;
 pub mod metadata;
 pub mod os_integration;
@@ -73,9 +73,11 @@ pub fn run() {
         .setup(|app| {
             #[cfg(windows)]
             {
+                use std::os::windows::ffi::OsStrExt;
                 use windows_sys::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
-                let id: Vec<u16> = "com.achira.chira-launcher"
-                    .encode_utf16()
+
+                let id: Vec<u16> = std::ffi::OsStr::new("com.achira.chira-launcher")
+                    .encode_wide()
                     .chain(std::iter::once(0))
                     .collect();
                 unsafe {
@@ -222,7 +224,6 @@ pub fn run() {
             }
 
             let session_dir = app_dir.join("rqbit_session");
-            // FORCE Torrent engine to use the user's DB download path instead of the hardcoded default
             let download_dir = std::path::PathBuf::from(&app_settings.download_path);
 
             let torrent_state: TorrentState = Arc::new(RwLock::new(None));
@@ -273,7 +274,8 @@ pub fn run() {
                 }
             });
 
-            tauri::async_runtime::spawn(db::writer::run_db_writer(db_path, db_rx));
+            // FIXED: Fully qualified path to guarantee the compiler finds it
+            tauri::async_runtime::spawn(crate::db::writer::run_db_writer(db_path, db_rx));
 
             process::monitor::start(
                 app.handle().clone(),

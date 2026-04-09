@@ -84,6 +84,16 @@ pub struct UserProfile {
     pub username: String,
     pub steam_id: Option<String>,
     pub avatar_url: Option<String>,
+    pub xp: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct AchSync {
+    pub api_name: String,
+    pub title: String,
+    pub description: String,
+    pub earned_time: u64,
+    pub xp: u64,
 }
 
 #[derive(Debug)]
@@ -91,9 +101,16 @@ pub enum ProfileDbWrite {
     UnlockAchievement {
         game_id: String,
         api_name: String,
+        title: String,
+        desc: String,
         unlock_time: String,
     },
+    SyncEarnedAchievements {
+        game_id: String,
+        earned: Vec<AchSync>,
+    },
     UpdateProfile(UserProfile),
+    AddXp(u64),
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
