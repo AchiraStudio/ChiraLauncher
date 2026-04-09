@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useDownloadsStore } from "../../store/downloadsStore";
 import { useProfileStore } from "../../store/profileStore";
 import { useUiStore } from "../../store/uiStore";
-import { Globe, Library as LibraryIcon, Star, Download, Settings, Pin, PinOff, User, Fingerprint, Plus } from "lucide-react";
+import { Globe, Library as LibraryIcon, Star, Download, Settings, Pin, PinOff, User, Plus } from "lucide-react";
 import { cn } from "../../lib/utils";
 
 const NAV_ITEMS = [
@@ -44,9 +44,12 @@ export function Sidebar() {
             {/* Logo Area */}
             <div className="p-6 flex items-center justify-between mb-8 overflow-hidden">
                 <div className="flex items-center gap-5 translate-x-1">
-                    <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-accent/20 to-accent/5 flex items-center justify-center shrink-0 shadow-2xl shadow-accent/10 border border-accent/20 relative group/logo">
-                        <div className="absolute inset-0 bg-accent/10 rounded-2xl opacity-0 group-hover/logo:opacity-100 transition-opacity" />
-                        <Fingerprint size={24} className="text-accent drop-shadow-[0_0_8px_rgba(102,192,244,0.4)]" />
+                    <div className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 relative group/logo overflow-hidden">
+                        <img
+                            src="/cl_logo.png"
+                            alt="ChiraLauncher"
+                            className="w-full h-full object-contain drop-shadow-[0_0_12px_rgba(102,192,244,0.35)] group-hover/logo:scale-110 transition-transform duration-300"
+                        />
                     </div>
                     <AnimatePresence>
                         {isOpen && (
