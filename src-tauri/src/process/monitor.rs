@@ -214,6 +214,7 @@ pub fn start(
                     "game-stopped",
                     json!({
                         "game_id": identity.game_id,
+                        "game_title": identity.game_title,
                         "elapsed_seconds": delta,
                         "last_played": now_str,
                     }),
@@ -236,6 +237,7 @@ pub fn start(
                 }
 
                 let mut matched_game_id = None;
+                let mut matched_game_title = String::new();
                 let mut resolved_exe_path = String::new();
 
                 if let Some(p) = process.exe() {
@@ -244,6 +246,10 @@ pub fn start(
                         if let Some(id) = exe_map.get(&path_str) {
                             matched_game_id = Some(id.clone());
                             resolved_exe_path = path_str;
+                            // Lookup title
+                            if let Ok(Some(g)) = crate::db::queries::get_game_by_id(&read_pool, id) {
+                                matched_game_title = g.title.clone();
+                            }
                         }
                     }
                 }
@@ -281,6 +287,7 @@ pub fn start(
                             exe_path: resolved_exe_path,
                             start_time,
                             game_id: game_id.clone(),
+                            game_title: matched_game_title.clone(),
                             launched_by: LaunchSource::AutoAttach,
                             elevated: false,
                             elevated_stop_flag: None,
@@ -395,6 +402,7 @@ fn start_achievement_watcher_for_game(
         if let Some(stop_flag) = achievement_watcher::start_watching_for_game(
             app.clone(),
             game_id.to_string(),
+            game.title,
             app_id.clone(),
             game_path.clone(),
             crate::settings::default_scan_roots(),

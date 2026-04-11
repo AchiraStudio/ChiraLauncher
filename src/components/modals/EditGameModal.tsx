@@ -14,8 +14,11 @@ import { cn } from "../../lib/utils";
 import { useLocalImage } from "../../hooks/useLocalImage";
 
 function ImagePreview({ path, aspect, placeholder, isLogo = false }: { path: string; aspect: string; placeholder: string; isLogo?: boolean }) {
-    const { src, error } = useLocalImage(path);
-    const [, focalStr] = path.split("?pos=");
+    // FIX: Safely strip the ?pos= modifier BEFORE asking the hook to load the file
+    const cleanPath = path ? path.split("?pos=")[0] : "";
+    const { src, error } = useLocalImage(cleanPath);
+    
+    const [, focalStr] = path ? path.split("?pos=") : ["", ""];
     const objectPosition = focalStr?.replace("-", " ") || "center";
 
     return (
@@ -120,13 +123,18 @@ export function EditGameModal() {
             const finalCover = await processImage(coverPath, originalCover, "cover");
             const finalBgRaw = await processImage(backgroundPath, originalBg, "background");
             const finalLogo = await processImage(logoPath, originalLogo, "logo");
-
             const finalBg = finalBgRaw ? `${finalBgRaw}?pos=${focalPoint}` : null;
+
+            const exeChanged = exePath !== gameToEdit.executable_path;
+            const newInstallDir = exeChanged 
+                ? exePath.substring(0, Math.max(exePath.lastIndexOf("\\"), exePath.lastIndexOf("/"))) 
+                : gameToEdit.install_dir;
 
             const updatedGame = {
                 ...gameToEdit,
                 title,
                 executable_path: exePath,
+                install_dir: newInstallDir,
                 cover_image_path: finalCover || null,
                 background_image_path: finalBg || null,
                 logo_path: finalLogo || null,

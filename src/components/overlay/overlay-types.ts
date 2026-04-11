@@ -1,6 +1,7 @@
 export interface AchievementPayload {
     api_name: string;
     display_name: string;
+    game_title: string;
     description: string;
     icon: string | null;
     icon_gray: string | null;

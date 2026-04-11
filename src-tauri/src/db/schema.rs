@@ -326,11 +326,50 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         tx.commit()?;
     }
 
-    // NEW Migration 23: Logo Path
     if current_version < 23 {
         let tx = conn.unchecked_transaction()?;
         let _ = tx.execute("ALTER TABLE games ADD COLUMN logo_path TEXT", []);
         tx.execute("INSERT INTO schema_migrations (version) VALUES (23)", [])?;
+        tx.commit()?;
+    }
+
+    // NEW Migration 24: Cloud Sync capabilities
+    if current_version < 24 {
+        let tx = conn.unchecked_transaction()?;
+        let _ = tx.execute("ALTER TABLE profiles ADD COLUMN supabase_user_id TEXT", []);
+        let _ = tx.execute(
+            "ALTER TABLE profiles ADD COLUMN is_cloud_synced INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
+        tx.execute("INSERT INTO schema_migrations (version) VALUES (24)", [])?;
+        tx.commit()?;
+    }
+
+    if current_version < 25 {
+        let tx = conn.unchecked_transaction()?;
+        // Add keys to local profile
+        let _ = tx.execute("ALTER TABLE profiles ADD COLUMN private_key TEXT", []);
+        let _ = tx.execute("ALTER TABLE profiles ADD COLUMN public_key TEXT", []);
+
+        // Create local decrypted messages table
+        let _ = tx.execute(
+            "CREATE TABLE IF NOT EXISTS local_messages (
+                id TEXT PRIMARY KEY,
+                contact_id TEXT NOT NULL,
+                is_mine INTEGER NOT NULL,
+                plain_text TEXT NOT NULL,
+                timestamp INTEGER NOT NULL
+            )",
+            [],
+        )?;
+        tx.execute("INSERT INTO schema_migrations (version) VALUES (25)", [])?;
+        tx.commit()?;
+    }
+
+    if current_version < 26 {
+        let tx = conn.unchecked_transaction()?;
+        let _ = tx.execute("ALTER TABLE games ADD COLUMN is_favorite INTEGER DEFAULT 0", []);
+        tx.execute("INSERT INTO schema_migrations (version) VALUES (26)", [])?;
         tx.commit()?;
     }
 

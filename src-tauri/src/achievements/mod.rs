@@ -317,6 +317,7 @@ fn find_save_path(
     let is_anadius = matches!(crack_type, Some(CrackType::Anadius));
     let is_goldberg = matches!(crack_type, Some(CrackType::Goldberg));
     let is_codex = matches!(crack_type, Some(CrackType::Codex));
+    let is_voices38 = matches!(crack_type, Some(CrackType::Voices38));
     let try_all = crack_type.is_none() || matches!(crack_type, Some(CrackType::Unknown));
 
     if let Some(id) = app_id {
@@ -373,7 +374,7 @@ fn find_save_path(
             }
         }
 
-        if is_goldberg || try_all {
+        if is_goldberg || is_voices38 || try_all {
             for var in &["APPDATA", "LOCALAPPDATA"] {
                 if let Some(appdata) = std::env::var_os(var) {
                     let base = PathBuf::from(&appdata);
@@ -594,7 +595,7 @@ pub fn find_save_dir(
             }
         }
     }
-    if matches!(crack_type, Some(CrackType::Goldberg)) {
+    if matches!(crack_type, Some(CrackType::Goldberg) | Some(CrackType::Voices38)) {
         for var in &["APPDATA", "LOCALAPPDATA"] {
             if let Some(appdata) = std::env::var_os(var) {
                 for sub in GOLDBERG_APPDATA_DIRS {

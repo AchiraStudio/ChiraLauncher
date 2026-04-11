@@ -41,7 +41,6 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "../public/repacks-fitgirl-enriched.json": "repacks-fitgirl-enriched.json",
       "resources/scanner.py": "scanner/scanner.py"
     }
   }

@@ -117,7 +117,13 @@ impl TorrentEngine {
                 length: f.length,
             }
         }).collect();
-
+        
+        // CLEANUP: We've got the metadata, let's remove it from the session for now.
+        // This ensures that start_download can add it elegantly with final options later.
+        if let Err(e) = self.session.delete(TorrentIdOrHash::Id(id), false).await {
+            log::warn!("[TorrentEngine] Failed to cleanup inspect torrent {}: {}", id, e);
+        }
+        
         Ok(TorrentInfo { id, name, files, total_bytes })
     }
 

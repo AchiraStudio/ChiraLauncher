@@ -1,6 +1,7 @@
 pub mod achievement_watcher;
 pub mod achievements;
 mod commands;
+pub mod crypto;
 pub mod db;
 pub mod extensions;
 pub mod metadata;
@@ -210,6 +211,7 @@ pub fn run() {
                             if let Some(watcher) = start_watching_for_game(
                                 app_handle_for_watchers.clone(),
                                 game.id.clone(),
+                                game.title.clone(),
                                 app_id,
                                 game_dir,
                                 crate::settings::default_scan_roots(),
@@ -274,7 +276,6 @@ pub fn run() {
                 }
             });
 
-            // FIXED: Fully qualified path to guarantee the compiler finds it
             tauri::async_runtime::spawn(crate::db::writer::run_db_writer(db_path, db_rx));
 
             process::monitor::start(
@@ -315,6 +316,7 @@ pub fn run() {
                 .always_on_top(true)
                 .skip_taskbar(true)
                 .resizable(false)
+                .shadow(false) // ⬅️ FIX: Explicitly disable OS drop shadows and borders
                 .visible(false)
                 .focused(false)
                 .build();
@@ -351,7 +353,8 @@ pub fn run() {
             commands::launcher::refresh_game_metadata,
             commands::metadata::upload_custom_cover,
             commands::metadata::upload_custom_background,
-            commands::metadata::get_fitgirl_repacks,
+            commands::metadata::upload_custom_logo,
+            commands::metadata::download_url_to_cache,
             commands::metadata::read_image_base64,
             commands::metadata::fetch_steam_app_details,
             commands::metadata::fetch_steam_reviews,
@@ -368,8 +371,6 @@ pub fn run() {
             commands::scanner::scan_single_game,
             settings::commands::get_app_settings,
             settings::commands::update_app_settings,
-            commands::repacks::load_repacks,
-            commands::repacks::refresh_repacks,
             commands::folder::load_folders,
             commands::folder::save_folders,
             tray::update_tray,
@@ -382,6 +383,15 @@ pub fn run() {
             profile::get_profile,
             profile::update_profile,
             profile::is_first_launch,
+            profile::get_profile,
+            profile::update_profile,
+            profile::set_profile_keys,
+            profile::is_first_launch,
+            profile::save_local_message,
+            profile::get_local_messages,
+            crypto::generate_keypair,
+            crypto::encrypt_message,
+            crypto::decrypt_message,
             os_integration::get_os_integration,
             os_integration::toggle_os_integration,
             achievement_watcher::watch_game_achievements,
@@ -397,7 +407,8 @@ pub fn run() {
             commands::metadata::upload_custom_background,
             commands::metadata::upload_custom_logo,
             commands::metadata::download_url_to_cache,
-            commands::metadata::get_fitgirl_repacks,
+            commands::game::toggle_favorite,
+            commands::reset::reset_application,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

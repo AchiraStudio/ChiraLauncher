@@ -4,11 +4,12 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useDownloadsStore } from "../../store/downloadsStore";
 import { useProfileStore } from "../../store/profileStore";
 import { useUiStore } from "../../store/uiStore";
-import { Globe, Library as LibraryIcon, Star, Download, Settings, Pin, PinOff, User, Plus } from "lucide-react";
+import { Globe, Library as LibraryIcon, Star, Download, Settings, Pin, PinOff, User, Plus, ShoppingCart, CloudOff } from "lucide-react";
 import { cn } from "../../lib/utils";
 
 const NAV_ITEMS = [
-    { path: "/browse", label: "Browse", icon: <Globe size={20} /> },
+    { path: "/discover", label: "Discover", icon: <Globe size={20} /> },
+    { path: "/browse", label: "Store", icon: <ShoppingCart size={20} /> },
     { path: "/library", label: "Library", icon: <LibraryIcon size={20} /> },
     { path: "/favorites", label: "Favorites", icon: <Star size={20} /> },
     { path: "/downloads", label: "Downloads", icon: <Download size={20} /> },
@@ -28,8 +29,10 @@ export function Sidebar() {
 
     const downloads = useDownloadsStore(s => s.downloads);
     const activeDownloads = downloads.filter(d => d.state !== "Finished" && d.progress_percent < 100).length;
+    
     const { profile } = useProfileStore();
     const setAddGameModalOpen = useUiStore((s) => s.setAddGameModalOpen);
+    const setAuthModalOpen = useUiStore((s) => s.setAuthModalOpen);
 
     const isOpen = isPinned || isHovered;
 
@@ -41,15 +44,11 @@ export function Sidebar() {
             onMouseEnter={() => setIsHovered(true)}
             onMouseLeave={() => setIsHovered(false)}
         >
-            {/* Logo Area */}
             <div className="p-6 flex items-center justify-between mb-8 overflow-hidden">
                 <div className="flex items-center gap-5 translate-x-1">
-                    <div className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 relative group/logo overflow-hidden">
-                        <img
-                            src="/cl_logo.png"
-                            alt="ChiraLauncher"
-                            className="w-full h-full object-contain drop-shadow-[0_0_12px_rgba(102,192,244,0.35)] group-hover/logo:scale-110 transition-transform duration-300"
-                        />
+                    <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-accent/20 to-accent/5 flex items-center justify-center shrink-0 shadow-2xl shadow-accent/10 border border-accent/20 relative group/logo overflow-hidden">
+                        <div className="absolute inset-0 bg-accent/10 rounded-2xl opacity-0 group-hover/logo:opacity-100 transition-opacity" />
+                        <img src="/cl_logo.png" alt="Chira" className="w-8 h-8 object-contain drop-shadow-[0_0_8px_rgba(34,211,238,0.4)]" />
                     </div>
                     <AnimatePresence>
                         {isOpen && (
@@ -76,7 +75,6 @@ export function Sidebar() {
                 )}
             </div>
 
-            {/* Navigation */}
             <nav className="flex flex-col gap-3 px-4 flex-1">
                 {NAV_ITEMS.map((item) => {
                     const isActive = location.pathname.startsWith(item.path);
@@ -132,9 +130,34 @@ export function Sidebar() {
                 })}
             </nav>
 
-            {/* Bottom Section: Add Game + Profile */}
             <div className="p-4 mt-auto flex flex-col gap-2">
-                {/* Add Game Button */}
+                {!profile?.is_cloud_synced && (
+                    <button
+                        onClick={() => setAuthModalOpen(true)}
+                        className={cn(
+                            "flex items-center gap-4 w-full p-4 rounded-2xl transition-all duration-300 overflow-hidden whitespace-nowrap border group relative",
+                            "bg-blue-500/10 border-blue-500/20 hover:bg-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_20px_rgba(59,130,246,0.15)]"
+                        )}
+                        title="Connect Identity"
+                    >
+                        <div className="w-5 h-5 shrink-0 flex items-center justify-center text-blue-400 group-hover:scale-110 transition-transform">
+                            <CloudOff size={20} strokeWidth={2.5} />
+                        </div>
+                        <AnimatePresence>
+                            {isOpen && (
+                                <motion.span
+                                    initial={{ opacity: 0, x: -10 }}
+                                    animate={{ opacity: 1, x: 0 }}
+                                    exit={{ opacity: 0, x: -10 }}
+                                    className="font-bold text-[11px] uppercase tracking-widest text-blue-400"
+                                >
+                                    Network Offline
+                                </motion.span>
+                            )}
+                        </AnimatePresence>
+                    </button>
+                )}
+
                 <button
                     onClick={() => setAddGameModalOpen(true)}
                     className={cn(
@@ -159,7 +182,6 @@ export function Sidebar() {
                     </AnimatePresence>
                 </button>
 
-                {/* Profile */}
                 <Link to="/user" className="flex items-center gap-4 w-full p-4 rounded-3xl transition-all hover:bg-white/[0.03] overflow-hidden whitespace-nowrap border border-transparent hover:border-white/5 cursor-pointer group shadow-2xl relative">
                     <div className="absolute inset-0 bg-accent/5 opacity-0 group-hover:opacity-100 transition-opacity" />
                     <div className="w-12 h-12 rounded-[1.2rem] border border-white/5 group-hover:border-accent/40 overflow-hidden shrink-0 shadow-2xl transition-all duration-500 relative z-10">
@@ -182,9 +204,15 @@ export function Sidebar() {
                                 <span className="text-white text-sm font-semibold truncate">
                                     {profile?.username || "Guest"}
                                 </span>
-                                <span className="text-accent text-xs flex items-center gap-1.5 mt-1">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse shadow-[0_0_8px_rgba(102,192,244,0.8)]" />
-                                    Online
+                                <span className={cn(
+                                    "text-xs flex items-center gap-1.5 mt-1",
+                                    profile?.is_cloud_synced ? "text-accent" : "text-white/30"
+                                )}>
+                                    <span className={cn(
+                                        "w-1.5 h-1.5 rounded-full",
+                                        profile?.is_cloud_synced ? "bg-accent animate-pulse shadow-[0_0_8px_rgba(102,192,244,0.8)]" : "bg-white/20"
+                                    )} />
+                                    {profile?.is_cloud_synced ? "Online" : "Local Node"}
                                 </span>
                             </motion.div>
                         )}

@@ -2,25 +2,16 @@ import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { useGameStore } from "./store/gameStore";
-import { useFolderStore } from "./store/folderStore";
 import { GameCard } from "./components/game/GameCard";
 import { Star, Library as LibraryIcon, Sparkles } from "lucide-react";
 
 export function Favorites() {
     const navigate = useNavigate();
     const { gamesById } = useGameStore();
-    const { customFolders } = useFolderStore();
 
     const favoriteGames = useMemo(() => {
-        const allGames = Object.values(gamesById);
-        const favoriteIds = new Set<string>();
-        customFolders.forEach(f => {
-            if (f.filterType === "favorites") {
-                f.gameIds?.forEach(id => favoriteIds.add(id));
-            }
-        });
-        return allGames.filter(g => favoriteIds.has(g.id));
-    }, [gamesById, customFolders]);
+        return Object.values(gamesById).filter(g => g.is_favorite);
+    }, [gamesById]);
 
     return (
         <div className="absolute inset-0 overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">

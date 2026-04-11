@@ -13,7 +13,7 @@ import {
     FolderOpen, Gamepad2, CheckCircle2, X, ChevronLeft, Activity,
     Hash, Globe, Sparkles
 } from "lucide-react";
-import { cn } from "../../lib/utils";
+import { cn } from "../../lib/utils"; // ⬅️ THIS FIXES THE 'cn' ERROR
 
 type AddStep = "PICK_FILE" | "DETAILS" | "METADATA" | "CONFIRM";
 
@@ -191,6 +191,15 @@ export function AddGameModal() {
                 crack_type: detectedCrackType,
                 app_id: detectedAppId,
                 manual_achievement_path: manualAchievementPath,
+                is_favorite: false,
+                run_as_admin: false,
+                genres: null,
+                tags: null,
+                metacritic_score: null,
+                platforms: null,
+                repack_info: null,
+                detected_metadata_path: null,
+                detected_earned_state_path: null,
             };
 
             await invoke("add_game", { game: newGame });
@@ -202,8 +211,11 @@ export function AddGameModal() {
             await new Promise((resolve) => setTimeout(resolve, 500));
             await fetchGames();
             reset();
-        } catch (e) {
+            toast.success("Game added successfully");
+        } catch (e: any) {
             console.error(e);
+            toast.error("Failed to add game", { description: String(e) });
+        } finally {
             setIsImporting(false);
         }
     };
@@ -318,7 +330,7 @@ export function AddGameModal() {
                                                         type="text"
                                                         value={title}
                                                         onChange={(e) => setTitle(e.target.value)}
-                                                        className="w-full bg-white/[0.03] border-2 border-white/5 focus:border-accent/40 rounded-2xl pl-14 pr-6 py-5 text-white font-black text-lg outline-none transition-all placeholder:text-white/10"
+                                                        className={cn("w-full bg-white/[0.03] border-2 border-white/5 focus:border-accent/40 rounded-2xl pl-14 pr-6 py-5 text-white font-black text-lg outline-none transition-all placeholder:text-white/10")}
                                                         placeholder="Enter game title..."
                                                         autoFocus
                                                     />

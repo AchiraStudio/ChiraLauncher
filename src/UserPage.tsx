@@ -7,8 +7,9 @@ import { formatPlaytime } from "./lib/format";
 import { useLocalImage } from "./hooks/useLocalImage";
 import {
     Edit2, Check, Shield, Copy, Trophy, Gamepad2, Clock,
-    TrendingUp, BarChart3, Sparkles, User, Lock, Target, Zap, Fingerprint, Hexagon
+    LogOut, Sparkles, User, Target, Zap, Fingerprint, Hexagon, TrendingUp, BarChart3, Lock
 } from "lucide-react";
+import { supabase } from "./lib/supabase";
 import { toast } from "sonner";
 import { cn } from "./lib/utils";
 
@@ -50,7 +51,7 @@ const ALL_MILESTONES = [
 export function UserPage() {
     const navigate = useNavigate();
     const gamesById = useGameStore((s) => s.gamesById);
-    const { profile, updateProfile, fetchProfile } = useProfileStore();
+    const { profile, updateProfile, fetchProfile, session } = useProfileStore();
     const allGames = Object.values(gamesById);
 
     useEffect(() => {
@@ -109,6 +110,11 @@ export function UserPage() {
         }
     };
 
+    const handleSignOut = async () => {
+        await supabase.auth.signOut();
+        toast.info("Logged out of grid");
+    };
+
     return (
         <div className="absolute inset-0 overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent bg-[#08090f]">
             <div className="absolute top-0 right-[10%] w-[600px] h-[600px] bg-accent/10 blur-[150px] rounded-full pointer-events-none" />
@@ -124,6 +130,14 @@ export function UserPage() {
                         <h1 className="text-3xl font-black text-white uppercase tracking-tighter">Pilot Identity</h1>
                         <p className="text-white/40 text-[10px] font-bold uppercase tracking-widest mt-1">Global User Record</p>
                     </div>
+                    {session && (
+                        <button 
+                            onClick={handleSignOut}
+                            className="ml-auto px-5 py-2.5 rounded-xl bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white border border-red-500/20 text-[10px] font-black uppercase tracking-widest transition-all shadow-lg active:scale-95 flex items-center gap-2"
+                        >
+                            <LogOut size={14} /> Log Out
+                        </button>
+                    )}
                 </header>
 
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -179,12 +193,23 @@ export function UserPage() {
                                                 <div className="absolute inset-0 bg-gradient-to-tr from-accent/20 to-transparent mix-blend-overlay" />
                                             </div>
 
-                                            <h2 className="text-4xl font-black text-white uppercase tracking-tighter mb-3">{profile?.username || "GUEST"}</h2>
+                                            <h2 className="text-4xl font-black text-white uppercase tracking-tighter mb-3">{profile?.username || (session ? "SYNCING..." : "GUEST")}</h2>
 
-                                            <div className="flex items-center justify-center gap-2">
-                                                <span className="px-3 py-1 rounded-md bg-accent/10 border border-accent/20 text-accent text-[10px] font-black uppercase tracking-widest">Level {stats.level}</span>
-                                                <span className="text-white/30 text-[10px] font-bold uppercase tracking-widest">Node Operator</span>
-                                            </div>
+                                            {!session ? (
+                                                <div className="flex items-center justify-center gap-2 mt-2">
+                                                    <span className="px-3 py-1 rounded-md bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[10px] font-black uppercase tracking-widest">
+                                                        Local Node
+                                                    </span>
+                                                    <span className="text-white/30 text-[10px] font-bold uppercase tracking-widest">Offline</span>
+                                                </div>
+                                            ) : (
+                                                <div className="flex items-center justify-center gap-2 mt-2">
+                                                    <span className="px-3 py-1 rounded-md bg-accent/10 border border-accent/20 text-accent text-[10px] font-black uppercase tracking-widest">
+                                                        Level {stats.level}
+                                                    </span>
+                                                    <span className="text-white/30 text-[10px] font-bold uppercase tracking-widest">Node Operator</span>
+                                                </div>
+                                            )}
 
                                             {profile?.steam_id && (
                                                 <button onClick={copySteamId} className="mt-5 flex items-center gap-2 px-4 py-2 bg-black/40 hover:bg-black/60 border border-white/5 rounded-lg text-white/40 hover:text-white transition-colors group/id shadow-inner">

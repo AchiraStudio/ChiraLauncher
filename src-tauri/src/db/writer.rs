@@ -40,6 +40,7 @@ pub async fn run_db_writer(db_path: PathBuf, mut rx: mpsc::UnboundedReceiver<DbW
             ),
             DbWrite::Game(GameDbWrite::UpdateDetectedAchievementPaths { game_id, metadata, earned_state }) => 
                 queries::update_detected_achievement_paths_conn(&conn, &game_id, metadata, earned_state),
+            DbWrite::Game(GameDbWrite::ToggleFavorite { game_id }) => queries::toggle_favorite_conn(&conn, &game_id),
             DbWrite::Profile(ProfileDbWrite::UnlockAchievement { game_id, api_name, title, desc, unlock_time }) => conn.execute(
                 "INSERT INTO achievements (game_id, api_name, title, description, unlocked, unlock_time) 
                  VALUES (?1, ?2, ?3, ?4, 1, ?5) 
@@ -78,10 +79,14 @@ pub async fn run_db_writer(db_path: PathBuf, mut rx: mpsc::UnboundedReceiver<DbW
                 res
             },
             DbWrite::Profile(ProfileDbWrite::AddXp(amount)) => conn.execute("UPDATE profiles SET xp = xp + ?1 WHERE is_default = 1", rusqlite::params![amount]),
+            DbWrite::Profile(ProfileDbWrite::SaveLocalMessage { id, contact_id, is_mine, plain_text, timestamp }) => conn.execute(
+                "INSERT INTO local_messages (id, contact_id, is_mine, plain_text, timestamp) VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![id, contact_id, is_mine as i32, plain_text, timestamp],
+            ).map(|_| 0),
             DbWrite::Profile(ProfileDbWrite::UpdateProfile(profile)) => conn.execute(
-                "INSERT INTO profiles (id, username, steam_id, avatar_url, is_default, xp) VALUES (?1, ?2, ?3, ?4, ?5, ?6) 
-                 ON CONFLICT(id) DO UPDATE SET username = excluded.username, steam_id = excluded.steam_id, avatar_url = excluded.avatar_url, is_default = excluded.is_default",
-                rusqlite::params![profile.id, profile.username, profile.steam_id, profile.avatar_url, 1, profile.xp],
+                "INSERT INTO profiles (id, username, steam_id, avatar_url, is_default, xp, supabase_user_id, is_cloud_synced, private_key, public_key) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) 
+                 ON CONFLICT(id) DO UPDATE SET username = excluded.username, steam_id = excluded.steam_id, avatar_url = excluded.avatar_url, is_default = excluded.is_default, supabase_user_id = excluded.supabase_user_id, is_cloud_synced = excluded.is_cloud_synced, private_key = excluded.private_key, public_key = excluded.public_key",
+                rusqlite::params![profile.id, profile.username, profile.steam_id, profile.avatar_url, 1, profile.xp, profile.supabase_user_id, profile.is_cloud_synced as i32, profile.private_key, profile.public_key],
             ),
             DbWrite::Settings(SettingsDbWrite::UpdateSettings(settings)) => {
                 crate::settings::update_settings(&mut conn, &settings).map(|_| 0)

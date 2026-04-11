@@ -53,11 +53,6 @@ pub async fn download_url_to_cache(
 }
 
 #[tauri::command]
-pub async fn get_fitgirl_repacks() -> Result<serde_json::Value, String> {
-    Ok(serde_json::json!([]))
-}
-
-#[tauri::command]
 pub async fn read_image_base64(path: String) -> Result<String, String> {
     let bytes = std::fs::read(&path).map_err(|e| format!("Failed to read file: {}", e))?;
     let ext = std::path::Path::new(&path)

@@ -62,6 +62,7 @@ export interface Game {
     app_id: string | null;
     detected_metadata_path: string | null;
     detected_earned_state_path: string | null;
+    is_favorite: boolean;
 }
 
 export type LaunchSource = "Launcher" | "AutoAttach";
@@ -96,6 +97,7 @@ export interface NewGame {
     app_id?: string | null;
     detected_metadata_path?: string | null;
     detected_earned_state_path?: string | null;
+    is_favorite: boolean;
 }
 
 export interface ProcessIdentity {

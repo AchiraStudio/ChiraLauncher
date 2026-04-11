@@ -167,3 +167,10 @@ pub async fn update_game_assets(
         }))
         .map_err(|e| e.to_string())
 }
+#[tauri::command]
+pub async fn toggle_favorite(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    state
+        .db_tx
+        .send(DbWrite::Game(GameDbWrite::ToggleFavorite { game_id: id }))
+        .map_err(|e| e.to_string())
+}

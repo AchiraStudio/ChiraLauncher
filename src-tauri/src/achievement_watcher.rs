@@ -14,6 +14,7 @@ use crate::commands::scanner::CrackType;
 pub struct AchievementUnlockedPayload {
     pub api_name: String,
     pub display_name: String,
+    pub game_title: String,
     pub description: String,
     pub icon: Option<String>,
     pub icon_gray: Option<String>,
@@ -624,6 +625,7 @@ fn resolve_icon(icon_base: &Path, relative: &str) -> Option<String> {
 
 fn payload_api(
     api_name: &str,
+    game_title: &str,
     meta: &HashMap<String, AchievementMeta>,
     meta_path: &Path,
     earned_time: u64,
@@ -648,6 +650,7 @@ fn payload_api(
     AchievementUnlockedPayload {
         api_name: api_name.to_string(),
         display_name,
+        game_title: game_title.to_string(),
         description,
         icon,
         icon_gray,
@@ -659,6 +662,7 @@ fn payload_api(
 
 fn payload_display(
     display_name: &str,
+    game_title: &str,
     meta: &HashMap<String, AchievementMeta>,
     display_map: &HashMap<String, String>,
     meta_path: &Path,
@@ -689,6 +693,7 @@ fn payload_display(
     AchievementUnlockedPayload {
         api_name,
         display_name: resolved_display,
+        game_title: game_title.to_string(),
         description,
         icon,
         icon_gray,
@@ -732,7 +737,7 @@ fn find_active_candidate(
         }
     }
 
-    if !matches!(crack_type, Some(CrackType::Goldberg)) {
+    if !matches!(crack_type, Some(CrackType::Goldberg) | Some(CrackType::Voices38)) {
         if let Some(sys_drive) = std::env::var_os("SystemDrive") {
             let public = PathBuf::from(&sys_drive).join("Users\\Public\\Documents\\Steam");
             for sub in PUBLIC_EMU_DIRS {
@@ -821,7 +826,11 @@ fn probe_dir(dir: &Path) -> Option<AchievementCandidate> {
     None
 }
 
-fn emulator_label(path: &Path) -> String {
+fn emulator_label(path: &Path, crack_type: Option<&CrackType>) -> String {
+    if let Some(CrackType::Voices38) = crack_type {
+        return "Voices38".to_string();
+    }
+    
     let s = path.to_string_lossy().to_lowercase();
     if s.contains("lsx emu") {
         "Anadius (LSX)"
@@ -846,6 +855,7 @@ fn emulator_label(path: &Path) -> String {
 pub fn start_watching_for_game(
     app: AppHandle,
     game_id: String,
+    game_title: String,
     app_id: String,
     game_path: PathBuf,
     scan_roots: Vec<PathBuf>,
@@ -913,7 +923,7 @@ pub fn start_watching_for_game(
                         "achievement-save-discovered",
                         SaveDiscoveredPayload {
                             app_id: app_id.clone(),
-                            emulator: emulator_label(&c.path),
+                            emulator: emulator_label(&c.path, crack_type.as_ref()),
                             path: c.path.to_string_lossy().to_string(),
                             format: format!("{:?}", c.format),
                         },
@@ -937,9 +947,9 @@ pub fn start_watching_for_game(
 
                     for (name, t) in new_unlocks {
                         let p = if is_anadius {
-                            payload_display(&name, &meta, &display_map, &meta_path, t)
+                            payload_display(&name, &game_title, &meta, &display_map, &meta_path, t)
                         } else {
-                            payload_api(&name, &meta, &meta_path, t)
+                            payload_api(&name, &game_title, &meta, &meta_path, t)
                         };
 
                         fire_overlay(&app, &p);
@@ -1002,6 +1012,7 @@ pub fn watch_game_achievements(
     let watcher = start_watching_for_game(
         app.clone(),
         game_id,
+        game.title,
         app_id,
         PathBuf::from(&game_dir),
         crate::settings::default_scan_roots(),
@@ -1029,6 +1040,7 @@ pub fn debug_fire_achievement(app: AppHandle, format_type: String) -> Result<(),
     let payload = AchievementUnlockedPayload {
         api_name: format!("TEST_{}", format_type.to_uppercase()),
         display_name: format!("Test — {}", format_type),
+        game_title: "ChiraLauncher Test".to_string(),
         description: "Mock achievement for overlay testing.".to_string(),
         icon: None,
         icon_gray: None,

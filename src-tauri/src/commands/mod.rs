@@ -5,7 +5,7 @@ pub mod game;
 pub mod import;
 pub mod launcher;
 pub mod metadata;
-pub mod repacks;
+pub mod reset;
 pub mod scanner;
 pub mod torrent;
 

@@ -42,6 +42,7 @@ pub struct Game {
     pub app_id: Option<String>,
     pub detected_metadata_path: Option<String>,
     pub detected_earned_state_path: Option<String>,
+    pub is_favorite: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -74,6 +75,7 @@ pub struct NewGame {
     pub app_id: Option<String>,
     pub detected_metadata_path: Option<String>,
     pub detected_earned_state_path: Option<String>,
+    pub is_favorite: bool,
 }
 
 fn map_game_row(row: &rusqlite::Row) -> rusqlite::Result<Game> {
@@ -138,7 +140,8 @@ fn map_game_row(row: &rusqlite::Row) -> rusqlite::Result<Game> {
         detected_earned_state_path: row
             .get::<_, Option<String>>("detected_earned_state_path")
             .unwrap_or(None),
-        logo_path: row.get::<_, Option<String>>("logo_path").unwrap_or(None), // NEW
+        logo_path: row.get::<_, Option<String>>("logo_path").unwrap_or(None),
+        is_favorite: row.get::<_, Option<i32>>("is_favorite").unwrap_or(Some(0)).unwrap_or(0) != 0,
     })
 }
 
@@ -223,10 +226,11 @@ pub fn insert_game_conn(conn: &Connection, game: NewGame) -> rusqlite::Result<us
             publisher, release_date, genres, tags, metacritic_score, platforms,
             repack_info, run_as_admin, manual_achievement_path, steam_app_id,
             crack_type, app_id, playtime_seconds, session_count, first_played, last_played,
-            achievements_unlocked, achievements_total, detected_metadata_path, detected_earned_state_path, logo_path
+            achievements_unlocked, achievements_total, detected_metadata_path, detected_earned_state_path, logo_path,
+            is_favorite
          ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
-            ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33
+            ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34
          )",
         params![
             game.id, game.title, game.exe_path, game.cover_path, game.background_path, game.description,
@@ -234,7 +238,8 @@ pub fn insert_game_conn(conn: &Connection, game: NewGame) -> rusqlite::Result<us
             game.publisher, game.release_date, game.genres, game.tags, game.metacritic_score, game.platforms,
             game.repack_info, game.run_as_admin as i32, game.manual_achievement_path, game.steam_app_id,
             game.crack_type, game.app_id, restored_secs, restored_sessions, restored_first, restored_last,
-            restored_ach_unlocked, restored_ach_total, game.detected_metadata_path, game.detected_earned_state_path, game.logo_path
+            restored_ach_unlocked, restored_ach_total, game.detected_metadata_path, game.detected_earned_state_path, game.logo_path,
+            game.is_favorite as i32
         ],
     )
 }
@@ -261,8 +266,8 @@ pub fn update_game_conn(conn: &Connection, game: Game) -> rusqlite::Result<usize
         "UPDATE games SET 
             title = ?1, exe_path = ?2, cover_path = ?3, background_path = ?4, developer = ?5, 
             publisher = ?6, release_date = ?7, description = ?8, genre = ?9, steam_app_id = ?10,
-            run_as_admin = ?11, manual_achievement_path = ?12, logo_path = ?13
-         WHERE id = ?14",
+            run_as_admin = ?11, manual_achievement_path = ?12, logo_path = ?13, is_favorite = ?14
+         WHERE id = ?15",
         params![
             game.title,
             game.exe_path,
@@ -277,6 +282,7 @@ pub fn update_game_conn(conn: &Connection, game: Game) -> rusqlite::Result<usize
             game.run_as_admin as i32,
             game.manual_achievement_path,
             game.logo_path,
+            game.is_favorite as i32,
             game.id
         ],
     )?;
@@ -305,5 +311,12 @@ pub fn update_detected_achievement_paths_conn(
     conn.execute(
         "UPDATE games SET detected_metadata_path = ?1, detected_earned_state_path = ?2 WHERE id = ?3",
         params![metadata_path, earned_state_path, game_id],
+    )
+}
+
+pub fn toggle_favorite_conn(conn: &Connection, id: &str) -> rusqlite::Result<usize> {
+    conn.execute(
+        "UPDATE games SET is_favorite = 1 - is_favorite WHERE id = ?1",
+        params![id],
     )
 }

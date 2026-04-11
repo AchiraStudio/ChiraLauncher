@@ -54,6 +54,7 @@ pub enum CrackType {
     Codex,
     Goldberg,
     Anadius,
+    Voices38,
     Unknown,
 }
 
@@ -101,6 +102,20 @@ struct PythonScannerResult {
 
 // ── Crack detection ───────────────────────────────────────────────────────────
 
+fn has_v38_file(dir: &Path) -> bool {
+    fs::read_dir(dir)
+        .map(|entries| {
+            entries.flatten().any(|e| {
+                e.path()
+                    .extension()
+                    .and_then(|x| x.to_str())
+                    .map(|x| x.eq_ignore_ascii_case("v38"))
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false)
+}
+
 /// Detect emulator type and app_id from a game directory.
 /// Only reads a few small files — never does a recursive walk.
 pub fn detect_crack(dir: &Path) -> (CrackType, String) {
@@ -110,6 +125,20 @@ pub fn detect_crack(dir: &Path) -> (CrackType, String) {
         let id = parse_anadius_content_id(&anadius_cfg).unwrap_or_default();
         log::info!("[Crack] Anadius at {} (content_id={})", dir.display(), id);
         return (CrackType::Anadius, id);
+    }
+
+    // Voices38: .v38 file in the game root
+    if has_v38_file(dir) {
+        let steam_settings = dir.join("steam_settings");
+        let id = if steam_settings.exists() && steam_settings.is_dir() {
+            read_goldberg_app_id(&steam_settings)
+                .or_else(|| read_plain_app_id(dir))
+                .unwrap_or_default()
+        } else {
+            read_plain_app_id(dir).unwrap_or_default()
+        };
+        log::info!("[Crack] Voices38 via .v38 at {} (app_id={})", dir.display(), id);
+        return (CrackType::Voices38, id);
     }
 
     // CODEX: steam_emu.ini
@@ -199,6 +228,7 @@ fn has_crack_marker(dir: &Path) -> bool {
         || dir.join("steam_api64.dll").exists()
         || dir.join("steam_api.dll").exists()
         || has_cdx_file(dir)
+        || has_v38_file(dir)
 }
 
 fn has_cdx_file(dir: &Path) -> bool {
@@ -222,12 +252,12 @@ fn has_cdx_file(dir: &Path) -> bool {
 /// The real CODEX steam_emu.ini looks like this:
 ///
 /// ```
-/// ### ÜÛÛÛÛÛ   Ü ...CODEX ASCII art...
+/// ### ÜÛÛÛÛÛ  Ü ...CODEX ASCII art...
 /// ### Game data stored at %SystemDrive%\Users\Public\Documents\Steam\CODEX\883710
 /// ###
 /// [Settings]
 /// ###
-/// ### Game identifier (http://store.steampowered.com/app/883710)
+/// ### Game identifier ([http://store.steampowered.com/app/883710](http://store.steampowered.com/app/883710))
 /// ###
 /// AppId=883710
 /// UserName=Achira
@@ -439,6 +469,7 @@ pub async fn scan_directory(
                 "codex" => CrackType::Codex,
                 "goldberg" => CrackType::Goldberg,
                 "anadius" => CrackType::Anadius,
+                "voices38" => CrackType::Voices38,
                 _ => CrackType::Unknown,
             };
 
@@ -533,6 +564,7 @@ pub async fn scan_single_game(
         "codex" => CrackType::Codex,
         "goldberg" => CrackType::Goldberg,
         "anadius" => CrackType::Anadius,
+        "voices38" => CrackType::Voices38,
         _ => CrackType::Unknown,
     };
 

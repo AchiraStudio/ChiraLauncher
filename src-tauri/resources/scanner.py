@@ -1,6 +1,6 @@
 """
 Game Crack Detector & Achievement Finder
-Supports: CODEX, Goldberg, Anadius emulators
+Supports: CODEX, Goldberg, Anadius, Voices38 emulators
 
 Called from Rust: python scanner.py <game_folder_path>
 Outputs a single JSON object to stdout.
@@ -82,10 +82,14 @@ def find_best_exe(game_root: Path) -> Optional[Path]:
 # ─────────────────────────────────────────────
 
 def detect_emulator(game_root: Path) -> str:
-    """Return 'codex', 'anadius', 'goldberg', or 'unknown'."""
+    """Return 'codex', 'anadius', 'goldberg', 'voices38', or 'unknown'."""
     # Anadius
     if (game_root / "anadius.cfg").exists():
         return "anadius"
+
+    # Voices38 — check for any .v38 file before Goldberg to prevent misidentification
+    if find_by_extension(game_root, ".v38"):
+        return "voices38"
 
     # CODEX — steam_emu.ini or any .cdx file
     if (game_root / "steam_emu.ini").exists():
@@ -495,23 +499,23 @@ def scan_game(game_path_str: str) -> dict:
                 else:
                     log("Steam fetch FAILED (no stats found for this ContentId or network error)")
 
-    # ── GOLDBERG ──
-    elif emu == "goldberg":
+    # ── GOLDBERG & VOICES38 ──
+    elif emu in ("goldberg", "voices38"):
         cfg = parse_goldberg_settings(game_root)
         app_id = cfg.get("AppId")
         result["app_id"] = app_id
-        log(f"Goldberg AppId: {app_id}")
+        log(f"{emu.capitalize()} AppId: {app_id}")
         if app_id:
             ach = find_goldberg_achievements(app_id)
             save_folder = ach["save_folder"]
             ach_jsn = ach["achievements_json"]
 
             if save_folder:
-                log(f"Goldberg save folder found: {save_folder}")
+                log(f"{emu.capitalize()} save folder found: {save_folder}")
             else:
-                log(f"Goldberg save folder NOT found for ID {app_id} (checked APPDATA/Goldberg SteamEmu Saves and GSE Saves)")
+                log(f"{emu.capitalize()} save folder NOT found for ID {app_id} (checked APPDATA/Goldberg SteamEmu Saves and GSE Saves)")
 
-            # Fallback for goldberg: steam_settings or game root
+            # Fallback for goldberg/voices38: steam_settings or game root
             if not ach_jsn:
                 log("Checking steam_settings/achievements.json fallback...")
                 settings_json = game_root / "steam_settings" / "achievements.json"
@@ -548,4 +552,5 @@ if __name__ == "__main__":
         sys.exit(1)
 
     result = scan_game(sys.argv[1])
+    result["schema_version"] = 1
     print(json.dumps(result, default=str))

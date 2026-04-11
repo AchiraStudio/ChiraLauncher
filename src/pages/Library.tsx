@@ -90,6 +90,12 @@ function LibraryListItem({
                 </div>
             </div>
 
+            {game.is_favorite && (
+                <div className="absolute top-1 right-1 text-pink-500 fill-pink-500 drop-shadow-md">
+                    <Heart size={10} fill="currentColor" />
+                </div>
+            )}
+
             {isActive && (
                 <div className="shrink-0 mr-0.5">
                     <ChevronRight size={14} className="text-white/40" />
@@ -119,7 +125,11 @@ function MetaRow({ icon, label, value }: { icon: React.ReactNode; label: string;
 export default function Library() {
     const gamesById = useGameStore((s) => s.gamesById);
     const allGames = useMemo(
-        () => Object.values(gamesById).sort((a: Game, b: Game) => a.title.localeCompare(b.title)),
+        () => Object.values(gamesById).sort((a: Game, b: Game) => {
+            if (a.is_favorite && !b.is_favorite) return -1;
+            if (!a.is_favorite && b.is_favorite) return 1;
+            return a.title.localeCompare(b.title);
+        }),
         [gamesById]
     );
 
@@ -129,6 +139,8 @@ export default function Library() {
     const setScannerModalOpen = useUiStore((s) => s.setScannerModalOpen);
     const runningGames = useProcessStore((s) => s.running);
     const refreshMetadata = useGameStore((s) => s.refreshMetadata);
+    const toggleFavorite = useGameStore((s) => s.toggleFavorite);
+    const isRefreshing = useGameStore((s) => s.isRefreshing);
 
     const [activeGameId, setActiveGameId] = useState<string | null>(null);
     const [achievements, setAchievements] = useState<Achievement[]>([]);
@@ -272,7 +284,7 @@ export default function Library() {
             </div>
 
             {/* ── Hero / Detail Panel (left) ── */}
-            <div className="flex-1 relative z-20 flex flex-col overflow-y-auto custom-scrollbar pointer-events-auto items-center">
+            <div className="flex-1 relative z-20 flex flex-col overflow-y-auto custom-scrollbar pointer-events-auto items-center pr-[360px]">
                 <AnimatePresence mode="wait">
                     {activeGame && (
                         <motion.div
@@ -283,10 +295,10 @@ export default function Library() {
                             transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
                             className="w-full max-w-6xl p-12 min-h-full flex flex-col"
                         >
-                            <div className="flex-1" /> {/* Spacer pushed up naturally */}
+                            <div className="h-[45vh] shrink-0" />
                             
                             {/* Main Hero Overview */}
-                            <div className="flex items-start gap-10 mt-24">
+                            <div className="flex items-start gap-10">
                                 {/* ── Left Column: Cover & Primary Actions ── */}
                                 <div className="flex flex-col gap-5 w-[200px] shrink-0">
                                     {/* Box-art cover */}
@@ -328,15 +340,26 @@ export default function Library() {
                                         >
                                             <Settings size={18} />
                                         </button>
-                                        <button className="h-12 rounded-xl bg-white/5 hover:bg-white/15 border border-white/10 flex items-center justify-center text-white/70 hover:text-white transition-all backdrop-blur-md hover:border-pink-400/40" title="Favorite">
-                                            <Heart size={18} />
+                                        <button 
+                                            onClick={() => toggleFavorite(activeGame.id)}
+                                            className={cn(
+                                                "h-12 rounded-xl bg-white/5 hover:bg-white/15 border border-white/10 flex items-center justify-center transition-all backdrop-blur-md",
+                                                activeGame.is_favorite ? "text-pink-500 border-pink-500/40 bg-pink-500/10" : "text-white/70 hover:text-white hover:border-pink-400/40"
+                                            )} 
+                                            title="Favorite"
+                                        >
+                                            <Heart size={18} fill={activeGame.is_favorite ? "currentColor" : "none"} />
                                         </button>
                                         <button
                                             onClick={() => refreshMetadata(activeGame.id)}
-                                            className="h-12 rounded-xl bg-white/5 hover:bg-white/15 border border-white/10 flex items-center justify-center text-white/70 hover:text-white transition-all backdrop-blur-md hover:border-blue-400/40"
+                                            disabled={isRefreshing[activeGame.id]}
+                                            className={cn(
+                                                "h-12 rounded-xl bg-white/5 hover:bg-white/15 border border-white/10 flex items-center justify-center text-white/70 hover:text-white transition-all backdrop-blur-md hover:border-blue-400/40",
+                                                isRefreshing[activeGame.id] && "opacity-50 cursor-not-allowed"
+                                            )}
                                             title="Refresh metadata"
                                         >
-                                            <RefreshCcw size={18} />
+                                            <RefreshCcw size={18} className={cn(isRefreshing[activeGame.id] && "animate-spin")} />
                                         </button>
                                     </div>
                                 </div>
@@ -447,7 +470,7 @@ export default function Library() {
             </div>
 
             {/* ── Right Panel: Game List ── */}
-            <div className="w-[340px] shrink-0 h-full border-l border-white/5 bg-black/40 backdrop-blur-3xl flex flex-col pointer-events-auto z-30">
+            <div className="absolute right-8 top-1/2 -translate-y-1/2 w-[340px] h-[85vh] rounded-[3rem] border border-white/10 bg-black/50 backdrop-blur-3xl flex flex-col pointer-events-auto z-30 shadow-[0_40px_100px_rgba(0,0,0,0.7)] overflow-hidden">
                 {/* List header */}
                 <div className="px-6 pt-10 pb-5 shrink-0">
                     <div className="flex items-center justify-between mb-5">

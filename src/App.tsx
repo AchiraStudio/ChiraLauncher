@@ -11,6 +11,7 @@ import { useDownloadsStore } from "./store/downloadsStore";
 import { useProfileStore } from "./store/profileStore";
 
 import { AppLayout } from "./components/layout/AppLayout";
+import { Discover } from "./Discover"; // NEW
 import { Browse } from "./Browse";
 import Library from "./pages/Library";
 import { Favorites } from "./Favorites";
@@ -24,8 +25,8 @@ import { useUiStore } from "./store/uiStore";
 import { ThemeEngine } from "./services/ThemeEngine";
 import { useExtensionStore } from "./store/extensionStore";
 import { launchGame } from "./services/gameService";
+import { useCloudSyncEngine } from "./lib/syncEngine"; // NEW
 
-import { useRepackStore } from "./store/repackStore";
 import { invoke } from "@tauri-apps/api/core";
 
 function useTraySync() {
@@ -50,6 +51,9 @@ function App() {
   const setTorrentModalOpen = useUiStore((s) => s.setTorrentModalOpen);
   const isFirstLaunch = useUiStore((s) => s.isFirstLaunch);
   const setFirstLaunch = useUiStore((s) => s.setFirstLaunch);
+
+  // Initialize the invisible cloud bridge! (Will safely do nothing if offline/guest)
+  useCloudSyncEngine();
 
   // --- Tauri Event Bridge ---
   useEffect(() => {
@@ -125,12 +129,14 @@ function App() {
       return;
     }
 
-    useRepackStore.getState().initialize();
     useGameStore.getState().fetchGames();
     useSettingsStore.getState().initialize();
     useFolderStore.getState().load();
     useDownloadsStore.getState().startPolling();
+
+    // Initialize profile and Cloud Auth listeners
     useProfileStore.getState().fetchProfile();
+    useProfileStore.getState().initAuthListener();
 
     invoke("is_first_launch")
       .then((isFirst) => {
@@ -173,7 +179,8 @@ function App() {
       <BrowserRouter>
         <Routes>
           <Route element={<AppLayout />}>
-            <Route path="/" element={<Navigate to="/browse" replace />} />
+            <Route path="/" element={<Navigate to="/discover" replace />} />
+            <Route path="/discover" element={<Discover />} />
             <Route path="/browse" element={<Browse />} />
             <Route path="/library" element={<Library />} />
             <Route path="/favorites" element={<Favorites />} />

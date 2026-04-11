@@ -18,6 +18,7 @@ pub struct ProcessIdentity {
     pub exe_path: String,
     pub start_time: u64,
     pub game_id: String,
+    pub game_title: String,
     pub launched_by: LaunchSource,
     pub elevated: bool,
     pub elevated_stop_flag: Option<Arc<std::sync::atomic::AtomicBool>>,
@@ -45,7 +46,7 @@ pub enum GameDbWrite {
         game_id: String,
         cover_path: Option<String>,
         background_path: Option<String>,
-        logo_path: Option<String>, // NEW
+        logo_path: Option<String>,
     },
     UpdateRunAsAdmin {
         game_id: String,
@@ -71,6 +72,9 @@ pub enum GameDbWrite {
         metadata: Option<String>,
         earned_state: Option<String>,
     },
+    ToggleFavorite {
+        game_id: String,
+    },
 }
 
 #[derive(Debug)]
@@ -86,6 +90,10 @@ pub struct UserProfile {
     pub steam_id: Option<String>,
     pub avatar_url: Option<String>,
     pub xp: u64,
+    pub supabase_user_id: Option<String>,
+    pub is_cloud_synced: bool,
+    pub private_key: Option<String>, // NEW: For local decryption
+    pub public_key: Option<String>,  // NEW: For sharing with others
 }
 
 #[derive(Debug, Clone)]
@@ -112,6 +120,14 @@ pub enum ProfileDbWrite {
     },
     UpdateProfile(UserProfile),
     AddXp(u64),
+    // NEW: Safe local message saving
+    SaveLocalMessage {
+        id: String,
+        contact_id: String,
+        is_mine: bool,
+        plain_text: String,
+        timestamp: u64,
+    },
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]

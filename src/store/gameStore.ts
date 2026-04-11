@@ -11,6 +11,7 @@ interface GameState {
     fetchGames: () => Promise<void>;
     updateGamePlaytime: (gameId: string, elapsedDelta: number) => void;
     refreshMetadata: (gameId: string) => Promise<void>;
+    toggleFavorite: (gameId: string) => Promise<void>;
 }
 
 export const useGameStore = create<GameState>((set, get) => ({
@@ -62,6 +63,32 @@ export const useGameStore = create<GameState>((set, get) => ({
         } finally {
             // Always reset — even on error — so the spinner never stays permanently stuck
             set((state) => ({ isRefreshing: { ...state.isRefreshing, [gameId]: false } }));
+        }
+    },
+
+    toggleFavorite: async (gameId: string) => {
+        const game = get().gamesById[gameId];
+        if (!game) return;
+
+        // Optimistic update
+        set((state) => ({
+            gamesById: {
+                ...state.gamesById,
+                [gameId]: { ...game, is_favorite: !game.is_favorite }
+            }
+        }));
+
+        try {
+            await invoke("toggle_favorite", { id: gameId });
+        } catch (e) {
+            console.error("Failed to toggle favorite:", e);
+            // Rollback on error
+            set((state) => ({
+                gamesById: {
+                    ...state.gamesById,
+                    [gameId]: game
+                }
+            }));
         }
     }
 }));

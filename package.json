@@ -6,11 +6,15 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build:portable": "node scripts/distribute.js portable",
+    "build:setup": "node scripts/distribute.js setup",
+    "build:all": "node scripts/distribute.js portable && node scripts/distribute.js setup",
     "build:debug": "tauri build --debug",
     "preview": "vite preview",
     "tauri": "tauri"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.103.0",
     "@tailwindcss/vite": "^4.2.1",
     "@tanstack/react-virtual": "^3.13.19",
     "@tauri-apps/api": "^2.10.1",

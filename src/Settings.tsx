@@ -13,7 +13,7 @@ import { toast } from "sonner";
 import { cn } from "./lib/utils";
 import {
     Settings as SettingsIcon, Download, Volume2, Palette, Plug, Trophy, Cpu, Monitor,
-    Bell, Inbox, Music, Terminal, Folder, Zap, Share2, CheckCircle2, AlertTriangle, RefreshCcw, Gamepad2, ShieldCheck, Globe, Loader2, Image, Hash
+    Bell, Inbox, Music, Terminal, Folder, Zap, Share2, CheckCircle2, AlertTriangle, RefreshCcw, Gamepad2, ShieldCheck, Globe, Loader2, Image, Hash, Trash2, Database
 } from "lucide-react";
 
 function Toggle({ checked, onChange }: { checked: boolean; onChange: () => void }) {
@@ -61,7 +61,7 @@ const TABS: { id: TabId; icon: React.ReactNode; label: string; desc: string }[] 
     { id: "interface", icon: <Palette size={18} />, label: "Interface", desc: "Visual theme" },
     { id: "integrations", icon: <Plug size={18} />, label: "Integrations", desc: "API Connectivity" },
     { id: "overlay", icon: <Monitor size={18} />, label: "Overlay", desc: "Achievement HUD" },
-    { id: "advanced", icon: <Cpu size={18} />, label: "Advanced", desc: "Dev & Debug" },
+    { id: "advanced", icon: <Cpu size={18} />, label: "Advanced", desc: "Dev & Maintenance" },
 ];
 
 export function Settings() {
@@ -70,6 +70,9 @@ export function Settings() {
     const setAppIdModalOpen = useUiStore((s) => s.setAppIdModalOpen);
     const [activeTab, setActiveTab] = useState<TabId>("general");
     const [isBulkSyncing, setIsBulkSyncing] = useState(false);
+    const [isResetModalOpen, setIsResetModalOpen] = useState(false);
+    const [keepProgress, setKeepProgress] = useState(true);
+    const [isResetting, setIsResetting] = useState(false);
 
     // Isolated state for sliders to prevent DB overload
     const [localSfx, setLocalSfx] = useState(settings?.volume_sfx || 80);
@@ -431,12 +434,123 @@ export function Settings() {
                                                 <AchievementDebugPanel />
                                             </motion.div>
                                         )}
+
+                                        <div className="mt-12">
+                                            <SectionHeader icon={<Trash2 size={24} />} title="System Maintenance" description="Factory reset and storage management." />
+                                            <div className="p-8 rounded-[2rem] bg-red-500/5 border border-red-500/10 space-y-4">
+                                                <div className="flex items-start gap-4">
+                                                    <div className="p-3 bg-red-500/10 rounded-xl text-red-500">
+                                                        <AlertTriangle size={24} />
+                                                    </div>
+                                                    <div>
+                                                        <h3 className="text-white font-bold text-lg">Factory Reset</h3>
+                                                        <p className="text-white/40 text-xs mt-1 leading-relaxed">
+                                                            Returning the application to a factory state will wipe all configurations and settings. 
+                                                            You can optionally choose to preserve your game library and locations.
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                                <div className="flex justify-end pt-2">
+                                                    <button 
+                                                        onClick={() => setIsResetModalOpen(true)}
+                                                        className="px-8 py-3 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-500 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all hover:scale-[1.02] active:scale-95"
+                                                    >
+                                                        Initialize Reset
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </>
                                 )}
                             </motion.div>
                         </AnimatePresence>
                     </div>
                 </div>
+
+                {/* Reset Confirmation Modal */}
+                <AnimatePresence>
+                    {isResetModalOpen && (
+                        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 outline-none">
+                            <motion.div 
+                                initial={{ opacity: 0 }} 
+                                animate={{ opacity: 1 }} 
+                                exit={{ opacity: 0 }}
+                                onClick={() => !isResetting && setIsResetModalOpen(false)}
+                                className="absolute inset-0 bg-black/80 backdrop-blur-xl"
+                            />
+                            <motion.div
+                                initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                                animate={{ opacity: 1, scale: 1, y: 0 }}
+                                exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                                className="relative w-full max-w-lg glass-panel p-10 rounded-[3rem] border border-white/10 shadow-3xl bg-surface/50 overflow-hidden"
+                            >
+                                <div className="absolute top-0 left-0 w-full h-1 bg-red-500/30" />
+                                
+                                <div className="flex flex-col items-center text-center gap-6">
+                                    <div className="w-20 h-20 rounded-3xl bg-red-500/10 flex items-center justify-center text-red-500 border border-red-500/20 mb-2">
+                                        <Trash2 size={40} />
+                                    </div>
+                                    
+                                    <div>
+                                        <h2 className="text-3xl font-black text-white uppercase tracking-tight">System Reset</h2>
+                                        <p className="text-white/40 mt-3 text-sm font-medium leading-relaxed">
+                                            Are you sure you want to proceed with a factory reset? This action is <span className="text-red-400 font-bold uppercase tracking-wider">irreversible</span>.
+                                        </p>
+                                    </div>
+
+                                    <div className="w-full bg-white/5 rounded-2xl p-6 space-y-4 text-left border border-white/5">
+                                        <div 
+                                            onClick={() => setKeepProgress(!keepProgress)}
+                                            className="flex items-center justify-between cursor-pointer group"
+                                        >
+                                            <div className="flex items-center gap-4">
+                                                <div className={cn(
+                                                    "w-10 h-10 rounded-xl flex items-center justify-center transition-all",
+                                                    keepProgress ? "bg-accent/10 text-accent border border-accent/20" : "bg-white/5 text-white/20 border border-white/5"
+                                                )}>
+                                                    <Database size={20} />
+                                                </div>
+                                                <div>
+                                                    <p className="text-white text-xs font-bold uppercase tracking-wider">Keep Library & Data</p>
+                                                    <p className="text-white/20 text-[10px] mt-0.5">Retain games, locations and progress</p>
+                                                </div>
+                                            </div>
+                                            <Toggle checked={keepProgress} onChange={() => setKeepProgress(!keepProgress)} />
+                                        </div>
+                                    </div>
+
+                                    <div className="flex gap-4 w-full mt-4">
+                                        <button
+                                            disabled={isResetting}
+                                            onClick={() => setIsResetModalOpen(false)}
+                                            className="flex-1 px-6 py-4 rounded-2xl bg-white/5 border border-white/10 text-white/50 hover:text-white hover:bg-white/10 transition-all font-black text-[11px] uppercase tracking-widest disabled:opacity-50"
+                                        >
+                                            Abort
+                                        </button>
+                                        <button
+                                            disabled={isResetting}
+                                            onClick={async () => {
+                                                setIsResetting(true);
+                                                try {
+                                                    await invoke("reset_application", { keepProgress });
+                                                    toast.success("System Reset Complete", { description: "The application will now restart." });
+                                                    setTimeout(() => window.location.reload(), 1500);
+                                                } catch (e) {
+                                                    toast.error("Reset Failed", { description: String(e) });
+                                                    setIsResetting(false);
+                                                }
+                                            }}
+                                            className="flex-[1.5] px-6 py-4 rounded-2xl bg-red-500 text-white shadow-lg shadow-red-500/20 hover:bg-red-400 transition-all font-black text-[11px] uppercase tracking-widest flex items-center justify-center gap-3 active:scale-95 disabled:opacity-50"
+                                        >
+                                            {isResetting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+                                            {isResetting ? "Processing..." : "Purge & Reset"}
+                                        </button>
+                                    </div>
+                                </div>
+                            </motion.div>
+                        </div>
+                    )}
+                </AnimatePresence>
             </div>
         </div>
     );

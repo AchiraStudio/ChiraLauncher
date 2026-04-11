@@ -11,7 +11,10 @@ import { LibrarySettingsModal } from "../modals/LibrarySettingsModal";
 import { AppIdManagerModal } from "../modals/AppIdManagerModal";
 import { DownloadManager } from "../ui/DownloadManager";
 import { Sidebar } from "./Sidebar";
+import { AuthModal } from "../modals/AuthModal";
 import { useLocalImage } from "../../hooks/useLocalImage";
+import { useProfileStore } from "../../store/profileStore";
+import { useEffect } from "react";
 
 function Modals() {
     return (
@@ -22,6 +25,7 @@ function Modals() {
             <FolderBuilderModal />
             <LibrarySettingsModal />
             <AppIdManagerModal />
+            <AuthModal />
             <DownloadManager />
         </>
     );
@@ -29,7 +33,13 @@ function Modals() {
 
 function GlobalBackground() {
     const currentBgPath = useUiStore(s => s.currentBg);
-    const { src: currentBg } = useLocalImage(currentBgPath);
+    
+    // ⬅️ FIX 1: Strip the focal point marker so the file reader can find the actual file
+    const cleanPath = currentBgPath ? currentBgPath.split("?pos=")[0] : null;
+    const { src: currentBg } = useLocalImage(cleanPath);
+
+    // ⬅️ FIX 2: Extract the focal point to apply it visually
+    const focalStr = currentBgPath?.includes("?pos=") ? currentBgPath.split("?pos=")[1].replace("-", " ") : "center";
 
     return (
         <div className="fixed inset-0 z-[-1] overflow-hidden pointer-events-none">
@@ -52,6 +62,7 @@ function GlobalBackground() {
                             src={currentBg}
                             alt=""
                             className="w-full h-full object-cover brightness-[0.6] saturate-[1.2] blur-[2px]"
+                            style={{ objectPosition: focalStr }}
                         />
                         <div className="absolute inset-0 bg-gradient-to-t from-background via-background/20 to-transparent" />
                         <div className="absolute inset-0 bg-gradient-to-r from-background/40 via-transparent to-background/40" />
@@ -68,8 +79,12 @@ function GlobalBackground() {
 
 export function AppLayout() {
     const settings = useSettingsStore(s => s.settings);
+    const initAuthListener = useProfileStore(s => s.initAuthListener);
 
-    // Inject the user's custom accent color natively into the DOM variables!
+    useEffect(() => {
+        initAuthListener();
+    }, [initAuthListener]);
+
     const customStyle = {
         '--color-accent': settings?.accent_color || '#3b82f6'
     } as React.CSSProperties;

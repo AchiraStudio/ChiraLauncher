@@ -20,7 +20,7 @@ interface ScannedGame {
     executable_path: string;
     guessed_title: string;
     install_dir: string;
-    crack_type: "codex" | "goldberg" | "anadius" | "unknown";
+    crack_type: "codex" | "goldberg" | "anadius" | "voices38" | "unknown";
     app_id: string;
 }
 
@@ -72,11 +72,8 @@ export function DirectoryScannerModal() {
                 setStep("SCANNING");
                 setProgress({ files_scanned: 0, candidates_found: 0, percentage: 0 });
 
-                // Fire and await the native parallel scan
                 const found: ScannedGame[] = await invoke("scan_directory", { path: selected });
                 setResults(found);
-
-                // Auto-select all by default
                 setSelectedPaths(new Set(found.map((g) => g.executable_path)));
                 setStep("RESULTS");
             }
@@ -105,7 +102,7 @@ export function DirectoryScannerModal() {
                     executable_path: g.executable_path,
                     cover_path: null,
                     background_path: null,
-                    logo_path: null, // Fixed: Added logo_path to resolve TS error
+                    logo_path: null,
                     description: null,
                     developer: null,
                     genre: null,
@@ -115,6 +112,19 @@ export function DirectoryScannerModal() {
                     install_dir: dir,
                     crack_type: g.crack_type,
                     app_id: g.app_id || null,
+                    is_favorite: false,
+                    run_as_admin: false,
+                    publisher: null,
+                    release_date: null,
+                    genres: null,
+                    tags: null,
+                    metacritic_score: null,
+                    platforms: null,
+                    repack_info: null,
+                    manual_achievement_path: null,
+                    steam_app_id: null,
+                    detected_metadata_path: null,
+                    detected_earned_state_path: null,
                 };
                 await invoke("add_game", { game: newGame });
             }
@@ -135,7 +145,6 @@ export function DirectoryScannerModal() {
                 exit={{ opacity: 0, scale: 0.95 }}
                 className="bg-[#232833] w-[700px] min-h-[400px] rounded-xl shadow-2xl border border-white/10 flex flex-col overflow-hidden"
             >
-                {/* Header */}
                 <div className="px-8 py-6 border-b border-white/5 flex items-center justify-between bg-surface-elevated">
                     <h2 className="text-xl font-bold tracking-wide text-white">Bulk Directory Scanner</h2>
                     <button onClick={reset} className="text-muted hover:text-white transition-colors">
@@ -146,7 +155,6 @@ export function DirectoryScannerModal() {
                     </button>
                 </div>
 
-                {/* Content */}
                 <div className="p-8 flex-1 flex flex-col">
                     <AnimatePresence mode="wait">
                         {step === "PICK_DIR" && (

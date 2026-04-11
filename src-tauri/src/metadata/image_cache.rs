@@ -4,8 +4,9 @@ use reqwest::Client;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
-const COVER_WIDTH: u32 = 264;
-const COVER_HEIGHT: u32 = 374;
+// Increased resolution to standard Steam cover size
+const COVER_WIDTH: u32 = 600;
+const COVER_HEIGHT: u32 = 900;
 
 const BG_WIDTH: u32 = 1920;
 const BG_HEIGHT: u32 = 1080;
@@ -29,7 +30,9 @@ impl ImageCache {
 
     fn process_and_save(&self, bytes: &[u8], width: u32, height: u32) -> anyhow::Result<String> {
         let img = image::load_from_memory(bytes).context("Failed to decode source image")?;
-        let resized = img.resize_exact(width, height, FilterType::Lanczos3);
+        
+        // FIX: Used `resize` instead of `resize_exact` to preserve the original aspect ratio!
+        let resized = img.resize(width, height, FilterType::Lanczos3);
 
         let mut jpeg_bytes = std::io::Cursor::new(Vec::new());
         resized
