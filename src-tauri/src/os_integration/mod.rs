@@ -34,7 +34,7 @@ fn sanitize_filename(s: &str) -> String {
 
 fn get_start_menu_dir() -> Option<PathBuf> {
     dirs::data_dir().map(|mut d| {
-        d.push("Microsoft\\Windows\\Start Menu\\Programs\\ChiraLauncher");
+        d.push("Microsoft\\Windows\\Start Menu\\Programs\\Chira Launcher");
         d
     })
 }
@@ -46,13 +46,13 @@ fn get_desktop_dir() -> Option<PathBuf> {
 // ── Create ────────────────────────────────────────────────────────────────────
 
 pub fn create_os_integration(info: &OsIntegrationInfo) -> Result<()> {
-    create_desktop_shortcut(info)?;
+    create_desktop_lnk(info)?; 
     create_start_menu_entry(info)?;
     register_uninstall_info(info)?;
     Ok(())
 }
 
-fn create_desktop_shortcut(info: &OsIntegrationInfo) -> Result<()> {
+fn create_desktop_lnk(info: &OsIntegrationInfo) -> Result<()> {
     let desktop = get_desktop_dir().ok_or_else(|| anyhow!("Could not find desktop directory"))?;
     let lnk_path = desktop.join(format!("{}.lnk", sanitize_filename(&info.title)));
     write_shortcut(&lnk_path, info)
@@ -77,9 +77,6 @@ fn write_shortcut(lnk_path: &PathBuf, info: &OsIntegrationInfo) -> Result<()> {
     sl.set_arguments(Some(format!("--launch-game {}", info.game_id)));
     sl.set_working_dir(Some(info.install_dir.clone()));
 
-    // Note: mslnk doesn't support AppUserModelId directly on the shortcut.
-    // Windows will still use a separate taskbar group per unique target+args combination.
-    // For the shortcut icon, use the game's icon (which could be the extracted .ico or the .exe)
     if let Some(icon_path) = &info.icon_path {
         sl.set_icon_location(Some(icon_path.clone()));
     } else {
@@ -115,30 +112,29 @@ fn register_uninstall_info(info: &OsIntegrationInfo) -> Result<()> {
 
 // ── Remove ────────────────────────────────────────────────────────────────────
 
-/// Remove all OS integration artifacts for a game (by both title and ID for robustness).
 pub fn remove_os_integration(game_id: &str, title: &str) -> Result<()> {
     let safe_title = sanitize_filename(title);
 
-    // ── Desktop shortcut ──────────────────────────────────────────────────
     if let Some(desktop) = get_desktop_dir() {
         let by_title = desktop.join(format!("{}.lnk", safe_title));
         if by_title.exists() {
             fs::remove_file(&by_title).ok();
         }
-        // Fallback by game_id slug (if title was renamed after shortcut creation)
+        let url_title = desktop.join(format!("{}.url", safe_title));
+        if url_title.exists() {
+            fs::remove_file(&url_title).ok();
+        }
         let by_id = desktop.join(format!("chiralauncher_{}.lnk", game_id));
         if by_id.exists() {
             fs::remove_file(&by_id).ok();
         }
     }
 
-    // ── Start Menu shortcut ───────────────────────────────────────────────
     if let Some(start_menu) = get_start_menu_dir() {
         let by_title = start_menu.join(format!("{}.lnk", safe_title));
         if by_title.exists() {
             fs::remove_file(&by_title).ok();
         }
-        // Try to remove the ChiraLauncher folder if it's now empty
         if let Ok(mut entries) = fs::read_dir(&start_menu) as std::io::Result<std::fs::ReadDir> {
             if entries.next().is_none() {
                 fs::remove_dir(&start_menu).ok();
@@ -146,7 +142,6 @@ pub fn remove_os_integration(game_id: &str, title: &str) -> Result<()> {
         }
     }
 
-    // ── Registry key ──────────────────────────────────────────────────────
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let key_name = format!("ChiraLauncher_{}", game_id);
     let uninstall_key_path = format!("{}\\{}", UNINSTALL_REG_PATH, key_name);
@@ -155,8 +150,6 @@ pub fn remove_os_integration(game_id: &str, title: &str) -> Result<()> {
     Ok(())
 }
 
-/// Remove OS integration for a game by ID — looks up title from DB.
-/// Used by the `--remove-game` CLI handler.
 pub fn remove_os_integration_by_id(conn: &Connection, game_id: &str) -> Result<()> {
     let title: String = conn
         .query_row("SELECT title FROM games WHERE id = ?1", [game_id], |row| row.get(0))
@@ -173,7 +166,8 @@ fn remove_os_integration_single(info: &OsIntegrationInfo, integration_type: &str
             if let Some(desktop) = get_desktop_dir() {
                 let path = desktop.join(format!("{}.lnk", sanitize_filename(&info.title)));
                 if path.exists() { let _ = fs::remove_file(path); }
-                // Also try by ID slug
+                let url_path = desktop.join(format!("{}.url", sanitize_filename(&info.title)));
+                if url_path.exists() { let _ = fs::remove_file(url_path); }
                 let by_id = desktop.join(format!("chiralauncher_{}.lnk", info.game_id));
                 if by_id.exists() { let _ = fs::remove_file(by_id); }
             }
@@ -262,7 +256,6 @@ pub async fn toggle_os_integration(
             .to_string()
     });
 
-    // Try to find an icon — look for game's .exe itself, or a .ico in the install dir
     let icon_path = find_game_icon(&exe_path, &install_dir, &game_id);
 
     let info = OsIntegrationInfo {
@@ -280,7 +273,7 @@ pub async fn toggle_os_integration(
                 remove_os_integration_single(&info, "desktop").map_err(|e| e.to_string())?;
                 current.has_desktop_shortcut = false;
             } else {
-                create_desktop_shortcut(&info).map_err(|e| e.to_string())?;
+                create_desktop_lnk(&info).map_err(|e| e.to_string())?;
                 current.has_desktop_shortcut = true;
             }
         },
@@ -312,7 +305,6 @@ pub async fn toggle_os_integration(
     Ok(current)
 }
 
-/// Look for a game icon: prefer .ico in install dir, or extract it from .exe.
 fn find_game_icon(exe_path: &str, install_dir: &str, game_id: &str) -> Option<String> {
     let install = std::path::Path::new(install_dir);
     if let Ok(entries) = fs::read_dir(install) as std::io::Result<std::fs::ReadDir> {
@@ -324,7 +316,6 @@ fn find_game_icon(exe_path: &str, install_dir: &str, game_id: &str) -> Option<St
         }
     }
     
-    // Try to extract icon from EXE
     if std::path::Path::new(exe_path).exists() {
         if let Some(app_data) = dirs::data_local_dir() {
             let icon_dir = app_data.join("ChiraLauncher").join("Icons");
@@ -344,31 +335,23 @@ fn find_game_icon(exe_path: &str, install_dir: &str, game_id: &str) -> Option<St
     }
 }
 
-/// Helper function to extract the large icon from an EXE and save it as a standalone .ico file.
 fn extract_game_icon_to_file(exe_path: &str, out_path: &std::path::Path) -> anyhow::Result<()> {
-    // Convert to UTF-16 wide string for Windows API
     use std::os::windows::ffi::OsStrExt;
     let wide_path: Vec<u16> = std::ffi::OsStr::new(exe_path).encode_wide().chain(std::iter::once(0)).collect();
     
     let mut icon_large: HICON = 0;
     
     unsafe {
-        // 0 = first icon, 1 = get 1 icon
         let count = ExtractIconExW(wide_path.as_ptr(), 0, &mut icon_large, std::ptr::null_mut(), 1);
-        
         if count == 0 || icon_large == 0 {
             return Err(anyhow::anyhow!("No icons found or failed to extract from executable."));
         }
-        
         let result = save_hicon_to_ico_file(icon_large, out_path);
-        
         DestroyIcon(icon_large);
-        
         result
     }
 }
 
-/// Helper function to write an HICON into a valid .ico file format
 unsafe fn save_hicon_to_ico_file(hicon: HICON, out_path: &std::path::Path) -> anyhow::Result<()> {
     use std::io::Write;
     use windows_sys::Win32::UI::WindowsAndMessaging::ICONINFO;
@@ -389,25 +372,20 @@ unsafe fn save_hicon_to_ico_file(hicon: HICON, out_path: &std::path::Path) -> an
         let mut header: BITMAPINFOHEADER = std::mem::zeroed();
         header.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
         header.biWidth = bitmap.bmWidth;
-        // height is typically *-1 for top-down or *2 for combined XOR/AND mask
         header.biHeight = bitmap.bmHeight;
         header.biPlanes = 1;
         header.biBitCount = bitmap.bmBitsPixel as u16;
-        if header.biBitCount < 24 { header.biBitCount = 32; } // upgrade low bpp
+        if header.biBitCount < 24 { header.biBitCount = 32; }
         header.biCompression = BI_RGB as u32;
 
         let mut bmi: BITMAPINFO = std::mem::zeroed();
         bmi.bmiHeader = header;
 
-        // First call to get size
         GetDIBits(hdc, hbitmap, 0, bitmap.bmHeight as u32, std::ptr::null_mut(), &mut bmi, DIB_RGB_COLORS);
-        
-        // Second call to get bits
         let mut pixels: Vec<u8> = vec![0; bmi.bmiHeader.biSizeImage as usize];
         if GetDIBits(hdc, hbitmap, 0, bitmap.bmHeight as u32, pixels.as_mut_ptr() as *mut _, &mut bmi, DIB_RGB_COLORS) == 0 {
             return None;
         }
-        
         Some((pixels, bmi.bmiHeader))
     };
 
@@ -419,34 +397,23 @@ unsafe fn save_hicon_to_ico_file(hicon: HICON, out_path: &std::path::Path) -> an
     if info.hbmMask != 0 { windows_sys::Win32::Graphics::Gdi::DeleteObject(info.hbmMask as _); }
 
     let (pixels, mut header) = color_data.ok_or_else(|| anyhow::anyhow!("Failed to read color bits"))?;
-    
-    // .ico files require height to be multiplied by 2 in the DIB header
     header.biHeight *= 2; 
 
-    // Header size + mask size (if any, otherwise just pad to 32bpp)
     let mask_len = mask_data.as_ref().map(|(m, _)| m.len()).unwrap_or(0);
     
-    // ICONDIR
     let mut file = std::fs::File::create(out_path)?;
-    file.write_all(&[0, 0, 1, 0, 1, 0])?; // idReserved, idType, idCount
-    
-    // ICONDIRENTRY
-    file.write_all(&[header.biWidth as u8])?; // bWidth
-    file.write_all(&[(header.biHeight / 2) as u8])?; // bHeight
-    file.write_all(&[0, 0, 1, 0])?; // bColorCount, bReserved, wPlanes
-    file.write_all(&[header.biBitCount as u8, 0])?; // wBitCount
+    file.write_all(&[0, 0, 1, 0, 1, 0])?;
+    file.write_all(&[header.biWidth as u8])?;
+    file.write_all(&[(header.biHeight / 2) as u8])?;
+    file.write_all(&[0, 0, 1, 0])?;
+    file.write_all(&[header.biBitCount as u8, 0])?;
     
     let bytes_in_res = std::mem::size_of::<BITMAPINFOHEADER>() + pixels.len() + mask_len;
-    file.write_all(&(bytes_in_res as u32).to_le_bytes())?; // dwBytesInRes
-    file.write_all(&22u32.to_le_bytes())?; // dwImageOffset
+    file.write_all(&(bytes_in_res as u32).to_le_bytes())?;
+    file.write_all(&22u32.to_le_bytes())?;
 
-    // Write DIB header
     file.write_all(unsafe { std::slice::from_raw_parts(&header as *const _ as *const u8, std::mem::size_of::<BITMAPINFOHEADER>()) })?;
-    
-    // Write Pixels
     file.write_all(&pixels)?;
-    
-    // Write Mask (if present)
     if let Some((mask_bytes, _)) = mask_data {
         file.write_all(&mask_bytes)?;
     }
@@ -474,4 +441,60 @@ pub fn set_launcher_aumid() {
     unsafe {
         SetCurrentProcessExplicitAppUserModelID(wide.as_ptr());
     }
+}
+
+#[tauri::command]
+pub fn create_all_shortcuts(game_id: String, title: String, exe_path: String, install_dir: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        let safe_title = sanitize_filename(&title);
+
+        // 1. Create Desktop Shortcut (.url using our custom URI and native icon)
+        if let Some(desktop) = get_desktop_dir() {
+            let desktop_shortcut_path = desktop.join(format!("{}.url", safe_title));
+            // Fixed escaping of curly braces for the format! macro
+            let content = format!(
+                "[{{000214A0-0000-0000-C000-000000000046}}]\n\
+                Prop3=19,11\n\
+                [InternetShortcut]\n\
+                IDList=\n\
+                URL=chiralauncher://launch/{}\n\
+                IconIndex=0\n\
+                IconFile={}\n",
+                game_id, exe_path
+            );
+            let _ = std::fs::write(&desktop_shortcut_path, content);
+        }
+
+        // 2. Create Start Menu Shortcut (.lnk in "Chira Launcher" folder using native icon)
+        if let Some(mut start_menu) = dirs::data_dir() {
+            start_menu.push("Microsoft\\Windows\\Start Menu\\Programs\\Chira Launcher");
+            if !start_menu.exists() {
+                let _ = std::fs::create_dir_all(&start_menu);
+            }
+            let lnk_path = start_menu.join(format!("{}.lnk", safe_title));
+
+            if let Ok(current_exe) = std::env::current_exe() {
+                if let Ok(mut sl) = mslnk::ShellLink::new(current_exe.to_string_lossy().as_ref()) {
+                    sl.set_arguments(Some(format!("--launch-game {}", game_id)));
+                    sl.set_working_dir(Some(install_dir));
+                    sl.set_icon_location(Some(exe_path)); // Forces Windows to extract the icon from the game's EXE
+                    let _ = sl.create_lnk(lnk_path);
+                }
+            }
+        }
+        
+        Ok(())
+    }
+    
+    #[cfg(not(target_os = "windows"))]
+    {
+        Err("Shortcuts are currently only supported on Windows.".to_string())
+    }
+}
+
+// Companion command to instantly strip the shortcuts away
+#[tauri::command]
+pub fn remove_all_shortcuts(game_id: String, title: String) -> Result<(), String> {
+    remove_os_integration(&game_id, &title).map_err(|e| e.to_string())
 }

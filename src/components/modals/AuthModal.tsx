@@ -22,7 +22,14 @@ export function AuthModal() {
         try {
             if (isLogin) {
                 const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-                if (error) throw error;
+                
+                if (error) {
+                    // ⬅️ NEW: User-friendly warning translations
+                    if (error.message.includes("Invalid login credentials")) {
+                        throw new Error("Invalid email or password. Are you sure you created an account?");
+                    }
+                    throw error;
+                }
                 
                 const { data: profileData, error: profileErr } = await supabase
                     .from('profiles')
@@ -40,18 +47,40 @@ export function AuthModal() {
                     );
                 }
                 toast.success("Welcome back, Pilot");
+                
             } else {
-                const { error } = await supabase.auth.signUp({ 
+                const { data, error } = await supabase.auth.signUp({ 
                     email, 
                     password,
-                    options: { data: { display_name: username } }
                 });
-                if (error) throw error;
-                toast.success("Identity established. Please check your email.");
+                
+                if (error) {
+                    if (error.message.includes("already registered")) {
+                        throw new Error("This email is already in use. Please log in instead.");
+                    }
+                    throw error;
+                }
+
+                if (data.user) {
+                    // ⬅️ NEW: Explicitly insert the chosen callsign into the profiles table!
+                    const { error: insertErr } = await supabase.from('profiles').upsert({
+                        id: data.user.id,
+                        username: username.trim(),
+                        xp: 0,
+                        role: 'user'
+                    });
+                    
+                    if (insertErr) console.error("Profile creation error:", insertErr);
+
+                    await useProfileStore.getState().updateProfile(
+                        username.trim(), null, null, data.user.id, true
+                    );
+                }
+                toast.success("Identity established! Welcome to the grid.");
             }
             setAuthModalOpen(false);
         } catch (err: any) {
-            toast.error(err.message || "Authentication failed");
+            toast.error("Authentication Failed", { description: err.message });
         } finally {
             setLoading(false);
         }

@@ -13,7 +13,7 @@ export interface UserProfile {
     supabase_user_id: string | null;
     is_cloud_synced: boolean;
     private_key: string | null;
-    public_key: string | null; 
+    public_key: string | null;
 }
 
 interface ProfileState {
@@ -50,12 +50,12 @@ export const useProfileStore = create<ProfileState>((set) => ({
                     } else if (cloudProfile.xp > localProfile.xp) {
                         // Cloud is ahead (played on another PC), pull to local
                         localProfile.xp = cloudProfile.xp;
-                        await invoke("update_profile", { 
+                        await invoke("update_profile", {
                             username: localProfile.username,
                             steamId: localProfile.steam_id,
                             avatarUrl: localProfile.avatar_url,
                             supabaseUserId: localProfile.supabase_user_id,
-                            isCloudSynced: true 
+                            isCloudSynced: true
                         });
                     }
                 }
@@ -98,6 +98,9 @@ export const useProfileStore = create<ProfileState>((set) => ({
 
 if (window.__TAURI_INTERNALS__) {
     listen<AchievementPayload>('achievement-unlocked', (event) => {
+        // EXTREME STRICT MODE: Nullify any XP gained from tests or bugged payloads
+        if (event.payload.is_debug === true || event.payload.xp === 0) return;
+
         useProfileStore.setState((state) => {
             if (state.profile) {
                 return { profile: { ...state.profile, xp: state.profile.xp + (event.payload.xp || 0) } };

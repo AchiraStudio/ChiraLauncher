@@ -28,7 +28,7 @@ export interface Game {
     install_dir: string | null;
     cover_image_path: string | null;
     background_image_path: string | null;
-    logo_path: string | null; // NEW
+    logo_path: string | null;
     description: string | null;
     igdb_id: number | null;
     steam_app_id: number | null;
@@ -57,12 +57,14 @@ export interface Game {
     achievements_unlocked: number | null;
     achievements_total: number | null;
     manual_achievement_path: string | null;
-
+    manual_save_path: string | null;
     crack_type: string | null;
     app_id: string | null;
     detected_metadata_path: string | null;
     detected_earned_state_path: string | null;
     is_favorite: boolean;
+    custom_ach_sound_path: string | null; // ── NEW ──
+    custom_bgm_path: string | null; // ── NEW ──
 }
 
 export type LaunchSource = "Launcher" | "AutoAttach";
@@ -73,7 +75,7 @@ export interface NewGame {
     executable_path: string;
     cover_path: string | null;
     background_path: string | null;
-    logo_path: string | null; // NEW
+    logo_path: string | null;
     description: string | null;
     developer: string | null;
     genre: string | null;
@@ -98,6 +100,8 @@ export interface NewGame {
     detected_metadata_path?: string | null;
     detected_earned_state_path?: string | null;
     is_favorite: boolean;
+    custom_ach_sound_path: string | null; // ── NEW ──
+    custom_bgm_path: string | null; // ── NEW ──
 }
 
 export interface ProcessIdentity {

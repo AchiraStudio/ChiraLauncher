@@ -1,8 +1,9 @@
-import { AnimatePresence, motion } from "framer-motion";
+import { useRef } from "react";
+import { AnimatePresence, motion, useInView } from "framer-motion";
 import { useProcessStore } from "../../store/processStore";
 import { useGameStore } from "../../store/gameStore";
 import { useUiStore } from "../../store/uiStore";
-import { Flame, CheckCircle, Play, Square, Settings } from "lucide-react";
+import { Flame, CheckCircle, Play, Square, Settings, KeyRound } from "lucide-react";
 import type { Game } from "../../types/game";
 import { PlaceholderCover } from "../ui/PlaceholderCover";
 import { cn, formatElapsedSeconds } from "../../lib/utils";
@@ -27,7 +28,11 @@ export function GameCard({ game, onClick, onHoverStart, onHoverEnd, badge }: Gam
     const isRefreshing = useGameStore((s) => s.isRefreshing[game.id] || false);
     const setEditGameModalOpen = useUiStore((s) => s.setEditGameModalOpen);
 
-    const { src: coverUrl, error: coverError } = useLocalImage(game.cover_image_path || (game as any).cover_path);
+    const cardRef = useRef<HTMLDivElement>(null);
+    const isInView = useInView(cardRef, { once: true, margin: "200px" });
+
+    const targetPath = game.cover_image_path || (game as any).cover_path;
+    const { src: coverUrl, error: coverError } = useLocalImage(isInView ? targetPath : null);
 
     const badgeConfig = {
         new: { label: "NEW", bg: "bg-green-500/80", text: "text-white", icon: null },
@@ -37,6 +42,7 @@ export function GameCard({ game, onClick, onHoverStart, onHoverEnd, badge }: Gam
 
     return (
         <motion.div
+            ref={cardRef}
             layoutId={`card-${game.id}`}
             whileHover="hover"
             initial={{ opacity: 0, y: 30, scale: 0.95 }}
@@ -53,11 +59,10 @@ export function GameCard({ game, onClick, onHoverStart, onHoverEnd, badge }: Gam
             className={cn(
                 "relative w-full rounded-xl overflow-hidden cursor-pointer group",
                 "aspect-[2/3] bg-surface",
-                "shadow-[0_4px_16px_rgba(0,0,0,0.5)] hover:shadow-[0_20px_50px_rgba(0,0,0,0.7),0_0_30px_rgba(6,182,212,0.3)]",
-                "ring-0 hover:ring-2 hover:ring-cyan-500/70 transition-shadow duration-300"
+                "shadow-[0_4px_16px_rgba(0,0,0,0.5)] hover:shadow-[0_20px_50px_rgba(0,0,0,0.7),0_0_30px_rgba(var(--color-accent),0.3)]",
+                "ring-0 hover:ring-2 hover:ring-accent/70 transition-shadow duration-300"
             )}
         >
-            {/* Cover image */}
             {coverUrl && !coverError ? (
                 <img
                     src={coverUrl}
@@ -72,7 +77,6 @@ export function GameCard({ game, onClick, onHoverStart, onHoverEnd, badge }: Gam
                 <PlaceholderCover title={game.title} />
             )}
 
-            {/* Gradient overlay — darker at base, glows on hover */}
             <div className={cn(
                 "absolute inset-0 bg-gradient-to-t from-black/90 via-black/10 to-transparent",
                 "transition-opacity duration-300 opacity-60 group-hover:opacity-100"
@@ -136,7 +140,7 @@ export function GameCard({ game, onClick, onHoverStart, onHoverEnd, badge }: Gam
                         "w-16 h-16 rounded-full flex items-center justify-center pointer-events-auto transition-all duration-300 scale-75 group-hover:scale-100 shadow-2xl backdrop-blur-md border border-white/20",
                         isRunning
                             ? "bg-red-500/90 hover:bg-red-600 hover:scale-110 shadow-[0_0_30px_rgba(239,68,68,0.5)]"
-                            : "bg-accent/90 hover:bg-accent hover:scale-110 shadow-[0_0_30_rgba(102,192,244,0.5)]"
+                            : "bg-accent/90 hover:bg-accent hover:scale-110 shadow-[0_0_30_rgba(var(--color-accent),0.5)]"
                     )}
                 >
                     {isRunning ? (
@@ -164,18 +168,26 @@ export function GameCard({ game, onClick, onHoverStart, onHoverEnd, badge }: Gam
                 )}
             </AnimatePresence>
 
-            {/* Bottom overlay — title + playtime on hover */}
+            {/* Bottom overlay — title, playtime, and Crack Type on hover */}
             <div className={cn(
                 "absolute bottom-0 inset-x-0 p-5 flex flex-col gap-1",
                 "transform transition-all duration-300 ease-out",
                 "opacity-0 translate-y-4 group-hover:opacity-100 group-hover:translate-y-0"
             )}>
                 <div className="text-[14px] font-bold text-white drop-shadow-md leading-tight line-clamp-2">{game.title}</div>
-                {game.playtime_seconds > 0 && (
-                    <div className="text-[10px] text-white/50 font-semibold tracking-wide">
-                        {formatPlaytime(game.playtime_seconds)}
-                    </div>
-                )}
+                <div className="flex items-center justify-between mt-1">
+                    {game.playtime_seconds > 0 ? (
+                        <div className="text-[10px] text-white/50 font-semibold tracking-wide">
+                            {formatPlaytime(game.playtime_seconds)}
+                        </div>
+                    ) : <div />}
+
+                    {game.crack_type && game.crack_type !== "unknown" && (
+                        <div className="flex items-center gap-1 bg-white/10 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest text-white/60 border border-white/10">
+                            <KeyRound size={8} /> {game.crack_type}
+                        </div>
+                    )}
+                </div>
             </div>
         </motion.div>
     );

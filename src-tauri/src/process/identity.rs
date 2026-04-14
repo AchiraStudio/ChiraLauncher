@@ -1,42 +1,47 @@
 use sysinfo::Pid;
+use std::path::Path;
 
 pub fn is_process_alive(
     pid: u32,
-    exe_path: &str, // stored localized string
-    start_time: u64,
+    exe_path: &str,
+    install_dir: &str,
     sys: &sysinfo::System,
 ) -> bool {
-    let pid = Pid::from_u32(pid);
-
-    if let Some(process) = sys.process(pid) {
-        let mut path_matches = false;
-
-        if let Some(p) = process.exe() {
-            let path_str = p.to_string_lossy().to_lowercase();
-            if !path_str.is_empty() && path_str == exe_path {
-                path_matches = true;
-            }
-        }
-
-        // Elevation fallback: check if filename matches process name
-        if !path_matches {
-            let exe_file_name = std::path::Path::new(exe_path)
-                .file_name()
-                .map(|n| n.to_string_lossy().to_lowercase())
-                .unwrap_or_default();
-
-            let proc_name = process.name().to_string_lossy().to_lowercase();
-            if proc_name == exe_file_name {
-                path_matches = true;
-            } else if proc_name == format!("{}.exe", exe_file_name) {
-                path_matches = true;
-            }
-        }
-
-        path_matches && process.start_time() == start_time
-    } else {
-        false
+    // 1. Check if the exact original process is alive
+    let target_pid = Pid::from_u32(pid);
+    if sys.process(target_pid).is_some() {
+        return true;
     }
+
+    // 2. If the main PID died (e.g. it was a launcher stub), 
+    // check if ANY process is running from inside the game's install directory!
+    let target_dir = Path::new(install_dir);
+    if !target_dir.as_os_str().is_empty() {
+        for proc in sys.processes().values() {
+            if let Some(exe) = proc.exe() {
+                if exe.starts_with(target_dir) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    // 3. Fallback: check by exact executable name match (useful for elevated processes where path is hidden)
+    let exe_file_name = Path::new(exe_path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+
+    if !exe_file_name.is_empty() {
+        for proc in sys.processes().values() {
+            let proc_name = proc.name().to_string_lossy().to_lowercase();
+            if proc_name == exe_file_name || proc_name == format!("{}.exe", exe_file_name) {
+                return true;
+            }
+        }
+    }
+
+    false
 }
 
 pub fn get_process_start_time(pid: u32, sys: &sysinfo::System) -> Option<u64> {

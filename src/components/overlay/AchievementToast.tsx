@@ -3,12 +3,8 @@ import type { AchievementPayload } from "./overlay-types";
 
 const T_BUBBLE = 350;
 const T_EXPAND = 450;
-const T_HOLD = 5000;
 const T_SHRINK = 350;
 const T_POPOUT = 300;
-
-const BAR_DELAY_MS = T_BUBBLE + T_EXPAND + 150;
-const BAR_DRAIN_MS = T_HOLD - 300;
 
 type Phase = "bubble" | "expand" | "hold" | "shrink" | "popout" | "done";
 type Rarity = "common" | "uncommon" | "rare" | "very_rare" | "ultra_rare";
@@ -55,6 +51,12 @@ export default function AchievementToast({ achievement, onDone }: Props) {
         const timers: ReturnType<typeof setTimeout>[] = [];
         let elapsed = 0;
 
+        // Uses the exact calculated duration from the audio engine
+        const T_HOLD = achievement.duration_ms || 5000;
+
+        const BAR_DELAY_MS = T_BUBBLE + T_EXPAND + 150;
+        const BAR_DRAIN_MS = T_HOLD - 300;
+
         timers.push(setTimeout(() => setPhase("bubble"), 0));
         elapsed += T_BUBBLE;
 
@@ -83,7 +85,7 @@ export default function AchievementToast({ achievement, onDone }: Props) {
         }, BAR_DELAY_MS));
 
         return () => timers.forEach(clearTimeout);
-    }, []);
+    }, [achievement.duration_ms]);
 
     if (phase === "done") return null;
 
@@ -93,7 +95,6 @@ export default function AchievementToast({ achievement, onDone }: Props) {
     const isShrink = phase === "shrink";
     const isPopout = phase === "popout";
 
-    // Animation dimensions
     const width = (isBubble || isShrink || isPopout) ? 64 : 420;
     const height = (isBubble || isShrink || isPopout) ? 64 : 96;
     const borderRadius = (isBubble || isShrink || isPopout) ? "50%" : "20px";
@@ -128,7 +129,6 @@ export default function AchievementToast({ achievement, onDone }: Props) {
                 overflow: "hidden",
                 willChange: "width, height, transform, opacity"
             }}>
-                {/* Left Colored Bar Accent */}
                 <div style={{
                     position: "absolute", left: 0, top: 0, bottom: 0, width: 6,
                     background: `linear-gradient(to bottom, ${tk.accent}, transparent)`,
@@ -136,7 +136,6 @@ export default function AchievementToast({ achievement, onDone }: Props) {
                     opacity: isHold ? 1 : 0, transition: "opacity 0.4s ease"
                 }} />
 
-                {/* Sweeping Light Ray */}
                 <div style={{
                     position: "absolute", top: 0, bottom: 0, width: 40,
                     background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent)",
@@ -145,7 +144,6 @@ export default function AchievementToast({ achievement, onDone }: Props) {
                     opacity: isHold ? 1 : 0,
                 }} />
 
-                {/* Icon Container */}
                 <div style={{
                     position: "absolute", left: 0, width: 90, height: "100%",
                     display: "flex", alignItems: "center", justifyItems: "center", paddingLeft: 20, zIndex: 2
@@ -169,7 +167,6 @@ export default function AchievementToast({ achievement, onDone }: Props) {
                     </div>
                 </div>
 
-                {/* Text Content */}
                 <div style={{
                     flex: 1, paddingLeft: 90, paddingRight: 20,
                     display: "flex", flexDirection: "column", justifyContent: "center",
@@ -193,7 +190,6 @@ export default function AchievementToast({ achievement, onDone }: Props) {
                                 {tk.label}
                             </span>
                         </div>
-                        {/* NEW: XP Badge */}
                         {achievement.xp > 0 && (
                             <div style={{
                                 display: "flex", alignItems: "center", gap: 4,
@@ -225,7 +221,6 @@ export default function AchievementToast({ achievement, onDone }: Props) {
                     )}
                 </div>
 
-                {/* Time Bar */}
                 <div style={{
                     position: "absolute", bottom: 0, left: 0, right: 0, height: 3,
                     background: "rgba(255,255,255,0.05)", opacity: isHold ? 1 : 0, transition: "opacity 0.2s"

@@ -14,6 +14,11 @@ pub async fn run_db_writer(db_path: PathBuf, mut rx: mpsc::UnboundedReceiver<DbW
                 "UPDATE games SET playtime_seconds = playtime_seconds + ?1 WHERE id = ?2",
                 rusqlite::params![delta_seconds, game_id],
             ),
+            // ⬅️ NEW: Overwrite playtime directly from the cloud
+            DbWrite::Game(GameDbWrite::OverwritePlaytime { game_id, playtime_seconds, last_played }) => conn.execute(
+                "UPDATE games SET playtime_seconds = ?1, last_played = COALESCE(?2, last_played) WHERE id = ?3",
+                rusqlite::params![playtime_seconds, last_played, game_id],
+            ),
             DbWrite::Game(GameDbWrite::SetLastPlayed { game_id, timestamp }) => conn.execute(
                 "UPDATE games SET last_played = ?1 WHERE id = ?2",
                 rusqlite::params![timestamp, game_id],
@@ -36,6 +41,10 @@ pub async fn run_db_writer(db_path: PathBuf, mut rx: mpsc::UnboundedReceiver<DbW
             ),
             DbWrite::Game(GameDbWrite::UpdateManualAchievementPath { game_id, path }) => conn.execute(
                 "UPDATE games SET manual_achievement_path = ?1 WHERE id = ?2",
+                rusqlite::params![path, game_id],
+            ),
+            DbWrite::Game(GameDbWrite::UpdateManualSavePath { game_id, path }) => conn.execute(
+                "UPDATE games SET manual_save_path = ?1 WHERE id = ?2",
                 rusqlite::params![path, game_id],
             ),
             DbWrite::Game(GameDbWrite::UpdateDetectedAchievementPaths { game_id, metadata, earned_state }) => 

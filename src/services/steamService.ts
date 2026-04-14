@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { supabase } from "../lib/supabase";
 
 export interface SteamAppDetails {
     name: string;
@@ -36,16 +37,48 @@ export interface SteamReviewsResponse {
 }
 
 export async function fetchSteamMetadata(appId: string): Promise<SteamAppDetails> {
-    const res = await invoke<any>("fetch_steam_app_details", { appId });
-    if (res?.[appId]?.success) {
-        return res[appId].data as SteamAppDetails;
+    // Phase 4: Unlisted Game ID Mapper
+    // Automatically checks Supabase to see if an Anadius/custom ID maps to a real Steam ID
+    let targetAppId = appId;
+    try {
+        const { data: mapping } = await supabase
+            .from("unlisted_games_map")
+            .select("steam_app_id")
+            .eq("unlisted_id", appId)
+            .maybeSingle();
+
+        if (mapping?.steam_app_id) {
+            targetAppId = mapping.steam_app_id.toString();
+        }
+    } catch (e) {
+        console.warn("Could not check Supabase ID mapping:", e);
+    }
+
+    const res = await invoke<any>("fetch_steam_app_details", { appId: targetAppId });
+    if (res?.[targetAppId]?.success) {
+        return res[targetAppId].data as SteamAppDetails;
     }
     throw new Error("Invalid Steam response or App ID not found");
 }
 
 export async function fetchSteamReviews(appId: string): Promise<SteamReviewsResponse | null> {
+    let targetAppId = appId;
     try {
-        const res = await invoke<any>("fetch_steam_reviews", { appId });
+        const { data: mapping } = await supabase
+            .from("unlisted_games_map")
+            .select("steam_app_id")
+            .eq("unlisted_id", appId)
+            .maybeSingle();
+
+        if (mapping?.steam_app_id) {
+            targetAppId = mapping.steam_app_id.toString();
+        }
+    } catch (e) {
+        console.warn("Could not check Supabase ID mapping:", e);
+    }
+
+    try {
+        const res = await invoke<any>("fetch_steam_reviews", { appId: targetAppId });
         if (res?.success === 1) {
             return res as SteamReviewsResponse;
         }
@@ -56,7 +89,6 @@ export async function fetchSteamReviews(appId: string): Promise<SteamReviewsResp
     }
 }
 
-// Helper to convert "26 Feb, 2026" to "2026-02-26" for HTML date inputs
 export function parseSteamDate(steamDateStr: string | undefined): string {
     if (!steamDateStr) return "";
     try {
@@ -69,10 +101,25 @@ export function parseSteamDate(steamDateStr: string | undefined): string {
 }
 
 export async function fetchSteamAchievementPercentages(appId: string): Promise<Record<string, number>> {
+    let targetAppId = appId;
     try {
-        const res = await invoke<any>("fetch_global_achievement_percentages", { appId });
+        const { data: mapping } = await supabase
+            .from("unlisted_games_map")
+            .select("steam_app_id")
+            .eq("unlisted_id", appId)
+            .maybeSingle();
+
+        if (mapping?.steam_app_id) {
+            targetAppId = mapping.steam_app_id.toString();
+        }
+    } catch (e) {
+        console.warn("Could not check Supabase ID mapping:", e);
+    }
+
+    try {
+        const res = await invoke<any>("fetch_global_achievement_percentages", { appId: targetAppId });
         const percentages: Record<string, number> = {};
-        
+
         const list = res?.achievementpercentages?.achievements;
         if (Array.isArray(list)) {
             for (const ach of list) {

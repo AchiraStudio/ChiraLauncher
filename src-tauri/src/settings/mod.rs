@@ -23,7 +23,9 @@ pub struct AppSettings {
     pub sequential_download: bool,
     pub steam_api_key: String,
     pub auto_fetch_achievements: bool,
-    pub accent_color: String, // NEW
+    pub accent_color: String,
+    pub launcher_bgm_path: String,      // NEW
+    pub default_ach_sound_path: String, // NEW
 }
 
 impl Default for AppSettings {
@@ -45,7 +47,9 @@ impl Default for AppSettings {
             sequential_download: false,
             steam_api_key: String::new(),
             auto_fetch_achievements: true,
-            accent_color: "#22d3ee".to_string(), // Default Cyan
+            accent_color: "#22d3ee".to_string(),
+            launcher_bgm_path: String::new(),
+            default_ach_sound_path: String::new(),
         }
     }
 }

@@ -40,7 +40,6 @@ pub fn start(
                 last_db_refresh = Instant::now();
             }
 
-            // 3. Periodic Overlay Persistence (Always on Top re-assertion)
             if last_overlay_refresh.elapsed() > Duration::from_secs(4) {
                 let has_running_games = {
                     let tracked = running.lock().unwrap();
@@ -69,35 +68,13 @@ pub fn start(
                     if !is_process_alive(
                         identity.pid,
                         &identity.exe_path,
-                        identity.start_time,
+                        &identity.install_dir,
                         &sys,
                     ) {
-                        // FIX: PID MIGRATION. Many games use a launcher stub that dies immediately.
-                        // Before we declare the game dead, check if another process with the exact same exe name exists!
-                        let exe_name = std::path::Path::new(&identity.exe_path)
-                            .file_name()
-                            .map(|n| n.to_string_lossy().to_lowercase())
-                            .unwrap_or_default();
+                        keys_to_drop.push(game_id.clone());
 
-                        let mut found_child = false;
-                        for (new_pid, p) in sys.processes() {
-                            let p_name = p.name().to_string_lossy().to_lowercase();
-                            if p_name == exe_name || p_name == format!("{}.exe", exe_name) {
-                                // Found a surviving child/related process! Migrate to this PID.
-                                log::info!("[Monitor] Original PID {} died, but found surviving process {} for game {}. Migrating.", identity.pid, new_pid, game_id);
-                                identity.pid = new_pid.as_u32();
-                                identity.start_time = p.start_time();
-                                found_child = true;
-                                break;
-                            }
-                        }
-
-                        if !found_child {
-                            keys_to_drop.push(game_id.clone());
-
-                            if let Some(flag) = &identity.elevated_stop_flag {
-                                flag.store(true, std::sync::atomic::Ordering::Relaxed);
-                            }
+                        if let Some(flag) = &identity.elevated_stop_flag {
+                            flag.store(true, std::sync::atomic::Ordering::Relaxed);
                         }
                     }
                 }
@@ -110,7 +87,6 @@ pub fn start(
                 }
             }
 
-            // Stop achievement prober tasks for permanently stopped games
             for game_id in &to_remove_keys {
                 if let Ok(Some(game)) = crate::db::queries::get_game_by_id(&read_pool, game_id) {
                     let has_manual_path = game
@@ -132,7 +108,6 @@ pub fn start(
                     {
                         let mut watchers = state.0.lock().unwrap();
 
-                        // Set the AtomicBool to true so the async prober loop breaks
                         if let Some(flag) = watchers.remove(game_id) {
                             flag.store(true, std::sync::atomic::Ordering::Relaxed);
                         }
@@ -150,7 +125,6 @@ pub fn start(
                 }
             }
 
-            // Hide overlay if no games are running
             if !to_remove_keys.is_empty() {
                 let still_running = { running.lock().unwrap().len() };
                 if still_running == 0 {
@@ -160,7 +134,6 @@ pub fn start(
                 }
             }
 
-            // Handle stopped games (DB writes + Events)
             for identity in stopped_identities {
                 let now = chrono::Utc::now().timestamp() as u64;
                 let delta = if identity.start_time > 0 && now >= identity.start_time {
@@ -193,9 +166,18 @@ pub fn start(
                         load_game_stats(&identity.game_id).unwrap_or_else(|| GameStats {
                             game_id: identity.game_id.clone(),
                             first_played: Some(Utc::now()),
-                            stats_version: 1,
+                            stats_version: 2,
                             ..Default::default()
                         });
+
+                    if let Ok(Some(game)) =
+                        crate::db::queries::get_game_by_id(&read_pool, &identity.game_id)
+                    {
+                        stats.app_id = game.steam_app_id.map(|id| id.to_string());
+                        stats.game_title = game.title.clone();
+                    } else {
+                        stats.game_title = identity.game_title.clone();
+                    }
 
                     stats.total_playtime_secs += delta;
                     stats.session_count += 1;
@@ -239,6 +221,7 @@ pub fn start(
                 let mut matched_game_id = None;
                 let mut matched_game_title = String::new();
                 let mut resolved_exe_path = String::new();
+                let mut resolved_install_dir = String::new();
 
                 if let Some(p) = process.exe() {
                     let path_str = p.to_string_lossy().to_lowercase();
@@ -246,9 +229,15 @@ pub fn start(
                         if let Some(id) = exe_map.get(&path_str) {
                             matched_game_id = Some(id.clone());
                             resolved_exe_path = path_str;
-                            // Lookup title
-                            if let Ok(Some(g)) = crate::db::queries::get_game_by_id(&read_pool, id) {
+                            if let Ok(Some(g)) = crate::db::queries::get_game_by_id(&read_pool, id)
+                            {
                                 matched_game_title = g.title.clone();
+                                resolved_install_dir = g.install_dir.unwrap_or_else(|| {
+                                    std::path::Path::new(&g.exe_path)
+                                        .parent()
+                                        .map(|p| p.to_string_lossy().to_string())
+                                        .unwrap_or_default()
+                                });
                             }
                         }
                     }
@@ -267,6 +256,16 @@ pub fn start(
                         {
                             matched_game_id = Some(id.clone());
                             resolved_exe_path = mapped_path.clone();
+                            if let Ok(Some(g)) = crate::db::queries::get_game_by_id(&read_pool, id)
+                            {
+                                matched_game_title = g.title.clone();
+                                resolved_install_dir = g.install_dir.unwrap_or_else(|| {
+                                    std::path::Path::new(&g.exe_path)
+                                        .parent()
+                                        .map(|p| p.to_string_lossy().to_string())
+                                        .unwrap_or_default()
+                                });
+                            }
                             break;
                         }
                     }
@@ -285,6 +284,7 @@ pub fn start(
                         let identity = ProcessIdentity {
                             pid: attached_pid,
                             exe_path: resolved_exe_path,
+                            install_dir: resolved_install_dir,
                             start_time,
                             game_id: game_id.clone(),
                             game_title: matched_game_title.clone(),
@@ -311,7 +311,6 @@ pub fn start(
                             attached_pid
                         );
 
-                        // ── Auto-start achievement prober task ────────────────────────────
                         start_achievement_watcher_for_game(&game_id, &read_pool, &app);
                     }
                 }
@@ -407,7 +406,9 @@ fn start_achievement_watcher_for_game(
             game_path.clone(),
             crate::settings::default_scan_roots(),
             game.manual_achievement_path,
+            game.manual_save_path,
             crack_type,
+            game.custom_ach_sound_path, // <--- FIXED HERE
         ) {
             watchers.insert(watcher_key, stop_flag);
             log::info!(

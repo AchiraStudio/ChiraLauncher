@@ -1,19 +1,19 @@
 import { useState } from "react";
 import { useUiStore } from "../../store/uiStore";
+import { useSettingsStore } from "../../store/settingsStore";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { motion, AnimatePresence } from "framer-motion";
 import { useGameStore } from "../../store/gameStore";
 import { v4 as uuidv4 } from "uuid";
 import type { NewGame } from "../../types/game";
-import { autoFetchSteamAchievements } from "../../services/gameService";
 import { fetchSteamMetadata, parseSteamDate, SteamAppDetails } from "../../services/steamService";
 import { toast } from "sonner";
 import {
     FolderOpen, Gamepad2, CheckCircle2, X, ChevronLeft, Activity,
     Hash, Globe, Sparkles
 } from "lucide-react";
-import { cn } from "../../lib/utils"; // ⬅️ THIS FIXES THE 'cn' ERROR
+import { cn } from "../../lib/utils";
 
 type AddStep = "PICK_FILE" | "DETAILS" | "METADATA" | "CONFIRM";
 
@@ -57,6 +57,10 @@ export function AddGameModal() {
 
     const [steamData, setSteamData] = useState<SteamAppDetails | null>(null);
     const [applySteamData, setApplySteamData] = useState(true);
+
+    const [importOptions, setImportOptions] = useState({
+        achievements: true
+    });
 
     if (!isAddGameModalOpen) return null;
 
@@ -109,6 +113,26 @@ export function AddGameModal() {
                         setManualAchievementPath(achPath);
                     }
 
+                    if (result.app_id) {
+                        try {
+                            const data = await fetchSteamMetadata(result.app_id);
+                            setSteamData(data);
+                            setTitle(data.name);
+                            setDescription(data.detailed_description || data.short_description);
+                            setDeveloper(data.developers?.[0] || "");
+                            setPublisher(data.publishers?.[0] || "");
+                            setReleaseDate(parseSteamDate(data.release_date?.date));
+                            setGenre(data.genres?.map((g: any) => g.description).join(", ") || "");
+
+                            const bgPref = localStorage.getItem("steam_bg_pref") || "hero";
+                            setCoverPath(`https://cdn.cloudflare.steamstatic.com/steam/apps/${result.app_id}/library_600x900.jpg`);
+                            setBackgroundPath(bgPref === "hero" ? `https://cdn.cloudflare.steamstatic.com/steam/apps/${result.app_id}/library_hero.jpg` : data.header_image);
+                            setLogoPath(`https://cdn.cloudflare.steamstatic.com/steam/apps/${result.app_id}/logo_2x.png`);
+                        } catch (err) {
+                            console.error("Silent Steam fetch failed:", err);
+                        }
+                    }
+
                 } catch (e) {
                     console.error("Scanner failed:", e);
                     const filename = selected.split("\\").pop() || "";
@@ -129,12 +153,16 @@ export function AddGameModal() {
             return;
         }
 
+        if (steamData) {
+            setStep("METADATA");
+            return;
+        }
+
         setIsFetchingSteam(true);
         setStep("METADATA");
         try {
             const data = await fetchSteamMetadata(detectedAppId);
             setSteamData(data);
-
             setTitle(data.name);
             setDescription(data.detailed_description || data.short_description);
             setDeveloper(data.developers?.[0] || "");
@@ -173,7 +201,7 @@ export function AddGameModal() {
 
             const newGame: NewGame = {
                 id: uuidv4(),
-                title: applySteamData && steamData ? steamData.name : title,
+                title: title,
                 executable_path: exePath,
                 cover_path: finalCover,
                 background_path: finalBg,
@@ -200,12 +228,27 @@ export function AddGameModal() {
                 repack_info: null,
                 detected_metadata_path: null,
                 detected_earned_state_path: null,
+                custom_ach_sound_path: null,
+                custom_bgm_path: null,
             };
 
             await invoke("add_game", { game: newGame });
 
-            if (newGame.id) {
-                autoFetchSteamAchievements(newGame.id, newGame.install_dir || "");
+            if (newGame.id && newGame.steam_app_id && importOptions.achievements) {
+                const apiKey = useSettingsStore.getState().settings?.steam_api_key;
+                if (apiKey) {
+                    invoke("fetch_and_write_achievements", {
+                        appId: newGame.steam_app_id.toString(),
+                        gameDir: newGame.install_dir || "",
+                        apiKey
+                    }).then(() => {
+                        toast.success("Achievements generated in steam_settings");
+                    }).catch(e => {
+                        toast.error("Failed to generate achievements", { description: String(e) });
+                    });
+                } else {
+                    toast.warning("Cannot generate achievements: No Steam API Key configured in Settings.");
+                }
             }
 
             await new Promise((resolve) => setTimeout(resolve, 500));
@@ -321,7 +364,7 @@ export function AddGameModal() {
 
                                         <div className="grid grid-cols-1 gap-8">
                                             <div className="space-y-3">
-                                                <label className="text-white/30 text-[10px] font-black tracking-normal uppercase ml-1">Detected Title</label>
+                                                <label className="text-white/30 text-[10px] font-black tracking-normal uppercase ml-1">Game Title</label>
                                                 <div className="relative group">
                                                     <div className="absolute inset-y-0 left-0 pl-5 flex items-center pointer-events-none text-accent/50">
                                                         <Gamepad2 size={20} />
@@ -359,7 +402,7 @@ export function AddGameModal() {
                                                 <ChevronLeft size={16} /> Reselect
                                             </button>
                                             <button onClick={fetchMetadata} className="bg-accent hover:brightness-110 text-white px-10 py-4 rounded-2xl font-black tracking-normal uppercase text-[10px] transition-all shadow-lg shadow-accent/20 active:scale-95 flex items-center gap-2">
-                                                <Globe size={16} /> {detectedAppId ? "Fetch Metadata" : "Next Step"}
+                                                <Globe size={16} /> {detectedAppId ? "Next Step" : "Next Step"}
                                             </button>
                                         </div>
                                     </div>
@@ -408,6 +451,10 @@ export function AddGameModal() {
                                                         <div className="absolute top-2 left-2 bg-black/80 px-2 py-1 rounded text-[9px] font-bold text-white/50 uppercase border border-white/10">Logo Preview</div>
                                                     </div>
                                                     <div className="bg-black/40 p-4 rounded-xl border border-white/5 space-y-2 text-xs text-white/70">
+                                                        <label className="flex items-center gap-3 p-2 bg-white/5 rounded-xl border border-transparent hover:border-white/10 cursor-pointer transition-colors mb-2">
+                                                            <input type="checkbox" checked={importOptions.achievements} onChange={(e) => setImportOptions(o => ({ ...o, achievements: e.target.checked }))} className="w-4 h-4 accent-accent" />
+                                                            <span className="text-sm font-bold text-white">Generate steam_settings achievements</span>
+                                                        </label>
                                                         <p><strong className="text-white/40">Title:</strong> {title}</p>
                                                         <p><strong className="text-white/40">Dev:</strong> {developer}</p>
                                                         <p><strong className="text-white/40">Genre:</strong> {genre}</p>

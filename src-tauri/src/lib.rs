@@ -1,6 +1,6 @@
 pub mod achievement_watcher;
 pub mod achievements;
-mod commands;
+pub mod commands;
 pub mod crypto;
 pub mod db;
 pub mod extensions;
@@ -54,14 +54,21 @@ pub fn run() {
         }
     }
 
+    let http_engine = std::sync::Arc::new(commands::http_dl::HttpDownloadEngine::new());
+
     tauri::Builder::default()
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.unminimize();
-                let _ = window.set_focus();
+            let is_background_launch = args.iter().any(|a| a.contains("chiralauncher://launch/"));
+
+            if !is_background_launch {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                }
             }
+
             if let Some(id) = args.iter().skip_while(|a| *a != "--launch-game").nth(1) {
                 let _ = app.emit("launch-game-requested", id);
             }
@@ -71,7 +78,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
-        .setup(|app| {
+        .setup(move |app| {
             #[cfg(windows)]
             {
                 use std::os::windows::ffi::OsStrExt;
@@ -95,6 +102,7 @@ pub fn run() {
             {
                 use tauri_plugin_deep_link::DeepLinkExt;
                 app.deep_link().register("magnet")?;
+                app.deep_link().register("chiralauncher")?;
             }
 
             let read_pool = db::create_read_pool(&db_path);
@@ -117,6 +125,7 @@ pub fn run() {
 
             app.manage(app_state);
             app.manage(achievement_watcher::ActiveWatchers::default());
+            app.manage(http_engine.clone());
 
             {
                 use crate::achievement_watcher::{start_watching_for_game, ActiveWatchers};
@@ -168,7 +177,8 @@ pub fn run() {
                                 let opts = crate::achievements::SyncOptions {
                                     crack_type,
                                     known_app_id: db_app_id.as_deref(),
-                                    manual_path: None,
+                                    manual_metadata_path: None,
+                                    manual_save_path: None,
                                     scan_roots: &default_roots,
                                     steam_api_key: None,
                                     db_tx: Some(&db_tx),
@@ -216,7 +226,9 @@ pub fn run() {
                                 game_dir,
                                 crate::settings::default_scan_roots(),
                                 game.manual_achievement_path,
+                                game.manual_save_path,
                                 crack_type,
+                                game.custom_ach_sound_path,
                             ) {
                                 watchers.insert(watcher_key, watcher);
                             }
@@ -249,7 +261,7 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 let args: Vec<String> = std::env::args().collect();
                 if let Some(id) = args.iter().skip_while(|a| *a != "--launch-game").nth(1) {
-                    tokio::time::sleep(tokio::time::Duration::from_millis(800)).await;
+                    tokio::time::sleep(tokio::time::Duration::from_millis(2500)).await;
                     let _ = app_handle_for_args.emit("launch-game-requested", id);
                 }
             });
@@ -316,13 +328,41 @@ pub fn run() {
                 .always_on_top(true)
                 .skip_taskbar(true)
                 .resizable(false)
-                .shadow(false) // ⬅️ FIX: Explicitly disable OS drop shadows and borders
+                .shadow(false)
                 .visible(false)
                 .focused(false)
                 .build();
 
                 if let Ok(overlay_window) = overlay {
                     let _ = overlay_window.set_ignore_cursor_events(true);
+                }
+            }
+
+            #[cfg(desktop)]
+            {
+                let tray_window = tauri::WebviewWindowBuilder::new(
+                    app,
+                    "tray",
+                    tauri::WebviewUrl::App("/tray".into()),
+                )
+                .title("Chira Tray")
+                .inner_size(320.0, 460.0)
+                .decorations(false)
+                .transparent(true)
+                .always_on_top(true)
+                .skip_taskbar(true)
+                .visible(false)
+                .resizable(false)
+                .shadow(false)
+                .build();
+
+                if let Ok(window) = tray_window {
+                    let window_clone = window.clone();
+                    window.on_window_event(move |event| {
+                        if let tauri::WindowEvent::Focused(false) = event {
+                            let _ = window_clone.hide();
+                        }
+                    });
                 }
             }
 
@@ -344,6 +384,7 @@ pub fn run() {
             commands::game::delete_game,
             commands::game::update_game,
             commands::game::update_game_assets,
+            commands::game::overwrite_playtime,
             commands::launcher::launch_game,
             commands::launcher::force_stop_game,
             commands::launcher::force_borderless,
@@ -356,6 +397,7 @@ pub fn run() {
             commands::metadata::upload_custom_logo,
             commands::metadata::download_url_to_cache,
             commands::metadata::read_image_base64,
+            commands::metadata::read_audio_base64,
             commands::metadata::fetch_steam_app_details,
             commands::metadata::fetch_steam_reviews,
             commands::metadata::fetch_global_achievement_percentages,
@@ -374,6 +416,8 @@ pub fn run() {
             commands::folder::load_folders,
             commands::folder::save_folders,
             tray::update_tray,
+            tray::show_main_window,
+            tray::quit_app,
             commands::torrent::inspect_magnet,
             commands::torrent::start_download,
             commands::torrent::pause_download,
@@ -383,32 +427,34 @@ pub fn run() {
             profile::get_profile,
             profile::update_profile,
             profile::is_first_launch,
-            profile::get_profile,
-            profile::update_profile,
             profile::set_profile_keys,
-            profile::is_first_launch,
             profile::save_local_message,
             profile::get_local_messages,
+            profile::get_recent_chats,
             crypto::generate_keypair,
             crypto::encrypt_message,
             crypto::decrypt_message,
             os_integration::get_os_integration,
             os_integration::toggle_os_integration,
+            os_integration::create_all_shortcuts,
+            os_integration::remove_all_shortcuts,
             achievement_watcher::watch_game_achievements,
             achievement_watcher::stop_game_achievement_watch,
             achievement_watcher::debug_fire_achievement,
             achievement_watcher::debug_fire_custom,
             commands::game::set_manual_achievement_path,
+            commands::game::set_manual_save_path,
             extensions::get_extensions,
             extensions::install_extension,
             extensions::toggle_extension,
             extensions::read_extension_file,
-            commands::metadata::upload_custom_cover,
-            commands::metadata::upload_custom_background,
-            commands::metadata::upload_custom_logo,
-            commands::metadata::download_url_to_cache,
             commands::game::toggle_favorite,
             commands::reset::reset_application,
+            commands::http_dl::add_http_downloads,
+            commands::http_dl::get_http_downloads,
+            commands::http_dl::cancel_http_download,
+            commands::http_dl::pause_http_download,
+            commands::http_dl::resume_http_download,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

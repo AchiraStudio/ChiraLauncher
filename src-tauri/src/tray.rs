@@ -1,40 +1,54 @@
-use tauri::menu::{Menu, MenuItem};
-use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, Manager, PhysicalPosition};
 
 pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
-    let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-    let show_i = MenuItem::with_id(app, "show", "Show Launcher", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
-
-    let _tray = TrayIconBuilder::with_id("main")
+    let _tray = TrayIconBuilder::with_id("chira-tray")
         .icon(app.default_window_icon().unwrap().clone())
-        .menu(&menu)
-        .show_menu_on_left_click(false)
-        .on_menu_event(|app, event| match event.id.as_ref() {
-            "quit" => {
-                app.exit(0);
-            }
-            "show" => {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
+        .on_tray_icon_event(|tray, event| {
+            let app = tray.app_handle();
+            match event {
+                TrayIconEvent::Click {
+                    button,
+                    button_state,
+                    rect,
+                    ..
+                } => {
+                    if button_state == MouseButtonState::Up {
+                        if button == MouseButton::Left {
+                            // Left click: Show main launcher
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.unminimize();
+                                let _ = window.set_focus();
+                            }
+                        } else if button == MouseButton::Right {
+                            // Right click: Summon the Fake Menu window
+                            if let Some(window) = app.get_webview_window("tray") {
+                                if window.is_visible().unwrap_or(false) {
+                                    let _ = window.hide();
+                                } else {
+                                    // Properly extract X and Y from the Tauri Position Enum
+                                    let (x, y) = match rect.position {
+                                        tauri::Position::Physical(p) => (p.x, p.y),
+                                        tauri::Position::Logical(p) => (p.x as i32, p.y as i32),
+                                    };
+
+                                    // Teleport window exactly above the Windows taskbar
+                                    let _ = window.set_position(tauri::Position::Physical(
+                                        PhysicalPosition {
+                                            x: x - 120, // Shift left slightly to center over cursor
+                                            y: y - 480, // Shift up by the height of our custom menu
+                                        },
+                                    ));
+                                    let _ = window.show();
+                                    let _ = window.set_focus();
+                                }
+                            }
+                        }
+                    }
                 }
+                _ => {}
             }
-            _ => {}
-        })
-        .on_tray_icon_event(|tray, event| match event {
-            TrayIconEvent::Click {
-                button: MouseButton::Left,
-                ..
-            } => {
-                let app = tray.app_handle();
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
-            }
-            _ => {}
         })
         .build(app)?;
 
@@ -42,50 +56,22 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
 }
 
 #[tauri::command]
-pub fn update_tray(app: AppHandle, titles: Vec<String>) -> Result<(), String> {
-    use tauri::menu::PredefinedMenuItem;
+pub async fn update_tray() -> Result<(), String> {
+    Ok(())
+}
 
-    let show_i = MenuItem::with_id(&app, "show", "Show Launcher", true, None::<&str>)
-        .map_err(|e| e.to_string())?;
-    let quit_i =
-        MenuItem::with_id(&app, "quit", "Quit", true, None::<&str>).map_err(|e| e.to_string())?;
-    let sep = PredefinedMenuItem::separator(&app).map_err(|e| e.to_string())?;
-
-    let mut menu_items: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> =
-        vec![&show_i, &quit_i, &sep];
-    let mut dynamic_items = Vec::new();
-
-    if titles.is_empty() {
-        let none_i = MenuItem::with_id(&app, "none", "No games running", false, None::<&str>)
-            .map_err(|e| e.to_string())?;
-        dynamic_items.push(none_i);
-    } else {
-        let header_i = MenuItem::with_id(&app, "header", "Running Games:", false, None::<&str>)
-            .map_err(|e| e.to_string())?;
-        dynamic_items.push(header_i);
-
-        for (i, title) in titles.into_iter().enumerate() {
-            let item_i = MenuItem::with_id(
-                &app,
-                format!("game_{}", i),
-                format!("🎮 {}", title),
-                false,
-                None::<&str>,
-            )
-            .map_err(|e| e.to_string())?;
-            dynamic_items.push(item_i);
-        }
+#[tauri::command]
+pub async fn show_main_window(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
     }
+    Ok(())
+}
 
-    for item in &dynamic_items {
-        menu_items.push(item);
-    }
-
-    let menu = Menu::with_items(&app, &menu_items).map_err(|e| e.to_string())?;
-
-    if let Some(tray) = app.tray_by_id("main") {
-        tray.set_menu(Some(menu)).map_err(|e| e.to_string())?;
-    }
-
+#[tauri::command]
+pub async fn quit_app(app: tauri::AppHandle) -> Result<(), String> {
+    app.exit(0);
     Ok(())
 }

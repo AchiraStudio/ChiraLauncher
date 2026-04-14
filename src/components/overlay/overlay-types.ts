@@ -7,7 +7,10 @@ export interface AchievementPayload {
     icon_gray: string | null;
     global_percent: number | null;
     earned_time: number;
-    xp: number; // For triggering the XP visual on the toast
+    xp: number;
+    is_debug?: boolean;
+    custom_sound_path?: string | null; // ── NEW ──
+    duration_ms?: number; // ── NEW: Injected by frontend pre-render ──
 }
 
 export interface GameStartPayload {

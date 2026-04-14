@@ -1,13 +1,14 @@
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { useGameStore } from "./store/gameStore";
 import { useProfileStore } from "./store/profileStore";
+import { useProcessStore } from "./store/processStore";
 import { formatPlaytime } from "./lib/format";
 import { useLocalImage } from "./hooks/useLocalImage";
 import {
     Edit2, Check, Shield, Copy, Trophy, Gamepad2, Clock,
-    LogOut, Sparkles, User, Target, Zap, Fingerprint, Hexagon, TrendingUp, BarChart3, Lock
+    LogOut, Sparkles, User, Target, Zap, Fingerprint, Hexagon, TrendingUp, BarChart3, Lock, Upload
 } from "lucide-react";
 import { supabase } from "./lib/supabase";
 import { toast } from "sonner";
@@ -54,6 +55,12 @@ export function UserPage() {
     const { profile, updateProfile, fetchProfile, session } = useProfileStore();
     const allGames = Object.values(gamesById);
 
+    const runningGames = useProcessStore(s => s.running);
+    const activeGames = Object.values(runningGames);
+    const isPlaying = activeGames.length > 0;
+    const activeGameTitle = isPlaying ? gamesById[activeGames[0].gameId]?.title : "";
+    const playingStatusText = isPlaying ? `Playing ${activeGameTitle}` : (profile?.is_cloud_synced ? "Online" : "Local Node");
+
     useEffect(() => {
         fetchProfile();
     }, [fetchProfile]);
@@ -86,6 +93,8 @@ export function UserPage() {
     const [editName, setEditName] = useState(profile?.username || "");
     const [editSteamId, setEditSteamId] = useState(profile?.steam_id || "");
 
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
     useEffect(() => {
         if (profile) {
             setEditName(profile.username);
@@ -95,11 +104,51 @@ export function UserPage() {
 
     const handleSave = async () => {
         try {
-            await updateProfile(editName, editSteamId || null);
+            await updateProfile(editName, editSteamId || null, profile?.avatar_url, profile?.supabase_user_id, profile?.is_cloud_synced);
             setIsEditing(false);
             toast.success("Identity profile updated");
         } catch (e) {
             toast.error("Failed to update profile");
+        }
+    };
+
+    const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file || !profile?.supabase_user_id) return;
+
+        if (file.size > 5 * 1024 * 1024) {
+            toast.error("Avatar must be less than 5MB");
+            return;
+        }
+
+        const uploadToast = toast.loading("Uploading avatar...");
+
+        try {
+            if (profile.avatar_url && profile.avatar_url.includes('supabase.co/storage/v1/object/public/avatars/')) {
+                const oldPath = profile.avatar_url.split('/avatars/')[1];
+                if (oldPath) {
+                    await supabase.storage.from('avatars').remove([oldPath]);
+                }
+            }
+
+            const fileExt = file.name.split('.').pop();
+            const filePath = `${profile.supabase_user_id}/${Date.now()}.${fileExt}`;
+
+            const { error: uploadError } = await supabase.storage
+                .from('avatars')
+                .upload(filePath, file);
+
+            if (uploadError) throw uploadError;
+
+            const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(filePath);
+
+            await updateProfile(profile.username, profile.steam_id, publicUrl, profile.supabase_user_id, profile.is_cloud_synced);
+
+            await supabase.from('profiles').update({ avatar_url: publicUrl }).eq('id', profile.supabase_user_id);
+
+            toast.success("Profile picture updated!", { id: uploadToast });
+        } catch (err: any) {
+            toast.error("Failed to upload avatar", { id: uploadToast, description: err.message });
         }
     };
 
@@ -113,6 +162,11 @@ export function UserPage() {
     const handleSignOut = async () => {
         await supabase.auth.signOut();
         toast.info("Logged out of grid");
+
+        if (profile) {
+            await updateProfile(profile.username, profile.steam_id, null, null, false);
+        }
+        navigate("/");
     };
 
     return (
@@ -131,7 +185,7 @@ export function UserPage() {
                         <p className="text-white/40 text-[10px] font-bold uppercase tracking-widest mt-1">Global User Record</p>
                     </div>
                     {session && (
-                        <button 
+                        <button
                             onClick={handleSignOut}
                             className="ml-auto px-5 py-2.5 rounded-xl bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white border border-red-500/20 text-[10px] font-black uppercase tracking-widest transition-all shadow-lg active:scale-95 flex items-center gap-2"
                         >
@@ -184,35 +238,57 @@ export function UserPage() {
                                         <button onClick={() => setIsEditing(true)} className="absolute top-0 right-0 w-10 h-10 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/40 hover:text-white transition-colors border border-white/5"><Edit2 size={16} /></button>
 
                                         <div className="flex flex-col items-center text-center mt-2 flex-1">
-                                            <div className="w-32 h-32 rounded-[2.5rem] bg-black/50 border border-white/10 shadow-2xl overflow-hidden mb-6 relative group/avatar">
+                                            <input
+                                                type="file"
+                                                ref={fileInputRef}
+                                                className="hidden"
+                                                accept="image/*"
+                                                onChange={handleAvatarUpload}
+                                            />
+                                            <button
+                                                onClick={() => profile?.supabase_user_id && fileInputRef.current?.click()}
+                                                className="w-32 h-32 rounded-[2.5rem] bg-black/50 border border-white/10 shadow-2xl overflow-hidden mb-6 relative group/avatar cursor-pointer"
+                                                title={profile?.supabase_user_id ? "Change Profile Picture" : "Must connect to Cloud to upload picture"}
+                                            >
                                                 {profile?.avatar_url ? (
-                                                    <img src={profile.avatar_url} alt="Profile" className="w-full h-full object-cover" />
+                                                    <img src={profile.avatar_url} alt="Profile" className="w-full h-full object-cover group-hover/avatar:opacity-40 transition-opacity" />
                                                 ) : (
                                                     <div className="w-full h-full flex items-center justify-center"><User size={48} className="text-white/10" /></div>
                                                 )}
                                                 <div className="absolute inset-0 bg-gradient-to-tr from-accent/20 to-transparent mix-blend-overlay" />
-                                            </div>
+
+                                                {profile?.supabase_user_id && (
+                                                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/avatar:opacity-100 transition-opacity">
+                                                        <Upload className="text-white" size={32} />
+                                                    </div>
+                                                )}
+                                            </button>
 
                                             <h2 className="text-4xl font-black text-white uppercase tracking-tighter mb-3">{profile?.username || (session ? "SYNCING..." : "GUEST")}</h2>
 
-                                            {!session ? (
-                                                <div className="flex items-center justify-center gap-2 mt-2">
-                                                    <span className="px-3 py-1 rounded-md bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[10px] font-black uppercase tracking-widest">
-                                                        Local Node
-                                                    </span>
-                                                    <span className="text-white/30 text-[10px] font-bold uppercase tracking-widest">Offline</span>
-                                                </div>
-                                            ) : (
-                                                <div className="flex items-center justify-center gap-2 mt-2">
+                                            <div className="flex items-center justify-center gap-2 mt-1 mb-2">
+                                                {session && (
                                                     <span className="px-3 py-1 rounded-md bg-accent/10 border border-accent/20 text-accent text-[10px] font-black uppercase tracking-widest">
                                                         Level {stats.level}
                                                     </span>
-                                                    <span className="text-white/30 text-[10px] font-bold uppercase tracking-widest">Node Operator</span>
+                                                )}
+
+                                                <div className="flex items-center gap-1.5 px-3 py-1 bg-black/40 border border-white/5 rounded-md">
+                                                    <span className={cn(
+                                                        "w-1.5 h-1.5 rounded-full shrink-0",
+                                                        isPlaying ? "bg-green-400 animate-pulse shadow-[0_0_8px_rgba(74,222,128,0.8)]" : (profile?.is_cloud_synced ? "bg-accent" : "bg-white/20")
+                                                    )} />
+                                                    <span className={cn(
+                                                        "text-[10px] font-bold uppercase tracking-widest",
+                                                        isPlaying ? "text-green-400" : (profile?.is_cloud_synced ? "text-white/50" : "text-white/30")
+                                                    )}>
+                                                        {playingStatusText}
+                                                    </span>
                                                 </div>
-                                            )}
+                                            </div>
 
                                             {profile?.steam_id && (
-                                                <button onClick={copySteamId} className="mt-5 flex items-center gap-2 px-4 py-2 bg-black/40 hover:bg-black/60 border border-white/5 rounded-lg text-white/40 hover:text-white transition-colors group/id shadow-inner">
+                                                <button onClick={copySteamId} className="mt-4 flex items-center gap-2 px-4 py-2 bg-black/40 hover:bg-black/60 border border-white/5 rounded-lg text-white/40 hover:text-white transition-colors group/id shadow-inner">
                                                     <Shield size={12} />
                                                     <span className="font-mono text-[10px] tracking-widest">{profile.steam_id}</span>
                                                     <Copy size={12} className="opacity-0 group-hover/id:opacity-100 transition-opacity" />
@@ -258,7 +334,6 @@ export function UserPage() {
                     </div>
 
                     <div className="xl:col-span-8 flex flex-col gap-6">
-
                         <div className="bg-[#0f1423]/90 backdrop-blur-3xl rounded-[2.5rem] p-8 border border-white/[0.08] shadow-2xl">
                             <div className="flex items-center justify-between mb-8">
                                 <h3 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-3">

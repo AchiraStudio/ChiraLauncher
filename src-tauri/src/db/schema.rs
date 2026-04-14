@@ -275,6 +275,8 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
                 session_count    INTEGER NOT NULL DEFAULT 0,
                 first_played     TEXT,
                 last_played      TEXT,
+                achievements_unlocked INTEGER NOT NULL DEFAULT 0,
+                achievements_total INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (steam_app_id, title_key)
             )",
             [],
@@ -333,7 +335,6 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         tx.commit()?;
     }
 
-    // NEW Migration 24: Cloud Sync capabilities
     if current_version < 24 {
         let tx = conn.unchecked_transaction()?;
         let _ = tx.execute("ALTER TABLE profiles ADD COLUMN supabase_user_id TEXT", []);
@@ -347,11 +348,9 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
 
     if current_version < 25 {
         let tx = conn.unchecked_transaction()?;
-        // Add keys to local profile
         let _ = tx.execute("ALTER TABLE profiles ADD COLUMN private_key TEXT", []);
         let _ = tx.execute("ALTER TABLE profiles ADD COLUMN public_key TEXT", []);
 
-        // Create local decrypted messages table
         let _ = tx.execute(
             "CREATE TABLE IF NOT EXISTS local_messages (
                 id TEXT PRIMARY KEY,
@@ -366,10 +365,35 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         tx.commit()?;
     }
 
-    if current_version < 26 {
+    if current_version < 27 {
         let tx = conn.unchecked_transaction()?;
-        let _ = tx.execute("ALTER TABLE games ADD COLUMN is_favorite INTEGER DEFAULT 0", []);
-        tx.execute("INSERT INTO schema_migrations (version) VALUES (26)", [])?;
+        let _ = tx.execute("ALTER TABLE games ADD COLUMN manual_save_path TEXT", []);
+        tx.execute("INSERT INTO schema_migrations (version) VALUES (27)", [])?;
+        tx.commit()?;
+    }
+
+    if current_version < 28 {
+        let tx = conn.unchecked_transaction()?;
+        let _ = tx.execute(
+            "ALTER TABLE games ADD COLUMN custom_ach_sound_path TEXT",
+            [],
+        );
+        let _ = tx.execute("ALTER TABLE games ADD COLUMN custom_bgm_path TEXT", []);
+        tx.execute("INSERT INTO schema_migrations (version) VALUES (28)", [])?;
+        tx.commit()?;
+    }
+
+    if current_version < 29 {
+        let tx = conn.unchecked_transaction()?;
+        let _ = tx.execute(
+            "ALTER TABLE settings ADD COLUMN launcher_bgm_path TEXT NOT NULL DEFAULT ''",
+            [],
+        );
+        let _ = tx.execute(
+            "ALTER TABLE settings ADD COLUMN default_ach_sound_path TEXT NOT NULL DEFAULT ''",
+            [],
+        );
+        tx.execute("INSERT INTO schema_migrations (version) VALUES (29)", [])?;
         tx.commit()?;
     }
 

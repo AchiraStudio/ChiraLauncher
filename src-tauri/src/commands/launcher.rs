@@ -164,6 +164,7 @@ pub async fn launch_game(
                 ProcessIdentity {
                     pid,
                     exe_path: clean_exe_path.to_lowercase(),
+                    install_dir: working_dir.clone(),
                     start_time,
                     game_id: id.clone(),
                     game_title: game.title.clone(),
@@ -230,6 +231,7 @@ pub async fn launch_game(
                         ProcessIdentity {
                             pid,
                             exe_path: clean_exe_path.to_lowercase(),
+                            install_dir: working_dir.clone(),
                             start_time,
                             game_id: id.clone(),
                             game_title: game.title.clone(),
@@ -262,6 +264,7 @@ pub async fn launch_game(
             ProcessIdentity {
                 pid,
                 exe_path: clean_exe_path.to_lowercase(),
+                install_dir: working_dir.clone(),
                 start_time,
                 game_id: id.clone(),
                 game_title: game.title.clone(),
@@ -429,125 +432,96 @@ pub async fn toggle_run_as_admin(
         .map_err(|e| e.to_string())
 }
 
+// ── AGGRESSIVE PROCESS KILLER ──
 #[cfg(target_os = "windows")]
-async fn kill_process(pid: u32, is_elevated: bool) -> bool {
-    use std::sync::atomic::{AtomicU32, Ordering};
-    use windows_sys::Win32::Foundation::{BOOL, HWND, LPARAM, TRUE};
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, GetWindowThreadProcessId, IsWindowVisible, PostMessageW, WM_CLOSE,
-    };
-
+async fn kill_process(pid: u32, exe_path: &str, install_dir: &str, is_elevated: bool) -> bool {
     let mut sys = sysinfo::System::new();
+    sys.refresh_processes(sysinfo::ProcessesToUpdate::All);
 
-    if is_elevated {
-        log::info!("Elevated game - attempting graceful close via elevated taskkill");
-        let ps_graceful = format!(
-            "Start-Process taskkill -ArgumentList '/PID {} /T' -Verb RunAs -WindowStyle Hidden",
-            pid
-        );
-        let _ = Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-WindowStyle",
-                "Hidden",
-                "-Command",
-                &ps_graceful,
-            ])
-            .creation_flags(0x00000008) // DETACHED_PROCESS
-            .output();
+    let target_dir = std::path::Path::new(install_dir);
+    let mut pids_to_kill = vec![pid];
 
-        tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
+    let exe_file_name = std::path::Path::new(exe_path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
 
-        sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[sysinfo::Pid::from_u32(
-            pid,
-        )]));
-        if sys.process(sysinfo::Pid::from_u32(pid)).is_none() {
-            return true;
-        }
+    // 1. Gather PIDs: Any process running from within the game folder, OR matching the exe name exactly
+    for (p, proc) in sys.processes() {
+        let pid_val = p.as_u32();
+        if pid_val == pid { continue; }
 
-        log::info!("Elevated game did not close gracefully, forcing kill.");
-        let ps_force = format!(
-            "Start-Process taskkill -ArgumentList '/F /T /PID {}' -Verb RunAs -WindowStyle Hidden",
-            pid
-        );
-        let _ = Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-WindowStyle",
-                "Hidden",
-                "-Command",
-                &ps_force,
-            ])
-            .creation_flags(0x00000008)
-            .output();
-
-        return true;
-    } else {
-        log::info!(
-            "Attempting graceful close (Alt+F4 equivalent) for PID {}",
-            pid
-        );
-
-        static TARGET_PID: AtomicU32 = AtomicU32::new(0);
-        TARGET_PID.store(pid, Ordering::SeqCst);
-
-        unsafe extern "system" fn enum_proc(hwnd: HWND, _lparam: LPARAM) -> BOOL {
-            let mut window_pid = 0;
-            GetWindowThreadProcessId(hwnd, &mut window_pid);
-            // If the window belongs to our target PID and is visible, simulate clicking the X
-            if window_pid == TARGET_PID.load(Ordering::SeqCst) && IsWindowVisible(hwnd) != 0 {
-                PostMessageW(hwnd, WM_CLOSE, 0, 0);
+        let mut should_kill = false;
+        
+        if let Some(exe) = proc.exe() {
+            if !target_dir.as_os_str().is_empty() && exe.starts_with(target_dir) {
+                should_kill = true;
             }
-            TRUE
         }
-
-        unsafe {
-            EnumWindows(Some(enum_proc), 0);
-        }
-
-        // Give the game 2 seconds to save data and cleanly exit
-        tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
-
-        sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[sysinfo::Pid::from_u32(
-            pid,
-        )]));
-        if sys.process(sysinfo::Pid::from_u32(pid)).is_none() {
-            log::info!("Process {} closed gracefully.", pid);
-            return true;
-        }
-
-        log::info!(
-            "Process {} did not close gracefully. Proceeding with force kill.",
-            pid
-        );
-        let force_result = Command::new("taskkill")
-            .args(["/F", "/T", "/PID", &pid.to_string()])
-            .creation_flags(0x00000008)
-            .output();
-
-        match force_result {
-            Ok(output) if output.status.success() => true,
-            _ => {
-                sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[sysinfo::Pid::from_u32(
-                    pid,
-                )]));
-                if let Some(process) = sys.process(sysinfo::Pid::from_u32(pid)) {
-                    process.kill();
-                    true
-                } else {
-                    false
-                }
+        
+        if !should_kill && !exe_file_name.is_empty() {
+            let proc_name = proc.name().to_string_lossy().to_lowercase();
+            if proc_name == exe_file_name || proc_name == format!("{}.exe", exe_file_name) {
+                should_kill = true;
             }
+        }
+
+        if should_kill {
+            pids_to_kill.push(pid_val);
         }
     }
+
+    log::info!("Aggressive Kill: Terminating PIDs {:?}", pids_to_kill);
+
+    // 2. Execute Kills
+    if is_elevated {
+        // Build an elevated PowerShell command to nuke everything
+        let mut ps_args = String::from("Start-Process cmd -ArgumentList '/C ");
+        for p in &pids_to_kill {
+            ps_args.push_str(&format!("taskkill /F /T /PID {} & ", p));
+        }
+        if !exe_file_name.is_empty() {
+            ps_args.push_str(&format!("taskkill /F /T /IM \"{}\" & ", exe_file_name));
+        }
+        ps_args.push_str("echo done' -Verb RunAs -WindowStyle Hidden");
+
+        let _ = Command::new("powershell")
+            .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &ps_args])
+            .creation_flags(0x08000000)
+            .output();
+
+        // Give Windows a second to process the elevated kills
+        tokio::time::sleep(tokio::time::Duration::from_millis(1500)).await;
+        return true;
+    }
+
+    // Standard loop kill
+    for p in &pids_to_kill {
+        if let Some(proc) = sys.process(sysinfo::Pid::from_u32(*p)) {
+            proc.kill();
+        }
+        // Fallback: forcefully wipe them out
+        let _ = Command::new("taskkill")
+            .args(["/F", "/T", "/PID", &p.to_string()])
+            .creation_flags(0x08000000)
+            .output();
+    }
+
+    // Broad sweep just in case
+    if !exe_file_name.is_empty() {
+        let _ = Command::new("taskkill")
+            .args(["/F", "/T", "/IM", &exe_file_name])
+            .creation_flags(0x08000000)
+            .output();
+    }
+
+    true
 }
 
 #[cfg(not(target_os = "windows"))]
-async fn kill_process(pid: u32, _is_elevated: bool) -> bool {
+async fn kill_process(pid: u32, _exe_path: &str, _install_dir: &str, _is_elevated: bool) -> bool {
     let mut sys = sysinfo::System::new();
-    sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[sysinfo::Pid::from_u32(
-        pid,
-    )]));
+    sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[sysinfo::Pid::from_u32(pid)]));
     if let Some(process) = sys.process(sysinfo::Pid::from_u32(pid)) {
         process.kill();
         true
@@ -564,7 +538,7 @@ pub async fn force_stop_game(id: String, state: State<'_, AppState>) -> Result<(
     };
 
     if let Some(identity) = identity {
-        let killed = kill_process(identity.pid, identity.elevated).await;
+        let killed = kill_process(identity.pid, &identity.exe_path, &identity.install_dir, identity.elevated).await;
 
         if killed {
             if let Some(flag) = &identity.elevated_stop_flag {

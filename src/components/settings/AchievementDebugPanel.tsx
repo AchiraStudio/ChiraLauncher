@@ -14,13 +14,35 @@ export function AchievementDebugPanel() {
     const fireCustom = async (override?: any) => {
         setIsFiring(true);
         try {
+            // Map the selected rarity to a float so the overlay renders the correct color
+            const getGlobalPercent = (rarity: string) => {
+                switch(rarity) {
+                    case "common": return 55.0;
+                    case "uncommon": return 30.0;
+                    case "rare": return 15.0;
+                    case "very_rare": return 8.0;
+                    case "ultra_rare": return 2.0;
+                    case "legendary": return 1.0;
+                    case "epic": return 4.0;
+                    default: return 50.0;
+                }
+            };
+
+            const currentRarity = override?.rarity || payload.rarity;
+
             const finalPayload = { 
-                ...payload, 
-                ...override,
+                api_name: override?.api_name || payload.api_name,
+                display_name: override?.display_name || payload.display_name,
+                game_title: "Debug Engine",
+                description: override?.description || payload.description,
                 icon: null,
                 icon_gray: null,
-                earned_time: Math.floor(Date.now() / 1000)
+                global_percent: getGlobalPercent(currentRarity),
+                earned_time: Math.floor(Date.now() / 1000),
+                xp: override?.xp || payload.xp,
+                is_debug: true // Safety flag
             };
+            
             await invoke("debug_fire_custom", { payload: finalPayload });
         } catch (e: any) {
             console.error(e);
@@ -37,18 +59,15 @@ export function AchievementDebugPanel() {
             for (let i = 0; i < 5; i++) {
                 const r = rarities[i];
                 const xp = r === "common" ? 50 : r === "rare" ? 150 : r === "epic" ? 200 : 500;
-                await invoke("debug_fire_custom", { 
-                    payload: {
-                        api_name: `TEST_BURST_${i}`,
-                        display_name: `Burst ${i + 1}`,
-                        description: `A test burst ${r} notification.`,
-                        xp,
-                        rarity: r,
-                        icon: null,
-                        icon_gray: null,
-                        earned_time: Math.floor(Date.now() / 1000)
-                    }
+                
+                await fireCustom({
+                    api_name: `TEST_BURST_${i}`,
+                    display_name: `Burst ${i + 1}`,
+                    description: `A test burst ${r} notification.`,
+                    xp,
+                    rarity: r,
                 });
+                
                 await new Promise(res => setTimeout(res, 100)); // Stagger
             }
         } catch (e: any) {
@@ -86,7 +105,10 @@ export function AchievementDebugPanel() {
                             className="bg-black/40 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white outline-none focus:border-accent"
                         >
                             <option value="common">Common</option>
+                            <option value="uncommon">Uncommon</option>
                             <option value="rare">Rare</option>
+                            <option value="very_rare">Very Rare</option>
+                            <option value="ultra_rare">Ultra Rare</option>
                             <option value="epic">Epic</option>
                             <option value="legendary">Legendary</option>
                         </select>

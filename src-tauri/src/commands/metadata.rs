@@ -74,6 +74,27 @@ pub async fn read_image_base64(path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+pub async fn read_audio_base64(path: String) -> Result<String, String> {
+    let bytes = std::fs::read(&path).map_err(|e| format!("Failed to read audio file: {}", e))?;
+    let ext = std::path::Path::new(&path)
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("mp3")
+        .to_lowercase();
+
+    let mime = match ext.as_str() {
+        "wav" => "audio/wav",
+        "ogg" => "audio/ogg",
+        "flac" => "audio/flac",
+        _ => "audio/mpeg",
+    };
+
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(format!("data:{};base64,{}", mime, b64))
+}
+
+#[tauri::command]
 pub async fn fetch_steam_app_details(app_id: String) -> Result<serde_json::Value, String> {
     let url = format!(
         "https://store.steampowered.com/api/appdetails?appids={}",

@@ -12,7 +12,8 @@ interface UiState {
     isLibrarySettingsModalOpen: boolean;
     isTorrentModalOpen: boolean;
     isAppIdModalOpen: boolean;
-    isAuthModalOpen: boolean; // NEW
+    isAuthModalOpen: boolean;
+    isResetModalOpen: boolean; // NEW
     isFirstLaunch: boolean;
     currentMagnet: string | null;
     currentBg: string | null;
@@ -24,7 +25,8 @@ interface UiState {
     setLibrarySettingsModalOpen: (open: boolean) => void;
     setTorrentModalOpen: (open: boolean, magnetUrl?: string | null) => void;
     setAppIdModalOpen: (open: boolean) => void;
-    setAuthModalOpen: (open: boolean) => void; // NEW
+    setAuthModalOpen: (open: boolean) => void;
+    setResetModalOpen: (open: boolean) => void; // NEW
     setFirstLaunch: (first: boolean) => void;
     setCurrentBg: (bg: string | null) => void;
 }
@@ -40,6 +42,7 @@ export const useUiStore = create<UiState>((set) => ({
     isTorrentModalOpen: false,
     isAppIdModalOpen: false,
     isAuthModalOpen: false,
+    isResetModalOpen: false,
     isFirstLaunch: false,
     currentMagnet: null,
     currentBg: null,
@@ -52,6 +55,7 @@ export const useUiStore = create<UiState>((set) => ({
     setTorrentModalOpen: (open, magnetUrl = null) => set({ isTorrentModalOpen: open, currentMagnet: magnetUrl ?? null }),
     setAppIdModalOpen: (open) => set({ isAppIdModalOpen: open }),
     setAuthModalOpen: (open) => set({ isAuthModalOpen: open }),
+    setResetModalOpen: (open) => set({ isResetModalOpen: open }),
     setFirstLaunch: (first) => set({ isFirstLaunch: first }),
     setCurrentBg: (bg) => set({ currentBg: bg }),
 }));

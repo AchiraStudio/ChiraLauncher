@@ -4,6 +4,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useDownloadsStore } from "../../store/downloadsStore";
 import { useProfileStore } from "../../store/profileStore";
 import { useUiStore } from "../../store/uiStore";
+import { useProcessStore } from "../../store/processStore";
+import { useGameStore } from "../../store/gameStore";
 import { Globe, Library as LibraryIcon, Star, Download, Settings, Pin, PinOff, User, Plus, ShoppingCart, CloudOff } from "lucide-react";
 import { cn } from "../../lib/utils";
 
@@ -33,6 +35,12 @@ export function Sidebar() {
     const { profile } = useProfileStore();
     const setAddGameModalOpen = useUiStore((s) => s.setAddGameModalOpen);
     const setAuthModalOpen = useUiStore((s) => s.setAuthModalOpen);
+    
+    const gamesById = useGameStore(s => s.gamesById);
+    const runningGames = useProcessStore(s => s.running);
+    const activeGames = Object.values(runningGames);
+    const activeGameTitle = activeGames.length > 0 ? gamesById[activeGames[0].gameId]?.title : "";
+    const playingStatus = activeGames.length > 0 ? `Playing ${activeGameTitle}` : (profile?.is_cloud_synced ? "Online" : "Local Node");
 
     const isOpen = isPinned || isHovered;
 
@@ -59,7 +67,7 @@ export function Sidebar() {
                                 className="flex flex-col"
                             >
                                 <span className="font-bold text-white text-lg leading-none">Chira</span>
-                                <span className="text-xs text-accent mt-1 opacity-80">v1.0.4</span>
+                                <span className="text-xs text-accent mt-1 opacity-80">v0.1.2</span>
                             </motion.div>
                         )}
                     </AnimatePresence>
@@ -205,14 +213,14 @@ export function Sidebar() {
                                     {profile?.username || "Guest"}
                                 </span>
                                 <span className={cn(
-                                    "text-xs flex items-center gap-1.5 mt-1",
-                                    profile?.is_cloud_synced ? "text-accent" : "text-white/30"
+                                    "text-[10px] flex items-center gap-1.5 mt-1 font-bold uppercase tracking-wider truncate max-w-[140px]",
+                                    activeGames.length > 0 ? "text-green-400" : (profile?.is_cloud_synced ? "text-accent" : "text-white/30")
                                 )}>
                                     <span className={cn(
-                                        "w-1.5 h-1.5 rounded-full",
-                                        profile?.is_cloud_synced ? "bg-accent animate-pulse shadow-[0_0_8px_rgba(102,192,244,0.8)]" : "bg-white/20"
+                                        "w-1.5 h-1.5 rounded-full shrink-0",
+                                        activeGames.length > 0 ? "bg-green-400 animate-pulse shadow-[0_0_8px_rgba(74,222,128,0.8)]" : (profile?.is_cloud_synced ? "bg-accent animate-pulse shadow-[0_0_8px_rgba(102,192,244,0.8)]" : "bg-white/20")
                                     )} />
-                                    {profile?.is_cloud_synced ? "Online" : "Local Node"}
+                                    <span className="truncate">{playingStatus}</span>
                                 </span>
                             </motion.div>
                         )}

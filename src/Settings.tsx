@@ -1,556 +1,389 @@
-import { useState, useEffect } from "react";
-import { appLogDir } from "@tauri-apps/api/path";
-import { open as openShell } from "@tauri-apps/plugin-shell";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { useSettingsStore } from "./store/settingsStore";
-import { useGameStore } from "./store/gameStore";
-import { useUiStore } from "./store/uiStore";
-import { AchievementDebugPanel } from "./components/settings/AchievementDebugPanel";
-import { fetchSteamMetadata, parseSteamDate } from "./services/steamService";
 import { invoke } from "@tauri-apps/api/core";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { useSettingsStore } from "./store/settingsStore";
+import { useUiStore } from "./store/uiStore";
 import { toast } from "sonner";
-import { cn } from "./lib/utils";
 import {
-    Settings as SettingsIcon, Download, Volume2, Palette, Plug, Trophy, Cpu, Monitor,
-    Bell, Inbox, Music, Terminal, Folder, Zap, Share2, CheckCircle2, AlertTriangle, RefreshCcw, Gamepad2, ShieldCheck, Globe, Loader2, Image, Hash, Trash2, Database
+    Settings2, Paintbrush, HardDrive, Gamepad2,
+    FolderOpen, MonitorSmartphone, Bell, Zap, AlertOctagon, Volume2, Music, Trophy, X, Play
 } from "lucide-react";
+import { cn } from "./lib/utils";
+import { smartAudio } from "./services/SmartAudio";
 
-function Toggle({ checked, onChange }: { checked: boolean; onChange: () => void }) {
-    return (
-        <div onClick={onChange} className={cn("relative w-11 h-6 rounded-full cursor-pointer transition-all duration-300 flex-shrink-0", checked ? "bg-accent shadow-[0_0_15px_rgba(192,38,211,0.3)]" : "bg-white/5 border border-white/5")}>
-            <div className={cn("absolute top-1 w-4 h-4 rounded-full shadow-sm transition-all duration-300", checked ? "left-6 bg-white" : "left-1 bg-white/20")} />
-        </div>
-    );
-}
-
-function SettingRow({ icon, title, description, children, onClick }: { icon: React.ReactNode; title: string; description: string; children: React.ReactNode; onClick?: () => void }) {
-    return (
-        <div onClick={onClick} className={cn("flex items-center gap-5 p-5 transition-colors rounded-2xl mx-1 my-0.5 group", onClick ? "cursor-pointer hover:bg-white/[0.05] active:scale-[0.99]" : "hover:bg-white/[0.02]")}>
-            <div className="w-10 h-10 rounded-xl bg-white/[0.03] border border-white/5 flex items-center justify-center text-white/40 group-hover:text-accent group-hover:border-accent/20 transition-all flex-shrink-0 shadow-inner">
-                {icon}
-            </div>
-            <div className="flex-1 min-w-0 mr-6">
-                <p className="font-bold text-white text-[13px] tracking-wide uppercase ">{title}</p>
-                <p className="text-[11px] text-white/30 mt-1 leading-relaxed font-medium">{description}</p>
-            </div>
-            <div className="flex-shrink-0" onClick={(e) => onClick && e.stopPropagation()}>{children}</div>
-        </div>
-    );
-}
-
-function SectionHeader({ icon, title, description }: { icon: React.ReactNode, title: string; description?: string }) {
-    return (
-        <div className="mb-8 px-2">
-            <div className="flex items-center gap-4">
-                <div className="text-accent drop-shadow-md">{icon}</div>
-                <h2 className="text-xl font-black tracking-normal text-white uppercase ">{title}</h2>
-                <div className="flex-1 h-px bg-white/5 ml-4" />
-            </div>
-            {description && <p className="text-white/20 text-[11px] font-bold mt-2 ml-10 uppercase tracking-widest leading-loose">{description}</p>}
-        </div>
-    );
-}
-
-type TabId = "general" | "downloads" | "audio" | "interface" | "integrations" | "overlay" | "advanced";
-
-const TABS: { id: TabId; icon: React.ReactNode; label: string; desc: string }[] = [
-    { id: "general", icon: <SettingsIcon size={18} />, label: "General", desc: "System behavior" },
-    { id: "downloads", icon: <Download size={18} />, label: "Downloads", desc: "Storage & Speed" },
-    { id: "audio", icon: <Volume2 size={18} />, label: "Audio", desc: "Sound & Music" },
-    { id: "interface", icon: <Palette size={18} />, label: "Interface", desc: "Visual theme" },
-    { id: "integrations", icon: <Plug size={18} />, label: "Integrations", desc: "API Connectivity" },
-    { id: "overlay", icon: <Monitor size={18} />, label: "Overlay", desc: "Achievement HUD" },
-    { id: "advanced", icon: <Cpu size={18} />, label: "Advanced", desc: "Dev & Maintenance" },
+const ACCENT_COLORS = [
+    { name: "Chira Blue", value: "#3b82f6" },
+    { name: "Cyber Cyan", value: "#06b6d4" },
+    { name: "Neon Purple", value: "#a855f7" },
+    { name: "Toxic Pink", value: "#ec4899" },
+    { name: "Matrix Green", value: "#10b981" },
+    { name: "Warning Yellow", value: "#eab308" },
+    { name: "Blood Red", value: "#ef4444" },
+    { name: "Stealth Gray", value: "#94a3b8" },
 ];
 
+type Tab = "general" | "appearance" | "audio" | "downloads" | "overlay";
+
 export function Settings() {
-    const { settings, isLoading, error, updateSetting } = useSettingsStore();
-    const { gamesById, fetchGames } = useGameStore();
-    const setAppIdModalOpen = useUiStore((s) => s.setAppIdModalOpen);
-    const [activeTab, setActiveTab] = useState<TabId>("general");
-    const [isBulkSyncing, setIsBulkSyncing] = useState(false);
-    const [isResetModalOpen, setIsResetModalOpen] = useState(false);
-    const [keepProgress, setKeepProgress] = useState(true);
-    const [isResetting, setIsResetting] = useState(false);
+    const { settings, updateSettings, isLoading } = useSettingsStore();
+    const setResetModalOpen = useUiStore((s) => s.setResetModalOpen);
+    const [activeTab, setActiveTab] = useState<Tab>("appearance");
 
-    // Isolated state for sliders to prevent DB overload
-    const [localSfx, setLocalSfx] = useState(settings?.volume_sfx || 80);
-    const [localBgm, setLocalBgm] = useState(settings?.volume_bgm || 50);
+    if (isLoading || !settings) {
+        return <div className="h-full w-full flex items-center justify-center text-white/20">Loading Core Systems...</div>;
+    }
 
-    useEffect(() => {
-        if (settings) {
-            setLocalSfx(settings.volume_sfx);
-            setLocalBgm(settings.volume_bgm);
-        }
-    }, [settings]);
-
-    const handleBulkSync = async () => {
-        if (!window.confirm("This will overwrite metadata for ALL games that have a Steam App ID attached. Proceed?")) return;
-        setIsBulkSyncing(true);
-        const games = Object.values(gamesById);
-        let successCount = 0;
-        let failCount = 0;
-
-        for (const game of games) {
-            if (!game.steam_app_id) continue;
-            try {
-                const data = await fetchSteamMetadata(game.steam_app_id.toString());
-                const bgPref = localStorage.getItem("steam_bg_pref") || "hero";
-                const bgUrl = bgPref === "hero"
-                    ? `https://cdn.cloudflare.steamstatic.com/steam/apps/${game.steam_app_id}/library_hero.jpg`
-                    : data.header_image;
-
-                const updatedGame = {
-                    ...game,
-                    title: data.name,
-                    description: data.detailed_description || data.short_description,
-                    developer: data.developers?.[0] || game.developer,
-                    publisher: data.publishers?.[0] || game.publisher,
-                    release_date: parseSteamDate(data.release_date?.date),
-                    genre: data.genres?.map(g => g.description).join(", ") || game.genre,
-                    cover_image_path: `https://cdn.cloudflare.steamstatic.com/steam/apps/${game.steam_app_id}/library_600x900.jpg`,
-                    background_image_path: bgUrl,
-                };
-
-                await invoke("update_game", { game: updatedGame });
-                successCount++;
-            } catch (e) {
-                failCount++;
+    const handlePickDownloadDir = async () => {
+        try {
+            const selected = await openDialog({ directory: true, multiple: false });
+            if (selected && typeof selected === "string") {
+                await updateSettings({ download_path: selected });
+                toast.success("Download path updated successfully");
             }
-            await new Promise(r => setTimeout(r, 1000));
+        } catch (e) {
+            toast.error("Failed to select directory");
         }
-
-        await fetchGames();
-        setIsBulkSyncing(false);
-        toast.success("Bulk Sync Complete", { description: `${successCount} updated, ${failCount} failed.` });
     };
 
-    if (isLoading) {
-        return (
-            <div className="flex flex-col gap-4 px-12 pt-12 max-w-[1000px] mx-auto w-full">
-                {[...Array(5)].map((_, i) => (
-                    <div key={i} className="h-20 rounded-2xl glass-panel animate-pulse bg-white/5" />
-                ))}
-            </div>
-        );
-    }
+    const handlePickAudio = async (type: "launcher_bgm" | "default_ach") => {
+        try {
+            const selected = await openDialog({ multiple: false, filters: [{ name: "Audio", extensions: ["mp3", "wav", "ogg", "flac"] }] });
+            if (selected && typeof selected === "string") {
+                if (type === "launcher_bgm") {
+                    await updateSettings({ launcher_bgm_path: selected });
+                    toast.success("Launcher BGM updated.");
+                    // Immediately trigger playback of new bgm if we are on global bgm
+                    smartAudio.playGlobalBGM();
+                } else {
+                    await updateSettings({ default_ach_sound_path: selected });
+                    toast.success("Default Achievement sound updated.");
+                }
+            }
+        } catch (e) {
+            toast.error("Failed to select audio file");
+        }
+    };
 
-    if (error) {
-        return (
-            <div className="text-white p-12 flex flex-col items-center justify-center min-h-[60vh] gap-6 text-center">
-                <div className="w-20 h-20 rounded-3xl bg-red-500/10 flex items-center justify-center text-red-500 mb-2 border border-red-500/20">
-                    <AlertTriangle size={40} />
-                </div>
-                <div>
-                    <h1 className="text-2xl font-black text-white uppercase tracking-widest">Configuration Error</h1>
-                    <p className="text-white/40 mt-2 max-w-sm text-sm font-medium leading-relaxed">{error}</p>
-                </div>
-                <button
-                    onClick={() => window.location.reload()}
-                    className="px-8 py-3 bg-accent text-white rounded-2xl text-[11px] font-black tracking-normal uppercase transition-all shadow-xl hover:scale-105 active:scale-95"
-                >
-                    <RefreshCcw size={14} className="inline mr-2" /> Restart System
-                </button>
-            </div>
-        );
-    }
+    const handleTestAchievement = async (formatType: string) => {
+        try {
+            await invoke("debug_fire_achievement", { formatType });
+            toast.success(`Fired ${formatType.toUpperCase()} test achievement`);
+        } catch (e: any) {
+            toast.error("Overlay Test Failed", { description: e.toString() });
+        }
+    };
 
-    if (!settings) return null;
+    const TABS = [
+        { id: "appearance", label: "Appearance", icon: <Paintbrush size={18} /> },
+        { id: "general", label: "System Behavior", icon: <MonitorSmartphone size={18} /> },
+        { id: "audio", label: "Audio & Acoustics", icon: <Volume2 size={18} /> },
+        { id: "downloads", label: "Storage & Paths", icon: <HardDrive size={18} /> },
+        { id: "overlay", label: "Overlay & Tracking", icon: <Gamepad2 size={18} /> },
+    ] as const;
 
     return (
         <div className="absolute inset-0 overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
-            <div className="flex flex-col min-h-full px-14 pt-14 pb-32 max-w-[1440px] mx-auto w-full">
-                <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }} className="mb-14">
-                    <h1 className="text-5xl font-black tracking-tight text-white mb-2 uppercase ">Settings</h1>
-                    <p className="text-white/20 text-[10px] font-black tracking-normal uppercase">Control Center — v1.0.4</p>
-                </motion.div>
+            <div className="absolute top-[-10%] right-[-5%] w-[600px] h-[600px] bg-accent/10 blur-[150px] rounded-full pointer-events-none" />
+            <div className="absolute bottom-[-10%] left-[-5%] w-[500px] h-[500px] bg-blue-600/10 blur-[150px] rounded-full pointer-events-none" />
 
-                <div className="flex gap-14 items-start">
-                    {/* SIDEBAR PILL NAV */}
-                    <div className="w-60 flex-shrink-0 space-y-1 sticky top-14">
+            <div className="flex flex-col min-h-full px-10 md:px-14 pt-14 pb-32 max-w-[1440px] mx-auto w-full relative z-10">
+
+                <header className="mb-12 flex items-center gap-4">
+                    <div className="w-14 h-14 rounded-2xl bg-accent/10 border border-accent/20 flex items-center justify-center shadow-[0_0_30px_rgba(var(--color-accent),0.2)]">
+                        <Settings2 className="text-accent w-7 h-7" />
+                    </div>
+                    <div>
+                        <h1 className="text-4xl font-black text-white uppercase tracking-tighter">Control Panel</h1>
+                        <p className="text-white/40 text-[11px] font-bold uppercase tracking-widest mt-1">Configure ChiraLauncher Parameters</p>
+                    </div>
+                </header>
+
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+
+                    <div className="lg:col-span-3 flex flex-col gap-2">
                         {TABS.map((tab) => (
                             <button
                                 key={tab.id}
                                 onClick={() => setActiveTab(tab.id)}
                                 className={cn(
-                                    "w-full flex items-center gap-4 px-5 py-4 rounded-2xl transition-all text-left group relative outline-none",
-                                    activeTab === tab.id ? "bg-white/[0.04] border border-white/10 shadow-2xl" : "bg-transparent border border-transparent hover:bg-white/[0.02] hover:border-white/5"
+                                    "flex items-center gap-3 px-5 py-4 rounded-2xl transition-all duration-300 font-bold text-sm tracking-wide text-left",
+                                    activeTab === tab.id
+                                        ? "bg-accent/15 text-accent border border-accent/30 shadow-[0_0_20px_rgba(var(--color-accent),0.1)]"
+                                        : "bg-white/[0.02] text-white/50 border border-transparent hover:bg-white/[0.05] hover:text-white"
                                 )}
                             >
-                                {activeTab === tab.id && (
-                                    <motion.div layoutId="nav-pill" className="absolute inset-0 bg-accent/5 rounded-2xl -z-10" />
-                                )}
-                                <span className={cn("transition-all duration-300", activeTab === tab.id ? "text-accent scale-110 drop-shadow-[0_0_8px_rgba(192,38,211,0.4)]" : "text-white/20 group-hover:text-white/40")}>
-                                    {tab.icon}
-                                </span>
-                                <div>
-                                    <p className={cn("font-black tracking-widest text-[11px] uppercase ", activeTab === tab.id ? "text-white" : "text-white/30 group-hover:text-white/60")}>
-                                        {tab.label}
-                                    </p>
-                                    <p className={cn("text-[9px] font-bold mt-0.5 tracking-wider truncate", activeTab === tab.id ? "text-accent/60" : "text-white/10 group-hover:text-white/20")}>
-                                        {tab.desc}
-                                    </p>
-                                </div>
+                                {tab.icon} {tab.label}
                             </button>
                         ))}
                     </div>
 
-                    {/* MAIN CONTENT AREA */}
-                    <div className="flex-1 max-w-[850px] mb-20">
+                    <div className="lg:col-span-9 bg-[#0f1423]/80 backdrop-blur-3xl border border-white/[0.08] rounded-[2.5rem] p-10 shadow-2xl relative overflow-hidden">
+                        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-accent to-purple-500" />
+
                         <AnimatePresence mode="wait">
-                            <motion.div
-                                key={activeTab}
-                                initial={{ opacity: 0, x: 20 }}
-                                animate={{ opacity: 1, x: 0 }}
-                                exit={{ opacity: 0, x: -10 }}
-                                transition={{ duration: 0.25 }}
-                                className="glass-panel p-10 rounded-[2.5rem] border border-white/5 shadow-3xl bg-surface/30 backdrop-blur-3xl"
-                            >
-                                {/* GENERAL */}
-                                {activeTab === "general" && (
-                                    <>
-                                        <SectionHeader icon={<SettingsIcon size={24} />} title="System Engine" description="Manage core launcher lifecycle and behavior." />
-                                        <div className="space-y-1">
-                                            <SettingRow icon={<Terminal size={20} />} title="Boot Sequence" description="Start ChiraLauncher automatically when Windows session begins." onClick={() => updateSetting("auto_launch_on_boot", !settings.auto_launch_on_boot)}>
-                                                <Toggle checked={settings.auto_launch_on_boot} onChange={() => updateSetting("auto_launch_on_boot", !settings.auto_launch_on_boot)} />
-                                            </SettingRow>
-                                            <SettingRow icon={<Bell size={20} />} title="OS Presence" description="Allow system notifications for finished downloads and unlocked achievements." onClick={() => updateSetting("enable_notifications", !settings.enable_notifications)}>
-                                                <Toggle checked={settings.enable_notifications} onChange={() => updateSetting("enable_notifications", !settings.enable_notifications)} />
-                                            </SettingRow>
-                                            <SettingRow icon={<Inbox size={20} />} title="Stealth Mode" description="Automatically minimize to system tray when the main window is closed." onClick={() => updateSetting("minimize_to_tray", !settings.minimize_to_tray)}>
-                                                <Toggle checked={settings.minimize_to_tray} onChange={() => updateSetting("minimize_to_tray", !settings.minimize_to_tray)} />
-                                            </SettingRow>
-                                        </div>
-                                    </>
-                                )}
 
-                                {/* DOWNLOADS */}
-                                {activeTab === "downloads" && (
-                                    <>
-                                        <SectionHeader icon={<Download size={24} />} title="Storage & Network" description="Transmission protocols and decentralized storage routing." />
-                                        <div className="space-y-1">
-                                            <SettingRow icon={<Folder size={20} />} title="Primary Vault" description={settings.download_path}>
+                            {activeTab === "appearance" && (
+                                <motion.div key="appearance" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} className="space-y-10">
+                                    <div className="space-y-4">
+                                        <div>
+                                            <h3 className="text-lg font-black text-white uppercase tracking-wider mb-1">Global Accent Color</h3>
+                                            <p className="text-xs text-white/40 font-medium">Select the primary glowing color for buttons, borders, and overlays.</p>
+                                        </div>
+                                        <div className="grid grid-cols-4 md:grid-cols-8 gap-4">
+                                            {ACCENT_COLORS.map((color) => (
                                                 <button
-                                                    onClick={async () => {
-                                                        const selected = await openDialog({ directory: true });
-                                                        if (selected && typeof selected === "string") updateSetting("download_path", selected);
-                                                    }}
-                                                    className="px-6 py-2.5 bg-white/[0.04] rounded-xl border border-white/10 hover:bg-white/10 hover:border-white/20 active:scale-95 transition-all text-[10px] font-black tracking-widest uppercase text-white/50 hover:text-white"
-                                                >
-                                                    Relocate
-                                                </button>
-                                            </SettingRow>
-                                            <SettingRow icon={<Zap size={20} />} title="Bandwidth Intake" description="Maximum download bit-rate (KB/s). Set to 0 for max throughput.">
-                                                <input type="number" min="0" value={settings.max_download_speed_kbps} onChange={(e) => updateSetting("max_download_speed_kbps", parseInt(e.target.value) || 0)} className="w-28 bg-black/40 border border-white/5 rounded-xl px-4 py-2.5 text-xs text-white outline-none focus:border-accent font-mono shadow-inner text-right" />
-                                            </SettingRow>
-                                            <SettingRow icon={<Share2 size={20} />} title="Uplink Pressure" description="Maximum upload bit-rate (KB/s). Set to 0 for max throughput.">
-                                                <input type="number" min="0" value={settings.max_upload_speed_kbps} onChange={(e) => updateSetting("max_upload_speed_kbps", parseInt(e.target.value) || 0)} className="w-28 bg-black/40 border border-white/5 rounded-xl px-4 py-2.5 text-xs text-white outline-none focus:border-accent font-mono shadow-inner text-right" />
-                                            </SettingRow>
-                                            <SettingRow icon={<RefreshCcw size={20} />} title="Concurrent Tasks" description="Number of parallel transmission streams (1-10).">
-                                                <input type="number" min="1" max="10" value={settings.max_concurrent_downloads} onChange={(e) => updateSetting("max_concurrent_downloads", Math.max(1, Math.min(10, parseInt(e.target.value) || 3)))} className="w-28 bg-black/40 border border-white/5 rounded-xl px-4 py-2.5 text-xs text-white outline-none focus:border-accent font-mono shadow-inner text-right" />
-                                            </SettingRow>
-                                            <SettingRow icon={<CheckCircle2 size={20} />} title="Sequential Flow" description="Force data pieces to download in chronological order. Safe for storage, slower speed." onClick={() => updateSetting("sequential_download", !settings.sequential_download)}>
-                                                <Toggle checked={settings.sequential_download} onChange={() => updateSetting("sequential_download", !settings.sequential_download)} />
-                                            </SettingRow>
-                                            <SettingRow icon={<Gamepad2 size={20} />} title="Neural Sync" description="Automatically index and add completed downloads to game library." onClick={() => updateSetting("auto_add_to_library", !settings.auto_add_to_library)}>
-                                                <Toggle checked={settings.auto_add_to_library} onChange={() => updateSetting("auto_add_to_library", !settings.auto_add_to_library)} />
-                                            </SettingRow>
-                                        </div>
-                                    </>
-                                )}
-
-                                {/* AUDIO */}
-                                {activeTab === "audio" && (
-                                    <>
-                                        <SectionHeader icon={<Volume2 size={24} />} title="Acoustic Fidelity" description="Internal soundscape and interaction feedback." />
-                                        <div className="space-y-1">
-                                            <SettingRow icon={<Volume2 size={20} />} title="Interaction SFX" description={`Main menu and click audio feedback — ${localSfx}%`}>
-                                                <input
-                                                    type="range"
-                                                    min="0" max="100"
-                                                    value={localSfx}
-                                                    onChange={(e) => setLocalSfx(parseInt(e.target.value))}
-                                                    onMouseUp={() => updateSetting("volume_sfx", localSfx)}
-                                                    className="w-44 h-1.5 bg-white/10 rounded-full appearance-none cursor-pointer accent-accent"
+                                                    key={color.value}
+                                                    onClick={() => updateSettings({ accent_color: color.value })}
+                                                    className={cn(
+                                                        "w-12 h-12 rounded-2xl transition-all flex items-center justify-center shadow-lg",
+                                                        settings.accent_color === color.value ? "scale-110 ring-4 ring-white/20" : "hover:scale-105 opacity-80 hover:opacity-100"
+                                                    )}
+                                                    style={{ backgroundColor: color.value, boxShadow: settings.accent_color === color.value ? `0 0 20px ${color.value}80` : 'none' }}
                                                 />
-                                            </SettingRow>
-                                            <SettingRow icon={<Music size={20} />} title="Atmospheric BGM" description={`Background ambient score volume — ${localBgm}%`}>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    <div className="h-px w-full bg-white/5" />
+
+                                    <div className="space-y-4">
+                                        <div>
+                                            <h3 className="text-lg font-black text-white uppercase tracking-wider mb-1">Library Background Art</h3>
+                                            <p className="text-xs text-white/40 font-medium">Choose which official Steam image to use as the backdrop when inspecting a game.</p>
+                                        </div>
+                                        <div className="flex gap-4">
+                                            <button
+                                                onClick={() => updateSettings({ steam_bg_pref: "hero" })}
+                                                className={cn("flex-1 p-5 rounded-2xl border transition-all text-left", settings.steam_bg_pref === "hero" ? "bg-accent/10 border-accent text-accent" : "bg-black/40 border-white/10 text-white/60 hover:border-white/20 hover:text-white")}
+                                            >
+                                                <p className="font-bold text-sm mb-1">Hero Banner</p>
+                                                <p className="text-xs opacity-70">Wider, cinematic landscape art (Default)</p>
+                                            </button>
+                                            <button
+                                                onClick={() => updateSettings({ steam_bg_pref: "store" })}
+                                                className={cn("flex-1 p-5 rounded-2xl border transition-all text-left", settings.steam_bg_pref === "store" ? "bg-accent/10 border-accent text-accent" : "bg-black/40 border-white/10 text-white/60 hover:border-white/20 hover:text-white")}
+                                            >
+                                                <p className="font-bold text-sm mb-1">Store Header</p>
+                                                <p className="text-xs opacity-70">Standard game header with built-in logo</p>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </motion.div>
+                            )}
+
+                            {activeTab === "audio" && (
+                                <motion.div key="audio" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} className="space-y-10">
+                                    <div className="space-y-6">
+                                        <div>
+                                            <h3 className="text-lg font-black text-white uppercase tracking-wider mb-1">Global Sounds & BGM</h3>
+                                            <p className="text-xs text-white/40 font-medium">Personalize the launcher's background music and default achievement unlock effect.</p>
+                                        </div>
+
+                                        <div className="space-y-2">
+                                            <label className="text-[10px] font-black text-white/40 tracking-widest uppercase">Launcher Background Music</label>
+                                            <div className="flex gap-2 items-center">
+                                                <Music size={16} className="text-accent/60 shrink-0 ml-1" />
                                                 <input
-                                                    type="range"
-                                                    min="0" max="100"
-                                                    value={localBgm}
-                                                    onChange={(e) => setLocalBgm(parseInt(e.target.value))}
-                                                    onMouseUp={() => updateSetting("volume_bgm", localBgm)}
-                                                    className="w-44 h-1.5 bg-white/10 rounded-full appearance-none cursor-pointer accent-accent"
+                                                    type="text"
+                                                    value={settings.launcher_bgm_path}
+                                                    onChange={e => updateSettings({ launcher_bgm_path: e.target.value })}
+                                                    className="flex-1 bg-black/40 border border-white/10 focus:border-accent rounded-xl px-4 py-3 text-xs text-white outline-none transition-colors font-mono"
+                                                    placeholder="C:\Music\launcher_theme.mp3"
                                                 />
-                                            </SettingRow>
-                                        </div>
-                                    </>
-                                )}
-
-                                {/* INTERFACE */}
-                                {activeTab === "interface" && (
-                                    <>
-                                        <SectionHeader icon={<Palette size={24} />} title="Visual Cortex" description="Modify the aesthetic resonance of the system." />
-                                        <div className="space-y-1">
-                                            <SettingRow icon={<Palette size={20} />} title="Accent Color" description="Customize the primary UI highlight color globally.">
-                                                <div className="flex items-center gap-3">
-                                                    <input
-                                                        type="color"
-                                                        value={settings.accent_color}
-                                                        onChange={(e) => updateSetting("accent_color", e.target.value)}
-                                                        className="w-10 h-10 rounded cursor-pointer bg-transparent border-0 p-0"
-                                                    />
-                                                    <button
-                                                        onClick={() => updateSetting("accent_color", "#22d3ee")}
-                                                        className="text-[10px] bg-white/5 px-3 py-1.5 rounded-lg text-white/40 hover:text-white transition-colors uppercase font-bold tracking-widest border border-white/5"
-                                                    >
-                                                        Reset
+                                                <button onClick={() => handlePickAudio("launcher_bgm")} className="shrink-0 bg-white/5 hover:bg-white/10 text-white/60 hover:text-white px-4 py-3 rounded-xl font-bold text-xs transition-all border border-white/10 flex items-center gap-1.5">
+                                                    <FolderOpen size={14} /> Browse
+                                                </button>
+                                                {settings.launcher_bgm_path && (
+                                                    <button onClick={() => { updateSettings({ launcher_bgm_path: "" }); smartAudio.playGlobalBGM(); }} className="text-red-400/60 hover:text-red-400 p-3 bg-red-500/5 hover:bg-red-500/10 rounded-xl border border-red-500/10 transition-colors">
+                                                        <X size={14} />
                                                     </button>
-                                                </div>
-                                            </SettingRow>
-                                        </div>
-                                    </>
-                                )}
-
-                                {/* INTEGRATIONS */}
-                                {activeTab === "integrations" && (
-                                    <>
-                                        <SectionHeader icon={<Plug size={24} />} title="External Bridges" description="Data hooks for Steam API and automatic metadata sync." />
-                                        <div className="space-y-1">
-                                            <SettingRow icon={<ShieldCheck size={20} />} title="Steam Web API Key" description="Required to pull official Global Achievement Percentages.">
-                                                <div className="flex items-center gap-3">
-                                                    <input
-                                                        type="password" value={settings.steam_api_key}
-                                                        onChange={(e) => updateSetting("steam_api_key", e.target.value)}
-                                                        placeholder="API KEY"
-                                                        className="w-56 bg-black/40 border border-white/5 rounded-xl px-4 py-2.5 text-xs text-white outline-none focus:border-accent font-mono placeholder-white/10"
-                                                    />
-                                                </div>
-                                            </SettingRow>
-                                            <SettingRow icon={<Hash size={20} />} title="App ID Manager" description="Bulk detect and edit Steam App IDs for your entire collection.">
-                                                <button
-                                                    onClick={() => setAppIdModalOpen(true)}
-                                                    className="px-6 py-2.5 bg-white/[0.04] hover:bg-white/10 rounded-xl border border-white/10 text-[10px] font-black tracking-widest uppercase text-white/70 hover:text-white transition-all"
-                                                >
-                                                    Manage IDs
-                                                </button>
-                                            </SettingRow>
-                                            <SettingRow icon={<Image size={20} />} title="Preferred Background" description="Which image type to pull from Steam when adding games.">
-                                                <select
-                                                    value={localStorage.getItem("steam_bg_pref") || "hero"}
-                                                    onChange={(e) => {
-                                                        localStorage.setItem("steam_bg_pref", e.target.value);
-                                                        window.dispatchEvent(new Event("storage"));
-                                                    }}
-                                                    className="px-5 py-3 bg-black/40 rounded-2xl border border-white/5 text-[10px] font-black tracking-widest uppercase outline-none cursor-pointer focus:border-accent text-white "
-                                                >
-                                                    <option value="hero">Library Hero (Cinematic)</option>
-                                                    <option value="header">Store Header (With Logo)</option>
-                                                </select>
-                                            </SettingRow>
-                                            <SettingRow icon={<Globe size={20} />} title="Bulk Synchronization" description="Force update all games with a Steam App ID with fresh metadata and artwork.">
-                                                <button
-                                                    onClick={handleBulkSync}
-                                                    disabled={isBulkSyncing}
-                                                    className="px-6 py-2.5 bg-accent hover:bg-accent/80 disabled:opacity-50 rounded-xl font-black text-[10px] uppercase tracking-widest text-white transition-all shadow-lg flex items-center gap-2"
-                                                >
-                                                    {isBulkSyncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCcw size={14} />}
-                                                    Sync All
-                                                </button>
-                                            </SettingRow>
-                                        </div>
-                                    </>
-                                )}
-
-                                {/* OVERLAY */}
-                                {activeTab === "overlay" && (
-                                    <>
-                                        <SectionHeader icon={<Monitor size={24} />} title="In-Game HUD" description="Configuration for achievement toasts and performance metrics." />
-                                        <div className="space-y-1">
-                                            <SettingRow icon={<Trophy size={20} />} title="Toast Alerts" description="Render achievement unlock notifications inside the active game process." onClick={() => {
-                                                const val = localStorage.getItem("enable_achievement_overlay") !== "false";
-                                                localStorage.setItem("enable_achievement_overlay", (!val).toString());
-                                                window.dispatchEvent(new Event("storage"));
-                                            }}>
-                                                <Toggle checked={localStorage.getItem("enable_achievement_overlay") !== "false"} onChange={() => {
-                                                    const val = localStorage.getItem("enable_achievement_overlay") !== "false";
-                                                    localStorage.setItem("enable_achievement_overlay", (!val).toString());
-                                                    window.dispatchEvent(new Event("storage"));
-                                                }} />
-                                            </SettingRow>
-                                            <SettingRow icon={<Zap size={20} />} title="Quadrant" description="Display quadrant for achievement notifications.">
-                                                <select
-                                                    value={localStorage.getItem("overlay_position") || "Top Right"}
-                                                    onChange={(e) => {
-                                                        localStorage.setItem("overlay_position", e.target.value);
-                                                        window.dispatchEvent(new Event("storage"));
-                                                    }}
-                                                    className="px-5 py-3 bg-black/40 rounded-2xl border border-white/5 text-[10px] font-black tracking-widest uppercase outline-none cursor-pointer focus:border-accent text-white "
-                                                >
-                                                    <option value="Top Left">Top Left</option>
-                                                    <option value="Top Right">Top Right</option>
-                                                    <option value="Bottom Left">Bottom Left</option>
-                                                    <option value="Bottom Right">Bottom Right</option>
-                                                </select>
-                                            </SettingRow>
-                                            <SettingRow icon={<Music size={20} />} title="Unlock Audible" description="Play achievement system tone on successful unlock event." onClick={() => {
-                                                const val = localStorage.getItem("achievement_sound") !== "false";
-                                                localStorage.setItem("achievement_sound", (!val).toString());
-                                                window.dispatchEvent(new Event("storage"));
-                                            }}>
-                                                <Toggle checked={localStorage.getItem("achievement_sound") !== "false"} onChange={() => {
-                                                    const val = localStorage.getItem("achievement_sound") !== "false";
-                                                    localStorage.setItem("achievement_sound", (!val).toString());
-                                                    window.dispatchEvent(new Event("storage"));
-                                                }} />
-                                            </SettingRow>
-                                        </div>
-                                    </>
-                                )}
-
-                                {/* ADVANCED */}
-                                {activeTab === "advanced" && (
-                                    <>
-                                        <SectionHeader icon={<Cpu size={24} />} title="Neural Control" description="Deep application debugging and process management." />
-                                        <div className="space-y-1 mb-10">
-                                            <SettingRow icon={<Cpu size={20} />} title="Developer Mode" description="Expose underlying game processes, subprocess stdout/stderr and raw API traces." onClick={() => updateSetting("developer_mode", !settings.developer_mode)}>
-                                                <Toggle checked={settings.developer_mode} onChange={() => updateSetting("developer_mode", !settings.developer_mode)} />
-                                            </SettingRow>
-                                            <SettingRow icon={<Monitor size={20} />} title="Kernel Traces" description="Access raw Tauri application logs and performance statistics.">
-                                                <button
-                                                    onClick={async () => {
-                                                        try { const logPath = await appLogDir(); await openShell(logPath); } catch (e) { console.error(e); }
-                                                    }}
-                                                    className="px-6 py-2.5 bg-white/[0.04] rounded-xl border border-white/10 hover:bg-white/10 hover:border-white/20 active:scale-95 transition-all text-[10px] font-black tracking-widest uppercase text-white/50 hover:text-white"
-                                                >
-                                                    Open Traces
-                                                </button>
-                                            </SettingRow>
-                                        </div>
-                                        {settings.developer_mode && (
-                                            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-black/40 rounded-3xl border border-white/5 p-2 overflow-hidden">
-                                                <AchievementDebugPanel />
-                                            </motion.div>
-                                        )}
-
-                                        <div className="mt-12">
-                                            <SectionHeader icon={<Trash2 size={24} />} title="System Maintenance" description="Factory reset and storage management." />
-                                            <div className="p-8 rounded-[2rem] bg-red-500/5 border border-red-500/10 space-y-4">
-                                                <div className="flex items-start gap-4">
-                                                    <div className="p-3 bg-red-500/10 rounded-xl text-red-500">
-                                                        <AlertTriangle size={24} />
-                                                    </div>
-                                                    <div>
-                                                        <h3 className="text-white font-bold text-lg">Factory Reset</h3>
-                                                        <p className="text-white/40 text-xs mt-1 leading-relaxed">
-                                                            Returning the application to a factory state will wipe all configurations and settings. 
-                                                            You can optionally choose to preserve your game library and locations.
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                                <div className="flex justify-end pt-2">
-                                                    <button 
-                                                        onClick={() => setIsResetModalOpen(true)}
-                                                        className="px-8 py-3 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-500 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all hover:scale-[1.02] active:scale-95"
-                                                    >
-                                                        Initialize Reset
-                                                    </button>
-                                                </div>
+                                                )}
                                             </div>
                                         </div>
-                                    </>
-                                )}
-                            </motion.div>
+
+                                        <div className="space-y-2">
+                                            <label className="text-[10px] font-black text-white/40 tracking-widest uppercase">Default Achievement Sound</label>
+                                            <div className="flex gap-2 items-center">
+                                                <Trophy size={16} className="text-yellow-500/60 shrink-0 ml-1" />
+                                                <input
+                                                    type="text"
+                                                    value={settings.default_ach_sound_path}
+                                                    onChange={e => updateSettings({ default_ach_sound_path: e.target.value })}
+                                                    className="flex-1 bg-black/40 border border-white/10 focus:border-accent rounded-xl px-4 py-3 text-xs text-white outline-none transition-colors font-mono"
+                                                    placeholder="C:\Sounds\xbox_rare_unlock.wav"
+                                                />
+                                                {settings.default_ach_sound_path && (
+                                                    <button onClick={() => smartAudio.playAchievement(settings.default_ach_sound_path)} className="shrink-0 bg-accent/10 hover:bg-accent/20 text-accent px-4 py-3 rounded-xl font-bold text-xs transition-all border border-accent/20 flex items-center justify-center" title="Preview Sound">
+                                                        <Play size={16} fill="currentColor" />
+                                                    </button>
+                                                )}
+                                                <button onClick={() => handlePickAudio("default_ach")} className="shrink-0 bg-white/5 hover:bg-white/10 text-white/60 hover:text-white px-4 py-3 rounded-xl font-bold text-xs transition-all border border-white/10 flex items-center gap-1.5">
+                                                    <FolderOpen size={14} /> Browse
+                                                </button>
+                                                {settings.default_ach_sound_path && (
+                                                    <button onClick={() => updateSettings({ default_ach_sound_path: "" })} className="text-red-400/60 hover:text-red-400 p-3 bg-red-500/5 hover:bg-red-500/10 rounded-xl border border-red-500/10 transition-colors">
+                                                        <X size={14} />
+                                                    </button>
+                                                )}
+                                            </div>
+                                            <p className="text-white/20 text-[10px] ml-7">Games with specific sound overrides in Edit Metadata will ignore this default.</p>
+                                        </div>
+                                    </div>
+
+                                    <div className="h-px w-full bg-white/5" />
+
+                                    <div className="space-y-6">
+                                        <div>
+                                            <h3 className="text-lg font-black text-white uppercase tracking-wider mb-1">Volume Mixer</h3>
+                                            <p className="text-xs text-white/40 font-medium">Control the acoustics of the engine.</p>
+                                        </div>
+                                        <div className="space-y-2 max-w-md">
+                                            <div className="flex justify-between items-center">
+                                                <label className="text-xs font-bold text-white/60 tracking-widest uppercase">SFX / Overlays</label>
+                                                <span className="text-accent font-bold text-xs">{settings.volume_sfx}%</span>
+                                            </div>
+                                            <input
+                                                type="range" min="0" max="100"
+                                                value={settings.volume_sfx}
+                                                onChange={e => updateSettings({ volume_sfx: parseInt(e.target.value) })}
+                                                className="w-full h-2 bg-black/50 rounded-lg appearance-none cursor-pointer accent-accent border border-white/5"
+                                            />
+                                        </div>
+                                        <div className="space-y-2 max-w-md">
+                                            <div className="flex justify-between items-center">
+                                                <label className="text-xs font-bold text-white/60 tracking-widest uppercase">Background Music (BGM)</label>
+                                                <span className="text-accent font-bold text-xs">{settings.volume_bgm}%</span>
+                                            </div>
+                                            <input
+                                                type="range" min="0" max="100"
+                                                value={settings.volume_bgm}
+                                                onChange={e => updateSettings({ volume_bgm: parseInt(e.target.value) })}
+                                                className="w-full h-2 bg-black/50 rounded-lg appearance-none cursor-pointer accent-accent border border-white/5"
+                                            />
+                                        </div>
+                                    </div>
+                                </motion.div>
+                            )}
+
+                            {activeTab === "general" && (
+                                <motion.div key="general" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} className="space-y-6">
+                                    <div className="bg-white/5 border border-white/10 p-5 rounded-2xl flex items-center justify-between">
+                                        <div>
+                                            <h4 className="text-white font-bold text-sm">Run on System Startup</h4>
+                                            <p className="text-white/40 text-xs mt-1">Boot ChiraLauncher silently in the system tray when Windows starts.</p>
+                                        </div>
+                                        <label className="relative inline-flex items-center cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                className="sr-only peer"
+                                                checked={settings.auto_launch_on_boot}
+                                                onChange={(e) => updateSettings({ auto_launch_on_boot: e.target.checked })}
+                                            />
+                                            <div className="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-accent border border-white/10"></div>
+                                        </label>
+                                    </div>
+                                    <div className="bg-white/5 border border-white/10 p-5 rounded-2xl flex items-center justify-between">
+                                        <div>
+                                            <h4 className="text-white font-bold text-sm">Start Minimized</h4>
+                                            <p className="text-white/40 text-xs mt-1">Skip the main window and start directly in the tray background.</p>
+                                        </div>
+                                        <label className="relative inline-flex items-center cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                className="sr-only peer"
+                                                checked={settings.minimize_to_tray}
+                                                onChange={(e) => updateSettings({ minimize_to_tray: e.target.checked })}
+                                            />
+                                            <div className="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-accent border border-white/10"></div>
+                                        </label>
+                                    </div>
+
+                                    {/* DANGER ZONE */}
+                                    <div className="mt-10 pt-10 border-t border-red-500/20">
+                                        <h3 className="text-lg font-black text-red-500 uppercase tracking-wider mb-4 flex items-center gap-2">
+                                            <AlertOctagon size={20} /> Danger Zone
+                                        </h3>
+                                        <div className="bg-red-500/5 border border-red-500/20 p-6 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-6">
+                                            <div>
+                                                <h4 className="text-white font-bold text-sm">Factory Reset Application</h4>
+                                                <p className="text-white/40 text-xs mt-1 max-w-md">Erase local database, wipe image caches, and restore the engine to a clean slate. Game installations are unharmed.</p>
+                                            </div>
+                                            <button
+                                                onClick={() => setResetModalOpen(true)}
+                                                className="bg-red-500/20 hover:bg-red-500 text-red-400 hover:text-white px-6 py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all border border-red-500/30 whitespace-nowrap active:scale-95"
+                                            >
+                                                Initiate Reset
+                                            </button>
+                                        </div>
+                                    </div>
+                                </motion.div>
+                            )}
+
+                            {activeTab === "downloads" && (
+                                <motion.div key="downloads" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} className="space-y-10">
+                                    <div className="space-y-4">
+                                        <div>
+                                            <h3 className="text-lg font-black text-white uppercase tracking-wider mb-1">Download Directory</h3>
+                                            <p className="text-xs text-white/40 font-medium">Where incoming game repacks and P2P files should be saved.</p>
+                                        </div>
+                                        <div className="flex gap-3">
+                                            <div className="flex-1 bg-black/50 border border-white/10 rounded-2xl px-5 py-4 text-sm font-mono text-white/70 overflow-hidden text-ellipsis whitespace-nowrap shadow-inner">
+                                                {settings.download_path || "No path selected"}
+                                            </div>
+                                            <button
+                                                onClick={handlePickDownloadDir}
+                                                className="bg-accent hover:brightness-110 text-black px-6 rounded-2xl font-black text-xs uppercase tracking-widest transition-all shadow-lg active:scale-95 flex items-center gap-2"
+                                            >
+                                                <FolderOpen size={16} /> Browse
+                                            </button>
+                                        </div>
+                                    </div>
+                                </motion.div>
+                            )}
+
+                            {activeTab === "overlay" && (
+                                <motion.div key="overlay" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} className="space-y-10">
+                                    <div className="space-y-4">
+                                        <div>
+                                            <h3 className="text-lg font-black text-white uppercase tracking-wider mb-1 flex items-center gap-2">
+                                                <Bell className="text-accent" size={20} /> Achievement Overlay Testing
+                                            </h3>
+                                            <p className="text-xs text-white/40 font-medium leading-relaxed max-w-2xl">
+                                                Trigger a mock achievement to ensure your Windows Desktop Window Manager (DWM) is allowing the transparent overlay to render over your game. <br />
+                                                <span className="text-yellow-400 font-bold">Note:</span> If your game is in Exclusive Fullscreen, you may not see the overlay. Switch to Borderless Windowed.
+                                            </p>
+                                        </div>
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4">
+                                            <button
+                                                onClick={() => handleTestAchievement("goldberg")}
+                                                className="bg-[#0f1423] border border-white/10 hover:border-accent hover:bg-accent/5 p-5 rounded-2xl transition-all group flex flex-col items-center justify-center gap-3 shadow-lg"
+                                            >
+                                                <div className="w-12 h-12 rounded-full bg-accent/10 flex items-center justify-center text-accent group-hover:scale-110 transition-transform"><Zap size={20} /></div>
+                                                <span className="font-bold text-white text-sm">Test Goldberg</span>
+                                            </button>
+                                            <button
+                                                onClick={() => handleTestAchievement("codex")}
+                                                className="bg-[#0f1423] border border-white/10 hover:border-purple-400 hover:bg-purple-400/5 p-5 rounded-2xl transition-all group flex flex-col items-center justify-center gap-3 shadow-lg"
+                                            >
+                                                <div className="w-12 h-12 rounded-full bg-purple-400/10 flex items-center justify-center text-purple-400 group-hover:scale-110 transition-transform"><Zap size={20} /></div>
+                                                <span className="font-bold text-white text-sm">Test CODEX</span>
+                                            </button>
+                                            <button
+                                                onClick={() => handleTestAchievement("anadius")}
+                                                className="bg-[#0f1423] border border-white/10 hover:border-green-400 hover:bg-green-400/5 p-5 rounded-2xl transition-all group flex flex-col items-center justify-center gap-3 shadow-lg"
+                                            >
+                                                <div className="w-12 h-12 rounded-full bg-green-400/10 flex items-center justify-center text-green-400 group-hover:scale-110 transition-transform"><Zap size={20} /></div>
+                                                <span className="font-bold text-white text-sm">Test Anadius</span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </motion.div>
+                            )}
+
                         </AnimatePresence>
                     </div>
                 </div>
-
-                {/* Reset Confirmation Modal */}
-                <AnimatePresence>
-                    {isResetModalOpen && (
-                        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 outline-none">
-                            <motion.div 
-                                initial={{ opacity: 0 }} 
-                                animate={{ opacity: 1 }} 
-                                exit={{ opacity: 0 }}
-                                onClick={() => !isResetting && setIsResetModalOpen(false)}
-                                className="absolute inset-0 bg-black/80 backdrop-blur-xl"
-                            />
-                            <motion.div
-                                initial={{ opacity: 0, scale: 0.9, y: 20 }}
-                                animate={{ opacity: 1, scale: 1, y: 0 }}
-                                exit={{ opacity: 0, scale: 0.9, y: 20 }}
-                                className="relative w-full max-w-lg glass-panel p-10 rounded-[3rem] border border-white/10 shadow-3xl bg-surface/50 overflow-hidden"
-                            >
-                                <div className="absolute top-0 left-0 w-full h-1 bg-red-500/30" />
-                                
-                                <div className="flex flex-col items-center text-center gap-6">
-                                    <div className="w-20 h-20 rounded-3xl bg-red-500/10 flex items-center justify-center text-red-500 border border-red-500/20 mb-2">
-                                        <Trash2 size={40} />
-                                    </div>
-                                    
-                                    <div>
-                                        <h2 className="text-3xl font-black text-white uppercase tracking-tight">System Reset</h2>
-                                        <p className="text-white/40 mt-3 text-sm font-medium leading-relaxed">
-                                            Are you sure you want to proceed with a factory reset? This action is <span className="text-red-400 font-bold uppercase tracking-wider">irreversible</span>.
-                                        </p>
-                                    </div>
-
-                                    <div className="w-full bg-white/5 rounded-2xl p-6 space-y-4 text-left border border-white/5">
-                                        <div 
-                                            onClick={() => setKeepProgress(!keepProgress)}
-                                            className="flex items-center justify-between cursor-pointer group"
-                                        >
-                                            <div className="flex items-center gap-4">
-                                                <div className={cn(
-                                                    "w-10 h-10 rounded-xl flex items-center justify-center transition-all",
-                                                    keepProgress ? "bg-accent/10 text-accent border border-accent/20" : "bg-white/5 text-white/20 border border-white/5"
-                                                )}>
-                                                    <Database size={20} />
-                                                </div>
-                                                <div>
-                                                    <p className="text-white text-xs font-bold uppercase tracking-wider">Keep Library & Data</p>
-                                                    <p className="text-white/20 text-[10px] mt-0.5">Retain games, locations and progress</p>
-                                                </div>
-                                            </div>
-                                            <Toggle checked={keepProgress} onChange={() => setKeepProgress(!keepProgress)} />
-                                        </div>
-                                    </div>
-
-                                    <div className="flex gap-4 w-full mt-4">
-                                        <button
-                                            disabled={isResetting}
-                                            onClick={() => setIsResetModalOpen(false)}
-                                            className="flex-1 px-6 py-4 rounded-2xl bg-white/5 border border-white/10 text-white/50 hover:text-white hover:bg-white/10 transition-all font-black text-[11px] uppercase tracking-widest disabled:opacity-50"
-                                        >
-                                            Abort
-                                        </button>
-                                        <button
-                                            disabled={isResetting}
-                                            onClick={async () => {
-                                                setIsResetting(true);
-                                                try {
-                                                    await invoke("reset_application", { keepProgress });
-                                                    toast.success("System Reset Complete", { description: "The application will now restart." });
-                                                    setTimeout(() => window.location.reload(), 1500);
-                                                } catch (e) {
-                                                    toast.error("Reset Failed", { description: String(e) });
-                                                    setIsResetting(false);
-                                                }
-                                            }}
-                                            className="flex-[1.5] px-6 py-4 rounded-2xl bg-red-500 text-white shadow-lg shadow-red-500/20 hover:bg-red-400 transition-all font-black text-[11px] uppercase tracking-widest flex items-center justify-center gap-3 active:scale-95 disabled:opacity-50"
-                                        >
-                                            {isResetting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
-                                            {isResetting ? "Processing..." : "Purge & Reset"}
-                                        </button>
-                                    </div>
-                                </div>
-                            </motion.div>
-                        </div>
-                    )}
-                </AnimatePresence>
             </div>
         </div>
     );

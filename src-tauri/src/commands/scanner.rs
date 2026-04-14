@@ -588,7 +588,8 @@ pub async fn scan_single_game(
         let opts = crate::achievements::SyncOptions {
             crack_type: Some(crack_type.clone()),
             known_app_id: app_id_ref,
-            manual_path: None,
+            manual_metadata_path: None,
+            manual_save_path: None,
             scan_roots: &default_roots,
             ..Default::default()
         };

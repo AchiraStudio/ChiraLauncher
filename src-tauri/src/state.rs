@@ -2,7 +2,6 @@ use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use tokio::sync::mpsc;
 
 #[derive(Clone, Debug, PartialEq)]
 #[allow(dead_code)]
@@ -16,6 +15,7 @@ pub enum LaunchSource {
 pub struct ProcessIdentity {
     pub pid: u32,
     pub exe_path: String,
+    pub install_dir: String, // ⬅️ NEW: Required for the ruthless directory-based killer
     pub start_time: u64,
     pub game_id: String,
     pub game_title: String,
@@ -30,6 +30,11 @@ pub enum GameDbWrite {
     UpdatePlaytime {
         game_id: String,
         delta_seconds: u64,
+    },
+    OverwritePlaytime {
+        game_id: String,
+        playtime_seconds: u64,
+        last_played: Option<String>,
     },
     SetLastPlayed {
         game_id: String,
@@ -67,6 +72,10 @@ pub enum GameDbWrite {
         game_id: String,
         path: Option<String>,
     },
+    UpdateManualSavePath {
+        game_id: String,
+        path: Option<String>,
+    },
     UpdateDetectedAchievementPaths {
         game_id: String,
         metadata: Option<String>,
@@ -92,8 +101,8 @@ pub struct UserProfile {
     pub xp: u64,
     pub supabase_user_id: Option<String>,
     pub is_cloud_synced: bool,
-    pub private_key: Option<String>, // NEW: For local decryption
-    pub public_key: Option<String>,  // NEW: For sharing with others
+    pub private_key: Option<String>,
+    pub public_key: Option<String>,  
 }
 
 #[derive(Debug, Clone)]
@@ -120,7 +129,6 @@ pub enum ProfileDbWrite {
     },
     UpdateProfile(UserProfile),
     AddXp(u64),
-    // NEW: Safe local message saving
     SaveLocalMessage {
         id: String,
         contact_id: String,
@@ -170,7 +178,7 @@ pub enum DbWrite {
     Extensions(ExtensionDbWrite),
 }
 
-pub type DbWriteSender = mpsc::UnboundedSender<DbWrite>;
+pub type DbWriteSender = tokio::sync::mpsc::UnboundedSender<DbWrite>;
 
 #[allow(dead_code)]
 pub struct AppState {

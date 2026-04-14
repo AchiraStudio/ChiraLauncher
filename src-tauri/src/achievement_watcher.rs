@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::achievements::{GOLDBERG_APPDATA_DIRS, PUBLIC_EMU_DIRS};
@@ -21,6 +21,9 @@ pub struct AchievementUnlockedPayload {
     pub earned_time: u64,
     pub global_percent: Option<f32>,
     pub xp: u64,
+    #[serde(default)]
+    pub is_debug: bool,
+    pub custom_sound_path: Option<String>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -164,192 +167,22 @@ fn parse_iso8601(s: &str) -> Option<u64> {
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct SteamSchemaResponse {
-    game: SteamSchemaGame,
-}
-#[derive(Debug, Deserialize)]
-struct SteamSchemaGame {
-    #[serde(rename = "availableGameStats")]
-    available_game_stats: Option<SteamGameStats>,
-}
-#[derive(Debug, Deserialize)]
-struct SteamGameStats {
-    achievements: Vec<SteamAchievement>,
-}
-#[derive(Debug, Deserialize)]
-struct SteamAchievement {
-    name: String,
-    #[serde(rename = "displayName")]
-    display_name: Option<String>,
-    description: Option<String>,
-    icon: Option<String>,
-    icongray: Option<String>,
-    hidden: Option<u8>,
-}
-#[derive(Debug, Serialize)]
-struct GenAchievement {
-    description: String,
-    #[serde(rename = "displayName")]
-    display_name: String,
-    hidden: u8,
-    icon: String,
-    icongray: String,
-    name: String,
-    #[serde(rename = "globalPercent")]
-    global_percent: f32,
-}
-
-async fn download_image(client: &reqwest::Client, url: &str, dest: &Path) -> Result<(), String> {
-    if dest.exists() || url.is_empty() {
-        return Ok(());
-    }
-    let bytes = client
-        .get(url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?
-        .bytes()
-        .await
-        .map_err(|e| e.to_string())?;
-    std::fs::write(dest, &bytes).map_err(|e| e.to_string())
-}
-
-pub async fn generate_achievements_json(
-    api_key: &str,
-    app_id: &str,
-    save_dir: &Path,
-) -> Result<bool, String> {
-    let json_path = save_dir.join("achievements.json");
-    if json_path.exists() {
-        return Ok(false);
-    }
-    if !save_dir.exists() {
-        return Err(format!(
-            "Save directory does not exist: {}. Launch the game once first.",
-            save_dir.display()
-        ));
-    }
-
-    let images_dir = save_dir.join("images");
-    std::fs::create_dir_all(&images_dir).map_err(|e| e.to_string())?;
-
-    let url = format!(
-        "https://api.steampowered.com/ISteamUserStats/GetSchemaForGame/v2/?key={}&appid={}",
-        api_key, app_id
-    );
-    let global_pct_url = format!(
-        "https://api.steampowered.com/ISteamUserStats/GetGlobalAchievementPercentagesForApp/v2/?gameid={}",
-        app_id
-    );
-
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .build()
-        .map_err(|e| e.to_string())?;
-
-    let resp: SteamSchemaResponse = client
-        .get(&url)
-        .send()
-        .await
-        .map_err(|e| format!("Steam API error: {}", e))?
-        .json()
-        .await
-        .map_err(|e| format!("Steam API JSON error: {}", e))?;
-
-    let steam_achs = resp
-        .game
-        .available_game_stats
-        .ok_or_else(|| format!("No achievements on Steam for app_id={}", app_id))?
-        .achievements;
-
-    let mut pct_map: HashMap<String, f32> = HashMap::new();
-    if let Ok(pct_res) = client.get(&global_pct_url).send().await {
-        if let Ok(pct_json) = pct_res.json::<serde_json::Value>().await {
-            if let Some(achs) = pct_json
-                .pointer("/achievementpercentages/achievements")
-                .and_then(|v| v.as_array())
-            {
-                for a in achs {
-                    if let (Some(name), Some(pct)) =
-                        (a.get("name").and_then(|n| n.as_str()), a.get("percent"))
-                    {
-                        let parsed_pct = if pct.is_number() {
-                            pct.as_f64().unwrap_or(0.0) as f32
-                        } else if pct.is_string() {
-                            pct.as_str().unwrap_or("0").parse::<f32>().unwrap_or(0.0)
-                        } else {
-                            0.0
-                        };
-                        pct_map.insert(name.to_string(), parsed_pct);
-                    }
-                }
-            }
-        }
-    }
-
-    let mut generated: Vec<GenAchievement> = Vec::new();
-    for ach in steam_achs {
-        let icon_url = ach.icon.unwrap_or_default();
-        let gray_url = ach.icongray.unwrap_or_default();
-        let icon_file = icon_url
-            .split('/')
-            .last()
-            .unwrap_or("unknown.jpg")
-            .to_string();
-        let gray_file = gray_url
-            .split('/')
-            .last()
-            .unwrap_or("unknown.jpg")
-            .to_string();
-
-        if let Err(e) = download_image(&client, &icon_url, &images_dir.join(&icon_file)).await {
-            log::warn!("[AutoGen] Icon failed ({}): {}", icon_url, e);
-        }
-        if let Err(e) = download_image(&client, &gray_url, &images_dir.join(&gray_file)).await {
-            log::warn!("[AutoGen] Gray icon failed ({}): {}", gray_url, e);
-        }
-
-        let global_pct = pct_map.get(&ach.name).copied().unwrap_or(0.0);
-
-        generated.push(GenAchievement {
-            description: ach.description.unwrap_or_default(),
-            display_name: ach.display_name.unwrap_or_else(|| ach.name.clone()),
-            hidden: ach.hidden.unwrap_or(0),
-            icon: if icon_url.is_empty() {
-                String::new()
-            } else {
-                format!("images/{}", icon_file)
-            },
-            icongray: if gray_url.is_empty() {
-                String::new()
-            } else {
-                format!("images/{}", gray_file)
-            },
-            name: ach.name,
-            global_percent: global_pct,
-        });
-    }
-
-    let json = serde_json::to_string_pretty(&generated).map_err(|e| e.to_string())?;
-    std::fs::write(&json_path, json).map_err(|e| e.to_string())?;
-    log::info!(
-        "[AutoGen] Wrote {} achievements (with global rarities) → {}",
-        generated.len(),
-        json_path.display()
-    );
-    Ok(true)
-}
-
 fn load_meta(
     game_dir: &Path,
     app_id: Option<&str>,
-    manual_path: Option<&str>,
+    manual_metadata_path: Option<&str>,
     crack_type: Option<&CrackType>,
 ) -> (HashMap<String, AchievementMeta>, PathBuf) {
-    if let Some(p) = manual_path
+    if let Some(p) = manual_metadata_path
         .filter(|p| !p.is_empty())
-        .map(|p| Path::new(p).join("achievements.json"))
+        .map(|p| {
+            let p = Path::new(p);
+            if p.is_file() {
+                p.to_path_buf()
+            } else {
+                p.join("achievements.json")
+            }
+        })
         .filter(|p| p.exists() && is_metadata_json(p))
     {
         return parse_meta_file(p);
@@ -366,7 +199,9 @@ fn load_meta(
         }
     }
 
-    if let Some(p) = crate::achievements::find_achievements_json(game_dir, app_id, manual_path) {
+    if let Some(p) =
+        crate::achievements::find_achievements_json(game_dir, app_id, manual_metadata_path)
+    {
         return parse_meta_file(p);
     }
 
@@ -377,23 +212,39 @@ fn load_meta(
 fn parse_meta_file(path: PathBuf) -> (HashMap<String, AchievementMeta>, PathBuf) {
     let meta = std::fs::read_to_string(&path)
         .ok()
-        .and_then(|s| serde_json::from_str::<Vec<AchievementMeta>>(&s).ok())
+        .and_then(|s| {
+            if let Ok(v) = serde_json::from_str::<Vec<AchievementMeta>>(&s) {
+                Some(v)
+            } else if let Ok(val) = serde_json::from_str::<serde_json::Value>(&s) {
+                val.get("achievements")
+                    .and_then(|a| serde_json::from_value::<Vec<AchievementMeta>>(a.clone()).ok())
+            } else {
+                None
+            }
+        })
         .map(|v| v.into_iter().map(|m| (m.name.clone(), m)).collect())
         .unwrap_or_default();
     (meta, path)
 }
 
 fn is_metadata_json(path: &Path) -> bool {
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-        .and_then(|v| v.as_array().cloned())
-        .map(|arr| {
-            arr.first().map_or(false, |e| {
+    let s = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&s) {
+        if let Some(arr) = v.as_array() {
+            return arr.first().map_or(false, |e| {
                 e.get("name").is_some() || e.get("displayName").is_some()
-            })
-        })
-        .unwrap_or(false)
+            });
+        }
+        if let Some(arr) = v.get("achievements").and_then(|a| a.as_array()) {
+            return arr.first().map_or(false, |e| {
+                e.get("name").is_some() || e.get("displayName").is_some()
+            });
+        }
+    }
+    false
 }
 
 fn looks_like_goldberg_save(path: &Path) -> bool {
@@ -406,7 +257,6 @@ fn looks_like_goldberg_save(path: &Path) -> bool {
                     e.get("achieved").is_some() || e.get("earned").is_some()
                 })
             } else if let Some(obj) = v.as_object() {
-                // Better validation for the dictionary/object format
                 obj.values().next().map_or(false, |e| {
                     e.get("earned").is_some() || e.get("achieved").is_some()
                 })
@@ -459,7 +309,6 @@ pub fn read_goldberg_earned(path: &Path) -> HashMap<String, u64> {
             }
         } else if let Some(obj) = json.as_object() {
             for (k, v) in obj {
-                // Safely handle true/false OR 1/0
                 let achieved = v.get("earned").and_then(|e| e.as_bool()).unwrap_or(false)
                     || v.get("achieved").and_then(|e| e.as_bool()).unwrap_or(false)
                     || v.get("earned")
@@ -629,6 +478,7 @@ fn payload_api(
     meta: &HashMap<String, AchievementMeta>,
     meta_path: &Path,
     earned_time: u64,
+    custom_sound_path: Option<String>,
 ) -> AchievementUnlockedPayload {
     let icon_base = meta_path.parent().unwrap_or(Path::new(""));
     let (display_name, description, icon, icon_gray, global_percent) = match meta.get(api_name) {
@@ -657,6 +507,8 @@ fn payload_api(
         earned_time,
         global_percent,
         xp: crate::achievements::calculate_xp(global_percent),
+        is_debug: false,
+        custom_sound_path,
     }
 }
 
@@ -667,6 +519,7 @@ fn payload_display(
     display_map: &HashMap<String, String>,
     meta_path: &Path,
     earned_time: u64,
+    custom_sound_path: Option<String>,
 ) -> AchievementUnlockedPayload {
     let api_name = display_map
         .get(&display_name.to_lowercase())
@@ -700,6 +553,8 @@ fn payload_display(
         earned_time,
         global_percent,
         xp: crate::achievements::calculate_xp(global_percent),
+        is_debug: false,
+        custom_sound_path,
     }
 }
 
@@ -715,10 +570,10 @@ fn find_active_candidate(
     app_id: &str,
     game_dir: &Path,
     scan_roots: &[PathBuf],
-    manual_path: Option<&str>,
+    manual_save_path: Option<&str>,
     crack_type: Option<&CrackType>,
 ) -> Option<AchievementCandidate> {
-    if let Some(manual) = manual_path.filter(|p| !p.is_empty()) {
+    if let Some(manual) = manual_save_path.filter(|p| !p.is_empty()) {
         if let Some(c) = probe_dir(Path::new(manual)) {
             return Some(c);
         }
@@ -737,7 +592,10 @@ fn find_active_candidate(
         }
     }
 
-    if !matches!(crack_type, Some(CrackType::Goldberg) | Some(CrackType::Voices38)) {
+    if !matches!(
+        crack_type,
+        Some(CrackType::Goldberg) | Some(CrackType::Voices38)
+    ) {
         if let Some(sys_drive) = std::env::var_os("SystemDrive") {
             let public = PathBuf::from(&sys_drive).join("Users\\Public\\Documents\\Steam");
             for sub in PUBLIC_EMU_DIRS {
@@ -769,6 +627,24 @@ fn find_active_candidate(
                     }
                 }
             }
+        }
+    }
+
+    if !app_id.is_empty() {
+        let offline = game_dir.join("OfflineStorage");
+        let named_ini = offline.join(format!("{}.ini", app_id));
+        if named_ini.exists() {
+            return Some(AchievementCandidate {
+                path: named_ini,
+                format: AchievementFormat::CodExIni,
+            });
+        }
+        let root_named_ini = game_dir.join(format!("{}.ini", app_id));
+        if root_named_ini.exists() {
+            return Some(AchievementCandidate {
+                path: root_named_ini,
+                format: AchievementFormat::CodExIni,
+            });
         }
     }
 
@@ -830,7 +706,7 @@ fn emulator_label(path: &Path, crack_type: Option<&CrackType>) -> String {
     if let Some(CrackType::Voices38) = crack_type {
         return "Voices38".to_string();
     }
-    
+
     let s = path.to_string_lossy().to_lowercase();
     if s.contains("lsx emu") {
         "Anadius (LSX)"
@@ -859,8 +735,10 @@ pub fn start_watching_for_game(
     app_id: String,
     game_path: PathBuf,
     scan_roots: Vec<PathBuf>,
-    manual_path: Option<String>,
+    manual_metadata_path: Option<String>,
+    manual_save_path: Option<String>,
     crack_type: Option<CrackType>,
+    custom_sound_path: Option<String>,
 ) -> Option<Arc<AtomicBool>> {
     log::info!(
         "[Prober] Starting background discovery task for game={} app_id={} crack={:?}",
@@ -876,8 +754,10 @@ pub fn start_watching_for_game(
     let db_tx = app.state::<crate::state::AppState>().db_tx.clone();
 
     tauri::async_runtime::spawn(async move {
+        let watcher_start = SystemTime::now();
         let mut active_cand: Option<AchievementCandidate> = None;
         let mut seen: HashSet<String> = HashSet::new();
+        let mut last_mtime: Option<SystemTime> = None;
         let mut meta: HashMap<String, AchievementMeta> = HashMap::new();
         let mut meta_path = PathBuf::new();
         let mut display_map: HashMap<String, String> = HashMap::new();
@@ -887,7 +767,7 @@ pub fn start_watching_for_game(
                 let (m, p) = load_meta(
                     &game_path,
                     Some(app_id.as_str()),
-                    manual_path.as_deref(),
+                    manual_metadata_path.as_deref(),
                     crack_type.as_ref(),
                 );
                 if !m.is_empty() {
@@ -905,7 +785,7 @@ pub fn start_watching_for_game(
                     &app_id,
                     &game_path,
                     &scan_roots,
-                    manual_path.as_deref(),
+                    manual_save_path.as_deref(),
                     crack_type.as_ref(),
                 );
 
@@ -915,8 +795,24 @@ pub fn start_watching_for_game(
                         game_id,
                         c.path
                     );
-                    let now = read_candidate_earned(&c);
-                    seen = now.into_keys().collect();
+
+                    let file_mtime = std::fs::metadata(&c.path).and_then(|m| m.modified()).ok();
+                    let file_predates_session =
+                        file_mtime.map(|mt| mt < watcher_start).unwrap_or(true);
+
+                    if file_predates_session {
+                        let baseline = read_candidate_earned(&c);
+                        log::info!(
+                            "[Prober] Pre-existing save (mtime < session start), snapshotting {} baseline achievements",
+                            baseline.len()
+                        );
+                        seen = baseline.into_keys().collect();
+                    } else {
+                        log::info!("[Prober] Fresh save file detected (mtime >= session start), treating all as new");
+                        seen.clear();
+                    }
+
+                    last_mtime = file_mtime;
                     active_cand = Some(c.clone());
 
                     let _ = app.emit(
@@ -935,45 +831,69 @@ pub fn start_watching_for_game(
                 if !cand.path.exists() {
                     log::warn!("[Prober] Save file was deleted mid-session. Resuming probe...");
                     active_cand = None;
+                    last_mtime = None;
                     seen.clear();
                 } else {
-                    let now = read_candidate_earned(cand);
-                    let new_unlocks: Vec<(String, u64)> = now
-                        .iter()
-                        .filter(|(k, _)| !seen.contains(*k))
-                        .map(|(k, t)| (k.clone(), *t))
-                        .take(8)
-                        .collect();
+                    let current_mtime = std::fs::metadata(&cand.path)
+                        .and_then(|m| m.modified())
+                        .ok();
+                    let changed = current_mtime != last_mtime;
 
-                    for (name, t) in new_unlocks {
-                        let p = if is_anadius {
-                            payload_display(&name, &game_title, &meta, &display_map, &meta_path, t)
-                        } else {
-                            payload_api(&name, &game_title, &meta, &meta_path, t)
-                        };
+                    if changed {
+                        last_mtime = current_mtime;
+                        let now = read_candidate_earned(cand);
+                        let new_unlocks: Vec<(String, u64)> = now
+                            .iter()
+                            .filter(|(k, _)| !seen.contains(*k))
+                            .map(|(k, t)| (k.clone(), *t))
+                            .take(8)
+                            .collect();
 
-                        fire_overlay(&app, &p);
+                        for (name, t) in new_unlocks {
+                            let p = if is_anadius {
+                                payload_display(
+                                    &name,
+                                    &game_title,
+                                    &meta,
+                                    &display_map,
+                                    &meta_path,
+                                    t,
+                                    custom_sound_path.clone(),
+                                )
+                            } else {
+                                payload_api(
+                                    &name,
+                                    &game_title,
+                                    &meta,
+                                    &meta_path,
+                                    t,
+                                    custom_sound_path.clone(),
+                                )
+                            };
 
-                        let _ = db_tx.send(crate::state::DbWrite::Profile(
-                            crate::state::ProfileDbWrite::UnlockAchievement {
-                                game_id: game_id.clone(),
-                                api_name: p.api_name.clone(),
-                                title: p.display_name.clone(),
-                                desc: p.description.clone(),
-                                unlock_time: p.earned_time.to_string(),
-                            },
-                        ));
+                            fire_overlay(&app, &p);
 
-                        let _ = db_tx.send(crate::state::DbWrite::Profile(
-                            crate::state::ProfileDbWrite::AddXp(p.xp),
-                        ));
+                            let _ = db_tx.send(crate::state::DbWrite::Profile(
+                                crate::state::ProfileDbWrite::UnlockAchievement {
+                                    game_id: game_id.clone(),
+                                    api_name: p.api_name.clone(),
+                                    title: p.display_name.clone(),
+                                    desc: p.description.clone(),
+                                    unlock_time: p.earned_time.to_string(),
+                                },
+                            ));
 
-                        log::info!("[Prober] Unlock detected: {} (+{} XP)", name, p.xp);
-                        seen.insert(name.clone());
+                            let _ = db_tx.send(crate::state::DbWrite::Profile(
+                                crate::state::ProfileDbWrite::AddXp(p.xp),
+                            ));
+
+                            log::info!("[Prober] Unlock detected: {} (+{} XP)", name, p.xp);
+                            seen.insert(name.clone());
+                        }
+
+                        seen.retain(|k| now.contains_key(k));
+                        seen.extend(now.into_keys());
                     }
-
-                    seen.retain(|k| now.contains_key(k));
-                    seen.extend(now.into_keys());
                 }
             }
 
@@ -1017,7 +937,9 @@ pub fn watch_game_achievements(
         PathBuf::from(&game_dir),
         crate::settings::default_scan_roots(),
         game.manual_achievement_path,
+        game.manual_save_path,
         crack_type,
+        game.custom_ach_sound_path,
     )
     .ok_or_else(|| "Could not start achievement prober task".to_string())?;
 
@@ -1048,24 +970,22 @@ pub fn debug_fire_achievement(app: AppHandle, format_type: String) -> Result<(),
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs(),
-        global_percent: Some(2.1), // Ultra Rare mock
-        xp: 200,
+        global_percent: Some(2.1),
+        xp: 0, // EXTREME SAFETY: Zero XP for tests from the backend
+        is_debug: true,
+        custom_sound_path: None,
     };
     fire_overlay(&app, &payload);
-    if let Some(ov) = app.get_webview_window("achievement-overlay") {
-        let _ = ov.emit("achievement-unlocked", &payload);
-    }
     Ok(())
 }
 
 #[tauri::command]
 pub fn debug_fire_custom(
     app: AppHandle,
-    payload: AchievementUnlockedPayload,
+    mut payload: AchievementUnlockedPayload,
 ) -> Result<(), String> {
+    payload.xp = 0; // EXTREME SAFETY: Zero XP for custom tests from the backend
+    payload.is_debug = true;
     fire_overlay(&app, &payload);
-    if let Some(ov) = app.get_webview_window("achievement-overlay") {
-        let _ = ov.emit("achievement-unlocked", &payload);
-    }
     Ok(())
 }

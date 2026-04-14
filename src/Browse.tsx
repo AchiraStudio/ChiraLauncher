@@ -1,229 +1,251 @@
-import { useMemo, useState } from "react";
-import { motion } from "framer-motion";
-import { Link, useNavigate } from "react-router-dom";
-import { Play, Clock, Gamepad2, ChevronRight, Star, HardDriveDownload, Square } from "lucide-react";
+import { useState, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Search, Flame, Star, Download, ChevronRight, ChevronLeft, Tag } from "lucide-react";
 import { cn } from "./lib/utils";
-import { useGameStore } from "./store/gameStore";
-import { useProcessStore } from "./store/processStore";
-import { launchGame, forceStopGame } from "./services/gameService";
-import type { Game } from "./types/game";
-import { useLocalImage } from "./hooks/useLocalImage";
 
-/** Strip HTML tags and decode basic entities for plain-text previews */
-function stripHtml(html: string): string {
-    return html
-        .replace(/<[^>]*>/g, " ")          // remove all tags
-        .replace(/&amp;/g, "&")
-        .replace(/&lt;/g, "<")
-        .replace(/&gt;/g, ">")
-        .replace(/&quot;/g, '"')
-        .replace(/&#39;/g, "'")
-        .replace(/&nbsp;/g, " ")
-        .replace(/\s+/g, " ")              // collapse whitespace
-        .trim();
-}
+// ─── Placeholder Data (Wire this up to your API later!) ───
+const HERO_GAMES = [
+    {
+        id: "h1",
+        title: "Cyberpunk 2077",
+        developer: "CD PROJEKT RED",
+        image: "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1091500/capsule_616x353.jpg",
+        banner: "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1091500/library_hero.jpg",
+        price: "$59.99",
+        tags: ["Action", "RPG", "Sci-fi"]
+    },
+    {
+        id: "h2",
+        title: "Elden Ring",
+        developer: "FromSoftware",
+        image: "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1245620/capsule_616x353.jpg",
+        banner: "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1245620/library_hero.jpg",
+        price: "$59.99",
+        tags: ["Souls-like", "Dark Fantasy", "RPG"]
+    },
+    {
+        id: "h3",
+        title: "Helldivers 2",
+        developer: "Arrowhead Game Studios",
+        image: "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/2081080/capsule_616x353.jpg",
+        banner: "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/2081080/library_hero.jpg",
+        price: "$39.99",
+        tags: ["Co-op", "Shooter", "Multiplayer"]
+    }
+];
 
-function HeroFeaturedGame({ game }: { game: Game }) {
-    const navigate = useNavigate();
-    const runningInfo = useProcessStore((s) => s.running[game.id]);
-    const isRunning = !!runningInfo;
+const TRENDING_GAMES = [
+    { id: "t1", title: "Baldur's Gate 3", price: "$59.99", rating: 96, image: "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1086940/capsule_616x353.jpg" },
+    { id: "t2", title: "Lethal Company", price: "$19.99", rating: 98, image: "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1966720/capsule_616x353.jpg" },
+    { id: "t3", title: "Palworld", price: "$9.99", rating: 97, image: "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1623730/capsule_616x353.jpg" },
+    { id: "t4", title: "Dragon's Dogma 2", price: "$59.99", rating: 95, image: "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1086940/capsule_616x353.jpg" }, // Reuse image for demo
+    { id: "t5", title: "Red Dead Redemption 2", price: "$69.99", rating: 89, image: "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1174180/capsule_616x353.jpg" },
+    { id: "t6", title: "Stardew Valley", price: "$29.99", rating: 98, image: "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/413150/capsule_616x353.jpg" },
+];
 
-    const { src: bgUrl } = useLocalImage(game.background_image_path || (game as any).background_path || game.cover_image_path || (game as any).cover_path);
-
-    // Robust logo resolving via the backend cache/http handler
-    const { src: logoSrc, error: logoErr } = useLocalImage(game.logo_path);
-    const [logoFailed, setLogoFailed] = useState(false);
-
-    // Assume logo is valid if path exists, unless explicitly proven otherwise
-    const isLogoValid = Boolean(game.logo_path && !logoErr && !logoFailed);
-
-    const handleAction = async (e: React.MouseEvent) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (isRunning) await forceStopGame(game.id);
-        else await launchGame(game.id);
-    };
-
-    return (
-        <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="relative w-full h-[500px] rounded-[2rem] overflow-hidden group cursor-pointer border border-white/10 shadow-[0_20px_50px_rgba(0,0,0,0.5)]"
-            onClick={() => navigate('/library', { state: { gameId: game.id } })}
-        >
-            {bgUrl ? (
-                <img src={bgUrl} alt={game.title} className="absolute inset-0 w-full h-full object-cover transition-transform duration-[2s] group-hover:scale-105 brightness-[0.6] saturate-125" />
-            ) : (
-                <div className="absolute inset-0 bg-gradient-to-br from-slate-900 to-black flex items-center justify-center">
-                    <Gamepad2 size={64} className="text-white/5" />
-                </div>
-            )}
-
-            <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent" />
-            <div className="absolute inset-0 bg-gradient-to-r from-black/80 via-transparent to-transparent" />
-
-            <div className="absolute inset-0 p-12 flex flex-col justify-end">
-                <span className="text-accent text-[10px] font-black uppercase tracking-widest mb-4 inline-block bg-accent/10 px-3 py-1.5 rounded-lg border border-accent/20 w-fit backdrop-blur-md">
-                    Featured Selection
-                </span>
-
-                {isLogoValid ? (
-                    <img
-                        key={game.id}
-                        src={logoSrc || undefined}
-                        alt={game.title}
-                        onError={() => setLogoFailed(true)}
-                        className={cn(
-                            "block w-auto max-w-[420px] max-h-[154px] object-contain mb-5 drop-shadow-[0_4px_40px_rgba(0,0,0,0.95)] transition-opacity duration-300",
-                            !logoSrc ? "opacity-0" : "opacity-100"
-                        )}
-                    />
-                ) : (
-                    <h1 className="text-5xl md:text-7xl font-black text-white tracking-tighter uppercase leading-[0.9] mb-4 drop-shadow-2xl max-w-3xl">
-                        {game.title}
-                    </h1>
-                )}
-
-                {game.description && (
-                    <p className="text-white/60 text-sm md:text-base font-medium max-w-2xl line-clamp-2 leading-relaxed mb-8 drop-shadow-md">
-                        {stripHtml(game.description)}
-                    </p>
-                )}
-
-                <div className="flex items-center gap-4">
-                    <button
-                        onClick={handleAction}
-                        className={cn(
-                            "px-10 py-4 rounded-xl font-black text-xs uppercase tracking-widest flex items-center gap-3 transition-all transform hover:scale-105 active:scale-95 shadow-2xl",
-                            isRunning ? "bg-red-500 hover:bg-red-600 text-white" : "bg-white text-black hover:bg-white/90"
-                        )}
-                    >
-                        {isRunning ? <Square size={16} fill="currentColor" /> : <Play size={18} fill="currentColor" />}
-                        {isRunning ? "Stop Process" : "Play Now"}
-                    </button>
-                    <button onClick={(e) => { e.stopPropagation(); navigate('/library', { state: { gameId: game.id } }); }} className="px-8 py-4 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white font-bold text-xs uppercase tracking-widest transition-all backdrop-blur-md">
-                        View Details
-                    </button>
-                </div>
-            </div>
-        </motion.div>
-    );
-}
-
-function StoreCard({ game }: { game: Game }) {
-    const navigate = useNavigate();
-    const { src: coverUrl } = useLocalImage(game.cover_image_path || (game as any).cover_path);
-
-    return (
-        <motion.div
-            whileHover={{ y: -8 }}
-            onClick={() => navigate('/library', { state: { gameId: game.id } })}
-            className="group cursor-pointer flex flex-col gap-3"
-        >
-            <div className="w-full aspect-[2/3] rounded-2xl overflow-hidden border border-white/10 bg-black/40 shadow-xl relative">
-                {coverUrl ? (
-                    <img src={coverUrl} alt={game.title} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110 brightness-90 group-hover:brightness-110" />
-                ) : (
-                    <div className="w-full h-full flex items-center justify-center"><Gamepad2 size={32} className="text-white/20" /></div>
-                )}
-                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-                <div className="absolute bottom-4 left-0 right-0 flex justify-center opacity-0 group-hover:opacity-100 transition-all translate-y-4 group-hover:translate-y-0">
-                    <span className="bg-accent text-white text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-lg shadow-lg">In Library</span>
-                </div>
-            </div>
-            <div>
-                <h3 className="text-white font-bold text-sm truncate group-hover:text-accent transition-colors">{game.title}</h3>
-                <p className="text-white/40 text-[10px] font-semibold uppercase tracking-wider mt-1 truncate">
-                    {game.developer || game.source || "Unknown Developer"}
-                </p>
-            </div>
-        </motion.div>
-    );
-}
+const CATEGORIES = ["All", "Action", "RPG", "Strategy", "Shooter", "Indie", "Multiplayer", "Survival"];
 
 export function Browse() {
-    const { gamesById } = useGameStore();
+    const [activeHero, setActiveHero] = useState(0);
+    const [searchQuery, setSearchQuery] = useState("");
+    const [activeCategory, setActiveCategory] = useState("All");
 
-    const { heroGame, recentGames, allGamesList } = useMemo(() => {
-        const all = Object.values(gamesById);
+    // Auto-advance hero carousel
+    useEffect(() => {
+        const timer = setInterval(() => {
+            setActiveHero((prev) => (prev + 1) % HERO_GAMES.length);
+        }, 6000);
+        return () => clearInterval(timer);
+    }, []);
 
-        let hero = all.find(g => g.background_image_path && g.description) ||
-            all.find(g => g.cover_image_path) ||
-            all[0];
+    const nextHero = () => setActiveHero((prev) => (prev + 1) % HERO_GAMES.length);
+    const prevHero = () => setActiveHero((prev) => (prev - 1 + HERO_GAMES.length) % HERO_GAMES.length);
 
-        const recent = [...all]
-            .sort((a, b) => (b.last_played ?? "").localeCompare(a.last_played ?? ""))
-            .filter(g => g.id !== hero?.id)
-            .slice(0, 4);
-
-        const list = [...all].filter(g => g.id !== hero?.id && !recent.find(r => r.id === g.id)).slice(0, 10);
-
-        return { heroGame: hero, recentGames: recent, allGamesList: list };
-    }, [gamesById]);
+    const currentHero = HERO_GAMES[activeHero];
 
     return (
-        <div className="min-h-full w-full bg-background relative overflow-y-auto overflow-x-hidden custom-scrollbar">
-            <div className="absolute top-[-10%] right-[-5%] w-[500px] h-[500px] bg-accent/10 blur-[120px] rounded-full animate-pulse opacity-40 pointer-events-none" />
+        // ── FIX: absolute inset-0 + flex-col to claim the full screen, 
+        // while the inner main tag gets overflow-y-auto to fix the scroll bug! ──
+        <div className="absolute inset-0 flex flex-col bg-[#08090f] text-white font-outfit">
 
-            <div className="relative z-10 px-10 md:px-14 pt-14 pb-32 max-w-[1600px] mx-auto w-full space-y-16">
+            {/* Seamless unified background layer for the whole page */}
+            <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
+                <AnimatePresence mode="wait">
+                    <motion.img
+                        key={currentHero.id}
+                        src={currentHero.banner}
+                        alt=""
+                        initial={{ opacity: 0, scale: 1.05 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 1.2, ease: "easeOut" }}
+                        className="absolute top-0 left-0 w-full h-[70vh] object-cover opacity-30 saturate-150 blur-3xl"
+                    />
+                </AnimatePresence>
+                <div className="absolute inset-0 bg-gradient-to-b from-[#08090f]/40 via-[#08090f]/80 to-[#08090f]" />
+            </div>
 
-                {/* ── Store Navigation ── */}
-                <div className="flex items-center gap-8 border-b border-white/5 pb-4">
-                    <h2 className="text-xl font-black text-white uppercase tracking-tighter flex items-center gap-2">
-                        <Star className="text-accent" size={20} /> Discover
-                    </h2>
-                    <div className="flex items-center gap-6 text-[11px] font-black uppercase tracking-widest text-white/40">
-                        <Link to="/library" className="hover:text-white transition-colors">Library</Link>
-                        <Link to="/downloads" className="hover:text-white transition-colors">Downloads</Link>
-                        <Link to="/extensions" className="hover:text-white transition-colors">Extensions</Link>
+            {/* ── THE SCROLLABLE CONTAINER ── */}
+            <main className="flex-1 h-full overflow-y-auto overflow-x-hidden custom-scrollbar relative z-10 scroll-smooth">
+
+                {/* ── FLOATING SEARCH & FILTER BAR ── */}
+                <div className="sticky top-0 z-50 px-8 py-6 flex flex-col md:flex-row items-center justify-between gap-6 pointer-events-none">
+                    <div className="flex-1 w-full max-w-xl pointer-events-auto">
+                        <div className="relative group">
+                            <Search size={18} className="absolute left-5 top-1/2 -translate-y-1/2 text-white/30 group-focus-within:text-cyan-400 transition-colors" />
+                            <input
+                                type="text"
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                placeholder="Search the catalog..."
+                                className="w-full bg-black/40 backdrop-blur-2xl border border-white/10 rounded-[1.5rem] py-4 pl-14 pr-6 text-sm font-bold text-white placeholder:text-white/30 focus:outline-none focus:border-cyan-400/50 shadow-2xl transition-all"
+                            />
+                        </div>
+                    </div>
+
+                    <div className="flex gap-2 overflow-x-auto custom-scrollbar max-w-full pointer-events-auto pb-2 md:pb-0 hide-scroll">
+                        {CATEGORIES.map(cat => (
+                            <button
+                                key={cat}
+                                onClick={() => setActiveCategory(cat)}
+                                className={cn(
+                                    "px-5 py-3 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all whitespace-nowrap backdrop-blur-md shadow-lg",
+                                    activeCategory === cat
+                                        ? "bg-cyan-400 text-black shadow-[0_0_20px_rgba(34,211,238,0.4)]"
+                                        : "bg-black/40 border border-white/10 text-white/60 hover:text-white hover:bg-white/10"
+                                )}
+                            >
+                                {cat}
+                            </button>
+                        ))}
                     </div>
                 </div>
 
-                {heroGame ? (
-                    <HeroFeaturedGame game={heroGame} />
-                ) : (
-                    <div className="h-[400px] rounded-[2rem] border border-white/5 border-dashed flex flex-col items-center justify-center text-white/30 gap-4">
-                        <HardDriveDownload size={48} />
-                        <p className="font-bold tracking-widest uppercase text-xs">Your library is completely empty.</p>
-                    </div>
-                )}
+                <div className="px-8 lg:px-16 pb-24 max-w-[1600px] mx-auto mt-4">
 
-                {/* ── Continue Playing Row ── */}
-                {recentGames.length > 0 && (
+                    {/* ── DYNAMIC HERO CAROUSEL ── */}
+                    <section className="mb-20">
+                        <div className="relative w-full aspect-[21/9] max-h-[600px] rounded-[2.5rem] overflow-hidden border border-white/10 shadow-[0_40px_100px_rgba(0,0,0,0.8)] bg-black">
+                            <AnimatePresence mode="wait">
+                                <motion.img
+                                    key={currentHero.id}
+                                    src={currentHero.banner}
+                                    alt={currentHero.title}
+                                    initial={{ opacity: 0, scale: 1.05 }}
+                                    animate={{ opacity: 1, scale: 1 }}
+                                    exit={{ opacity: 0 }}
+                                    transition={{ duration: 0.8, ease: "easeOut" }}
+                                    className="absolute inset-0 w-full h-full object-cover brightness-[0.6]"
+                                />
+                            </AnimatePresence>
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent" />
+                            <div className="absolute inset-0 bg-gradient-to-r from-black/90 via-black/40 to-transparent w-[70%]" />
+
+                            {/* Hero Content */}
+                            <div className="absolute inset-0 p-12 lg:p-20 flex flex-col justify-end pointer-events-none">
+                                <AnimatePresence mode="wait">
+                                    <motion.div
+                                        key={currentHero.id}
+                                        initial={{ opacity: 0, y: 20 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        exit={{ opacity: 0, y: -20 }}
+                                        transition={{ duration: 0.5, delay: 0.2 }}
+                                        className="max-w-2xl pointer-events-auto"
+                                    >
+                                        <div className="flex items-center gap-3 mb-4">
+                                            <span className="px-3 py-1 rounded-lg bg-cyan-400/20 border border-cyan-400/30 text-cyan-400 text-[10px] font-black uppercase tracking-widest backdrop-blur-md">Featured</span>
+                                            <span className="text-white/50 text-[10px] font-bold uppercase tracking-widest">{currentHero.developer}</span>
+                                        </div>
+                                        <h1 className="text-5xl lg:text-7xl font-black tracking-tighter text-white drop-shadow-lg mb-6 leading-tight">
+                                            {currentHero.title}
+                                        </h1>
+
+                                        <div className="flex items-center gap-3 mb-8">
+                                            {currentHero.tags.map(tag => (
+                                                <span key={tag} className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-white/70 text-[10px] font-bold uppercase tracking-widest backdrop-blur-md flex items-center gap-1.5">
+                                                    <Tag size={10} /> {tag}
+                                                </span>
+                                            ))}
+                                        </div>
+
+                                        <div className="flex items-center gap-6">
+                                            <button className="px-10 py-4 rounded-2xl bg-gradient-to-r from-cyan-400 to-cyan-300 text-black font-black text-xs uppercase tracking-widest shadow-[0_0_30px_rgba(34,211,238,0.3)] hover:brightness-110 transition-all active:scale-95 flex items-center gap-3">
+                                                <Download size={16} strokeWidth={3} /> Get - {currentHero.price}
+                                            </button>
+                                            <button className="w-14 h-14 rounded-2xl bg-white/10 hover:bg-white/20 border border-white/10 flex items-center justify-center text-white backdrop-blur-md transition-all active:scale-95">
+                                                <Star size={20} />
+                                            </button>
+                                        </div>
+                                    </motion.div>
+                                </AnimatePresence>
+                            </div>
+
+                            {/* Carousel Controls */}
+                            <div className="absolute right-8 bottom-8 flex items-center gap-3">
+                                <button onClick={prevHero} className="w-12 h-12 rounded-full bg-black/50 hover:bg-black/80 border border-white/10 flex items-center justify-center text-white backdrop-blur-md transition-all active:scale-90">
+                                    <ChevronLeft size={20} />
+                                </button>
+                                <div className="flex gap-2 px-2">
+                                    {HERO_GAMES.map((_, i) => (
+                                        <div key={i} className={cn("h-1.5 rounded-full transition-all duration-500", i === activeHero ? "w-6 bg-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.5)]" : "w-2 bg-white/20")} />
+                                    ))}
+                                </div>
+                                <button onClick={nextHero} className="w-12 h-12 rounded-full bg-black/50 hover:bg-black/80 border border-white/10 flex items-center justify-center text-white backdrop-blur-md transition-all active:scale-90">
+                                    <ChevronRight size={20} />
+                                </button>
+                            </div>
+                        </div>
+                    </section>
+
+                    {/* ── TRENDING GRID ── */}
                     <section>
-                        <div className="flex items-center justify-between mb-6">
-                            <h3 className="text-lg font-black text-white uppercase tracking-widest flex items-center gap-2">
-                                <Clock size={16} className="text-purple-400" /> Continue Playing
-                            </h3>
-                            <Link to="/library" className="text-[10px] font-bold text-white/30 hover:text-white uppercase tracking-widest transition-colors flex items-center gap-1">
+                        <div className="flex items-center justify-between mb-8">
+                            <h2 className="text-2xl font-black text-white uppercase tracking-tight flex items-center gap-3">
+                                <Flame className="text-orange-500" size={28} /> Trending Now
+                            </h2>
+                            <button className="text-xs font-bold text-white/50 hover:text-cyan-400 uppercase tracking-widest transition-colors flex items-center gap-1">
                                 View All <ChevronRight size={14} />
-                            </Link>
+                            </button>
                         </div>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-                            {recentGames.map(game => (
-                                <StoreCard key={game.id} game={game} />
+
+                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                            {TRENDING_GAMES.map((game) => (
+                                <motion.div
+                                    key={game.id}
+                                    whileHover={{ y: -8 }}
+                                    className="group cursor-pointer rounded-[2rem] bg-black/40 backdrop-blur-xl border border-white/5 p-4 transition-all hover:bg-white/[0.04] hover:border-white/15 shadow-xl hover:shadow-2xl"
+                                >
+                                    <div className="w-full aspect-[16/9] rounded-[1.25rem] overflow-hidden mb-4 relative bg-black/50 border border-white/5 shadow-inner">
+                                        <img src={game.image} alt={game.title} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" />
+                                        <div className="absolute top-3 right-3 bg-black/60 backdrop-blur-md px-2 py-1 rounded-lg border border-white/10 flex items-center gap-1.5 shadow-md">
+                                            <Star size={10} className="text-yellow-400" fill="currentColor" />
+                                            <span className="text-[10px] font-black text-white">{game.rating}</span>
+                                        </div>
+                                        {/* Overlay Hover Play Button */}
+                                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                            <div className="w-12 h-12 rounded-full bg-cyan-400 text-black flex items-center justify-center shadow-[0_0_20px_rgba(34,211,238,0.5)] transform scale-75 group-hover:scale-100 transition-transform duration-300 delay-75">
+                                                <Search size={20} strokeWidth={3} />
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="px-2">
+                                        <h3 className="text-sm font-bold text-white truncate mb-2 group-hover:text-cyan-400 transition-colors">{game.title}</h3>
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-[11px] font-black text-white/50 uppercase tracking-widest">{game.price}</span>
+                                            <button className="w-8 h-8 rounded-xl bg-white/5 group-hover:bg-cyan-400/10 flex items-center justify-center text-white/40 group-hover:text-cyan-400 transition-colors">
+                                                <Download size={14} />
+                                            </button>
+                                        </div>
+                                    </div>
+                                </motion.div>
                             ))}
                         </div>
                     </section>
-                )}
 
-                {/* ── More in Collection ── */}
-                {allGamesList.length > 0 && (
-                    <section>
-                        <div className="flex items-center justify-between mb-6">
-                            <h3 className="text-lg font-black text-white uppercase tracking-widest flex items-center gap-2">
-                                <Gamepad2 size={16} className="text-blue-400" /> From Your Vault
-                            </h3>
-                        </div>
-                        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6">
-                            {allGamesList.map(game => (
-                                <StoreCard key={game.id} game={game} />
-                            ))}
-                        </div>
-                    </section>
-                )}
+                </div>
+            </main>
 
-            </div>
+            {/* Quick tip: If AppLayout is causing the issue elsewhere, ensure the layout container holding the `<Outlet />` isn't forcing overflow-hidden on its children! */}
         </div>
     );
 }

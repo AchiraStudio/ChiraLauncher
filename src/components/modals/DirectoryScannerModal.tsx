@@ -7,6 +7,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useGameStore } from "../../store/gameStore";
 import { v4 as uuidv4 } from "uuid";
 import type { NewGame } from "../../types/game";
+import { fetchSteamMetadata, parseSteamDate } from "../../services/steamService";
+import { toast } from "sonner";
 
 type ScannerStep = "PICK_DIR" | "SCANNING" | "RESULTS";
 
@@ -35,6 +37,7 @@ export function DirectoryScannerModal() {
     const [results, setResults] = useState<ScannedGame[]>([]);
     const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
     const [isImporting, setIsImporting] = useState(false);
+    const [importStatus, setImportStatus] = useState("");
 
     useEffect(() => {
         let unlisten: (() => void) | undefined;
@@ -58,6 +61,7 @@ export function DirectoryScannerModal() {
         setProgress({ files_scanned: 0, candidates_found: 0, percentage: 0 });
         setResults([]);
         setSelectedPaths(new Set());
+        setImportStatus("");
         setScannerModalOpen(false);
     };
 
@@ -94,46 +98,92 @@ export function DirectoryScannerModal() {
         setIsImporting(true);
         try {
             const selectedGames = results.filter((g) => selectedPaths.has(g.executable_path));
+
+            let i = 1;
             for (const g of selectedGames) {
+                setImportStatus(`Fetching metadata for ${g.guessed_title} (${i}/${selectedGames.length})...`);
                 const dir = g.install_dir || g.executable_path.substring(0, g.executable_path.lastIndexOf("\\"));
+
+                let finalTitle = g.guessed_title;
+                let coverPath = null;
+                let bgPath = null;
+                let logoPath = null;
+                let dev = null;
+                let pub = null;
+                let desc = null;
+                let release = null;
+                let genresStr = null;
+
+                if (g.app_id) {
+                    try {
+                        const data = await fetchSteamMetadata(g.app_id);
+                        if (data.name) finalTitle = data.name;
+                        dev = data.developers?.[0] || null;
+                        pub = data.publishers?.[0] || null;
+                        desc = data.detailed_description || data.short_description || null;
+                        release = parseSteamDate(data.release_date?.date) || null;
+                        genresStr = data.genres?.map((g: any) => g.description).join(", ") || null;
+
+                        const bgPref = localStorage.getItem("steam_bg_pref") || "hero";
+                        const rawCover = `https://cdn.cloudflare.steamstatic.com/steam/apps/${g.app_id}/library_600x900.jpg`;
+                        const rawBg = bgPref === "hero" ? `https://cdn.cloudflare.steamstatic.com/steam/apps/${g.app_id}/library_hero.jpg` : data.header_image;
+                        const rawLogo = `https://cdn.cloudflare.steamstatic.com/steam/apps/${g.app_id}/logo_2x.png`;
+
+                        coverPath = await invoke<string>("download_url_to_cache", { url: rawCover, imageType: "cover" }).catch(() => null);
+                        const downloadedBg = await invoke<string>("download_url_to_cache", { url: rawBg, imageType: "background" }).catch(() => null);
+                        bgPath = downloadedBg ? `${downloadedBg}?pos=center` : null;
+                        logoPath = await invoke<string>("download_url_to_cache", { url: rawLogo, imageType: "logo" }).catch(() => null);
+
+                    } catch (e) {
+                        console.error("Failed to fetch metadata for", g.app_id);
+                    }
+                }
+
                 const newGame: NewGame = {
                     id: uuidv4(),
-                    title: g.guessed_title,
+                    title: finalTitle,
                     executable_path: g.executable_path,
-                    cover_path: null,
-                    background_path: null,
-                    logo_path: null,
-                    description: null,
-                    developer: null,
-                    genre: null,
+                    cover_path: coverPath,
+                    background_path: bgPath,
+                    logo_path: logoPath,
+                    description: desc,
+                    developer: dev,
+                    publisher: pub,
+                    release_date: release,
+                    genres: genresStr,
+                    genre: genresStr ? genresStr.split(",")[0] : null,
                     source: "scanner",
                     added_at: new Date().toISOString(),
                     installed_size: null,
                     install_dir: dir,
                     crack_type: g.crack_type,
                     app_id: g.app_id || null,
+                    steam_app_id: g.app_id ? parseInt(g.app_id) : null,
                     is_favorite: false,
                     run_as_admin: false,
-                    publisher: null,
-                    release_date: null,
-                    genres: null,
                     tags: null,
                     metacritic_score: null,
                     platforms: null,
                     repack_info: null,
                     manual_achievement_path: null,
-                    steam_app_id: null,
                     detected_metadata_path: null,
                     detected_earned_state_path: null,
+                    custom_ach_sound_path: null,
+                    custom_bgm_path: null,
                 };
+
                 await invoke("add_game", { game: newGame });
+                i++;
             }
             await fetchGames();
             reset();
+            toast.success(`${selectedGames.length} games imported successfully!`);
         } catch (e) {
             console.error(e);
+            toast.error("Error during import", { description: String(e) });
         } finally {
             setIsImporting(false);
+            setImportStatus("");
         }
     };
 
@@ -233,9 +283,13 @@ export function DirectoryScannerModal() {
                                     <button
                                         onClick={handleImport}
                                         disabled={selectedPaths.size === 0 || isImporting}
-                                        className="px-8 py-2.5 bg-green-500 disabled:opacity-50 hover:bg-green-400 rounded text-black font-black tracking-widest shadow-lg flex items-center gap-2"
+                                        className="px-8 py-2.5 bg-green-500 disabled:opacity-50 hover:bg-green-400 rounded text-black font-black tracking-widest shadow-lg flex items-center gap-2 transition-all"
                                     >
-                                        {isImporting ? "IMPORTING..." : `IMPORT ${selectedPaths.size} GAMES`}
+                                        {isImporting ? (
+                                            <span className="truncate max-w-[200px]">{importStatus}</span>
+                                        ) : (
+                                            `IMPORT ${selectedPaths.size} GAMES`
+                                        )}
                                     </button>
                                 </div>
                             </motion.div>

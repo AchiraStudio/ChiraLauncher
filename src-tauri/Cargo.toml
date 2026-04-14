@@ -1,6 +1,6 @@
 [package]
 name = "chiralauncher"
-version = "0.1.0"
+version = "0.1.3"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -97,6 +97,7 @@ base64 = "0.22.1"
 aes-gcm = "0.10.3"
 rand_core = "0.10.0"
 x25519-dalek = { version = "2.0", features = ["static_secrets"] }
+futures-util = "0.3.32"
 
 # Cross-platform process start time (for PID reuse hardening)
 # Windows: uses GetProcessTimes via windows-sys

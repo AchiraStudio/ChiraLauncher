@@ -14,7 +14,7 @@ pub struct Game {
     pub last_played: Option<String>,
     pub cover_path: Option<String>,
     pub background_path: Option<String>,
-    pub logo_path: Option<String>, // NEW
+    pub logo_path: Option<String>,
     pub description: Option<String>,
     pub developer: Option<String>,
     pub genre: Option<String>,
@@ -38,11 +38,15 @@ pub struct Game {
     pub achievements_unlocked: Option<u32>,
     pub achievements_total: Option<u32>,
     pub manual_achievement_path: Option<String>,
+    pub manual_save_path: Option<String>,
     pub crack_type: Option<String>,
     pub app_id: Option<String>,
     pub detected_metadata_path: Option<String>,
     pub detected_earned_state_path: Option<String>,
     pub is_favorite: bool,
+    // ── NEW FIELDS ──
+    pub custom_ach_sound_path: Option<String>,
+    pub custom_bgm_path: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -53,7 +57,7 @@ pub struct NewGame {
     pub exe_path: String,
     pub cover_path: Option<String>,
     pub background_path: Option<String>,
-    pub logo_path: Option<String>, // NEW
+    pub logo_path: Option<String>,
     pub description: Option<String>,
     pub developer: Option<String>,
     pub genre: Option<String>,
@@ -70,12 +74,16 @@ pub struct NewGame {
     pub repack_info: Option<String>,
     pub run_as_admin: bool,
     pub manual_achievement_path: Option<String>,
+    pub manual_save_path: Option<String>,
     pub steam_app_id: Option<u32>,
     pub crack_type: Option<String>,
     pub app_id: Option<String>,
     pub detected_metadata_path: Option<String>,
     pub detected_earned_state_path: Option<String>,
     pub is_favorite: bool,
+    // ── NEW FIELDS ──
+    pub custom_ach_sound_path: Option<String>,
+    pub custom_bgm_path: Option<String>,
 }
 
 fn map_game_row(row: &rusqlite::Row) -> rusqlite::Result<Game> {
@@ -132,6 +140,9 @@ fn map_game_row(row: &rusqlite::Row) -> rusqlite::Result<Game> {
         manual_achievement_path: row
             .get::<_, Option<String>>("manual_achievement_path")
             .unwrap_or(None),
+        manual_save_path: row
+            .get::<_, Option<String>>("manual_save_path")
+            .unwrap_or(None),
         crack_type: row.get::<_, Option<String>>("crack_type").unwrap_or(None),
         app_id: row.get::<_, Option<String>>("app_id").unwrap_or(None),
         detected_metadata_path: row
@@ -141,7 +152,17 @@ fn map_game_row(row: &rusqlite::Row) -> rusqlite::Result<Game> {
             .get::<_, Option<String>>("detected_earned_state_path")
             .unwrap_or(None),
         logo_path: row.get::<_, Option<String>>("logo_path").unwrap_or(None),
-        is_favorite: row.get::<_, Option<i32>>("is_favorite").unwrap_or(Some(0)).unwrap_or(0) != 0,
+        is_favorite: row
+            .get::<_, Option<i32>>("is_favorite")
+            .unwrap_or(Some(0))
+            .unwrap_or(0)
+            != 0,
+        custom_ach_sound_path: row
+            .get::<_, Option<String>>("custom_ach_sound_path")
+            .unwrap_or(None),
+        custom_bgm_path: row
+            .get::<_, Option<String>>("custom_bgm_path")
+            .unwrap_or(None),
     })
 }
 
@@ -224,22 +245,22 @@ pub fn insert_game_conn(conn: &Connection, game: NewGame) -> rusqlite::Result<us
             id, title, exe_path, cover_path, background_path, description,
             developer, genre, source, added_at, installed_size, install_dir,
             publisher, release_date, genres, tags, metacritic_score, platforms,
-            repack_info, run_as_admin, manual_achievement_path, steam_app_id,
+            repack_info, run_as_admin, manual_achievement_path, manual_save_path, steam_app_id,
             crack_type, app_id, playtime_seconds, session_count, first_played, last_played,
             achievements_unlocked, achievements_total, detected_metadata_path, detected_earned_state_path, logo_path,
-            is_favorite
+            is_favorite, custom_ach_sound_path, custom_bgm_path
          ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
-            ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34
+            ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37
          )",
         params![
             game.id, game.title, game.exe_path, game.cover_path, game.background_path, game.description,
             game.developer, game.genre, game.source, game.added_at, game.installed_size.map(|x| x as i64), game.install_dir,
             game.publisher, game.release_date, game.genres, game.tags, game.metacritic_score, game.platforms,
-            game.repack_info, game.run_as_admin as i32, game.manual_achievement_path, game.steam_app_id,
+            game.repack_info, game.run_as_admin as i32, game.manual_achievement_path, game.manual_save_path, game.steam_app_id,
             game.crack_type, game.app_id, restored_secs, restored_sessions, restored_first, restored_last,
             restored_ach_unlocked, restored_ach_total, game.detected_metadata_path, game.detected_earned_state_path, game.logo_path,
-            game.is_favorite as i32
+            game.is_favorite as i32, game.custom_ach_sound_path, game.custom_bgm_path
         ],
     )
 }
@@ -266,8 +287,9 @@ pub fn update_game_conn(conn: &Connection, game: Game) -> rusqlite::Result<usize
         "UPDATE games SET 
             title = ?1, exe_path = ?2, cover_path = ?3, background_path = ?4, developer = ?5, 
             publisher = ?6, release_date = ?7, description = ?8, genre = ?9, steam_app_id = ?10,
-            run_as_admin = ?11, manual_achievement_path = ?12, logo_path = ?13, is_favorite = ?14
-         WHERE id = ?15",
+            run_as_admin = ?11, manual_achievement_path = ?12, manual_save_path = ?13, logo_path = ?14, 
+            is_favorite = ?15, custom_ach_sound_path = ?16, custom_bgm_path = ?17
+         WHERE id = ?18",
         params![
             game.title,
             game.exe_path,
@@ -281,8 +303,11 @@ pub fn update_game_conn(conn: &Connection, game: Game) -> rusqlite::Result<usize
             game.steam_app_id,
             game.run_as_admin as i32,
             game.manual_achievement_path,
+            game.manual_save_path,
             game.logo_path,
             game.is_favorite as i32,
+            game.custom_ach_sound_path,
+            game.custom_bgm_path,
             game.id
         ],
     )?;

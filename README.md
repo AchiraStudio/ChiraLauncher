@@ -18,6 +18,29 @@ A personal game launcher built with Tauri, Rust, and React. ChiraLauncher lets y
 
 ---
 
+## ✨ Recent Updates
+
+### Giving the UI and Audio some love
+- **All-New Audio Tab:** I added a dedicated spot in the Settings to manage how the launcher sounds. You can now set your own universal background music and change the default achievement pop sound. I also threw in some live volume sliders so you don't have to guess how loud things are.
+- **Audio Previews:** Hooking up custom sounds is great, but having to guess if they actually work isn't. I added little "Play" buttons next to the sound pickers so you can test them out immediately.
+- **Messaging Gets a Facelift:** The old messaging UI was feeling a bit clunky, so I completely redesigned `Messages.tsx`. It now looks much more like Discord, with a clean left-aligned layout and clear styling for sent and received messages.
+- **Easier Encryption:** Generating your E2E encryption keys used to be a little tedious. I've added a quick "Generate Keys" button straight into the chat view, making it painless to set up your secure vault on a new device.
+- **Cleaner Library Info:** Those giant info cards under the game titles were taking up way too much space. I swapped them out for sleek, backdrop-blurred pill tags that cleanly show the developer, publisher, ID, and other details.
+- **Less Scrolling, More Gaming:** I made the game description area collapsible by default. It now fades out cleanly with a "Read More" button, which keeps your game pages looking way less cluttered.
+- **Taming the Downloads Page:** If you've ever downloaded a game with 50 different `.rar` parts, you know how messy the UI would get. The downloads page now groups these automatically into a single, neat folder card. Just click "View Contents" if you want to check the progress of individual files.
+
+### Squashing Bugs and Making Things Smoother
+- **Fixed the "DJ Launcher" Bug:** If you clicked through your games too fast, the launcher used to play multiple background tracks on top of each other. The audio engine is a lot smarter now and instantly cuts the old track when you switch games.
+- **Focus-Aware Music:** It was annoying having the launcher music keep playing in the background when you were doing something else. Now, the music will smoothly fade out the second you minimize the window, click away, or launch a game, and it fades right back in when you return.
+- **Achievements Pop Even When Muted:** I ran into a weird issue where muting the background music also killed the achievement sounds. I completely reworked how the audio context handles muting, so now your BGM stays quiet but those sweet, sweet achievement pops still come through.
+- **Notifications Listen to the Audio:** Short achievement sounds used to cut off, or the pop-up would vanish before a longer sound finished playing. The engine now calculates exactly how long your custom `.mp3` or `.wav` is, trims out any dead air, and keeps the toast on screen for the whole sound (with a 3-second minimum so you don't miss it).
+- **Better Local Audio Handling:** Tauri was being overly strict about letting the webview play local audio files. I wrote a new Rust command (`read_audio_base64`) that pipes the audio directly to the frontend, bypassing those restrictions entirely.
+- **No More Free XP:** Turns out the "Test Achievement" buttons in the developer settings were actually granting real XP to cloud profiles... oops! I've patched it so test payloads strictly send 0 XP and are properly flagged as debug events so they don't touch the database.
+- **Smarter Desktop Shortcuts:** If ChiraLauncher was closed and you double-clicked a game shortcut on your desktop, the launcher would open but forget to actually start your game. I added a slight boot delay so the database and React have time to wake up fully before passing the launch command.
+- **System Tray Polish:** I cleaned up a harsh shadow on the system tray menu and added a nice little pulsing green dot to show you which games are currently running in the background.
+
+---
+
 ## Screenshots
 
 > ![browse page](image.png)
@@ -257,6 +280,12 @@ The image cache is at:
 Pull requests are welcome. For significant changes, open an issue first to discuss what you'd like to change.
 
 Please keep PRs focused — one feature or fix per PR makes review much easier.
+
+---
+
+## Credits
+
+- **Sound Effects (SFX):** UI audio sounds are sourced from [CreatorAssets / YouTube](https://www.youtube.com/watch?v=1TTSWWobIQE). Check out their channel here: [@CreatorAssets](https://www.youtube.com/@CreatorAssets).
 
 ---
 

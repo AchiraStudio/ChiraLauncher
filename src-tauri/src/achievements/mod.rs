@@ -41,7 +41,7 @@ pub struct Achievement {
     pub icon_gray_path: Option<String>,
     pub global_percent: Option<f32>,
     #[serde(default)]
-    pub xp: u64, // NEW
+    pub xp: u64,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -73,7 +73,8 @@ pub struct AchievementDiscovery {
 pub struct SyncOptions<'a> {
     pub crack_type: Option<CrackType>,
     pub known_app_id: Option<&'a str>,
-    pub manual_path: Option<&'a str>,
+    pub manual_metadata_path: Option<&'a str>,
+    pub manual_save_path: Option<&'a str>,
     pub scan_roots: &'a [PathBuf],
     pub steam_api_key: Option<&'a str>,
     pub db_tx: Option<&'a crate::state::DbWriteSender>,
@@ -136,14 +137,14 @@ pub fn discover_achievements(
     let meta_path = find_metadata_path(
         install_dir,
         app_id.as_deref(),
-        opts.manual_path,
+        opts.manual_metadata_path,
         &mut probe_log,
     );
 
     let save_path = find_save_path(
         app_id.as_deref(),
         install_dir,
-        opts.manual_path,
+        opts.manual_save_path,
         opts.scan_roots,
         Some(&emu_info.crack_type),
         &mut probe_log,
@@ -169,14 +170,14 @@ pub fn resolve_app_id(install_dir: &Path) -> Option<String> {
 pub fn resolve_save_path(
     app_id: Option<&str>,
     game_dir: &Path,
-    manual_path: Option<&str>,
+    manual_save_path: Option<&str>,
     scan_roots: &[PathBuf],
     crack_type: Option<&CrackType>,
 ) -> Option<PathBuf> {
     let opts = SyncOptions {
         crack_type: crack_type.cloned(),
         known_app_id: app_id,
-        manual_path,
+        manual_save_path,
         scan_roots,
         ..Default::default()
     };
@@ -186,11 +187,11 @@ pub fn resolve_save_path(
 pub fn find_achievements_json(
     game_dir: &Path,
     app_id: Option<&str>,
-    manual_path: Option<&str>,
+    manual_metadata_path: Option<&str>,
 ) -> Option<PathBuf> {
     let opts = SyncOptions {
         known_app_id: app_id,
-        manual_path,
+        manual_metadata_path,
         ..Default::default()
     };
     discover_achievements(game_dir, app_id, &opts).metadata_path
@@ -443,16 +444,25 @@ fn find_save_path(
 }
 
 pub fn looks_like_metadata(path: &Path) -> bool {
-    fs::read_to_string(path)
-        .ok()
-        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-        .and_then(|v| v.as_array().cloned())
-        .map(|arr| {
-            arr.first().map_or(false, |e| {
+    let s = match fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&s) {
+        // Handle array root
+        if let Some(arr) = v.as_array() {
+            return arr.first().map_or(false, |e| {
                 e.get("name").is_some() || e.get("displayName").is_some()
-            })
-        })
-        .unwrap_or(false)
+            });
+        }
+        // Handle object root with achievements key
+        if let Some(arr) = v.get("achievements").and_then(|a| a.as_array()) {
+            return arr.first().map_or(false, |e| {
+                e.get("name").is_some() || e.get("displayName").is_some()
+            });
+        }
+    }
+    false
 }
 
 pub fn looks_like_save_state(path: &Path) -> bool {
@@ -542,93 +552,6 @@ fn build_list(
         .collect()
 }
 
-pub async fn try_auto_generate(
-    app_id: &str,
-    game_dir: &Path,
-    crack_type: Option<&CrackType>,
-    steam_api_key: Option<&str>,
-) -> bool {
-    let Some(key) = steam_api_key.filter(|k| !k.is_empty()) else {
-        return false;
-    };
-
-    let _log: Vec<String> = Vec::new();
-    let save_dir = find_save_dir(app_id, game_dir, crack_type);
-
-    let Some(dest_dir) = save_dir else {
-        log::info!("[AutoGen] No existing save dir for app_id={}", app_id);
-        return false;
-    };
-
-    if dest_dir.join("achievements.json").exists() {
-        return false;
-    }
-
-    log::info!(
-        "[AutoGen] Generating for app_id={} → {}",
-        app_id,
-        dest_dir.display()
-    );
-
-    match crate::achievement_watcher::generate_achievements_json(key, app_id, &dest_dir).await {
-        Ok(true) => {
-            log::info!("[AutoGen] Done for app_id={}", app_id);
-            true
-        }
-        _ => false,
-    }
-}
-
-pub fn find_save_dir(
-    app_id: &str,
-    game_dir: &Path,
-    crack_type: Option<&CrackType>,
-) -> Option<PathBuf> {
-    if matches!(crack_type, Some(CrackType::Anadius)) {
-        if let Some(local) = std::env::var_os("LOCALAPPDATA") {
-            let dir = PathBuf::from(&local)
-                .join("anadius")
-                .join("LSX emu")
-                .join(app_id);
-            if dir.exists() {
-                return Some(dir);
-            }
-        }
-    }
-    if matches!(crack_type, Some(CrackType::Goldberg) | Some(CrackType::Voices38)) {
-        for var in &["APPDATA", "LOCALAPPDATA"] {
-            if let Some(appdata) = std::env::var_os(var) {
-                for sub in GOLDBERG_APPDATA_DIRS {
-                    let dir = PathBuf::from(&appdata).join(sub).join(app_id);
-                    if dir.exists() {
-                        return Some(dir);
-                    }
-                }
-            }
-        }
-    }
-    if let Some(sys_drive) = std::env::var_os("SystemDrive") {
-        let drive_root = PathBuf::from(&sys_drive);
-        let drive_root = if drive_root.to_string_lossy().ends_with('\\') {
-            drive_root
-        } else {
-            PathBuf::from(format!(r"{}\", sys_drive.to_string_lossy()))
-        };
-        let public = drive_root.join("Users\\Public\\Documents\\Steam");
-        for sub in PUBLIC_EMU_DIRS {
-            let dir = public.join(sub).join(app_id);
-            if dir.exists() {
-                return Some(dir);
-            }
-        }
-    }
-    let local = game_dir.join("steam_settings");
-    if local.exists() {
-        return Some(local);
-    }
-    None
-}
-
 pub fn sync_achievements(
     game_id: &str,
     install_dir: &str,
@@ -644,7 +567,16 @@ pub fn sync_achievements(
         .metadata_path
         .as_ref()
         .and_then(|p| fs::read_to_string(p).ok())
-        .and_then(|s| serde_json::from_str(&s).ok())
+        .and_then(|s| {
+            if let Ok(v) = serde_json::from_str::<Vec<AchievementDef>>(&s) {
+                Some(v)
+            } else if let Ok(val) = serde_json::from_str::<serde_json::Value>(&s) {
+                val.get("achievements")
+                    .and_then(|a| serde_json::from_value::<Vec<AchievementDef>>(a.clone()).ok())
+            } else {
+                None
+            }
+        })
         .unwrap_or_default();
 
     let icon_base = discovery
@@ -748,7 +680,8 @@ pub fn sync_achievements(
 pub fn has_local_achievements(
     install_dir: &str,
     db_app_id: Option<&str>,
-    manual_path: Option<&str>,
+    manual_metadata_path: Option<&str>,
+    manual_save_path: Option<&str>,
     scan_roots: &[PathBuf],
     crack_type: Option<&CrackType>,
 ) -> bool {
@@ -756,7 +689,8 @@ pub fn has_local_achievements(
     let opts = SyncOptions {
         crack_type: crack_type.cloned(),
         known_app_id: db_app_id,
-        manual_path,
+        manual_metadata_path,
+        manual_save_path,
         scan_roots,
         ..Default::default()
     };
