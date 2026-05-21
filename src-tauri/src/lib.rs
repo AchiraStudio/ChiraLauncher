@@ -59,7 +59,9 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-            let is_background_launch = args.iter().any(|a| a.contains("chiralauncher://launch/"));
+            let is_background_launch = args
+                .iter()
+                .any(|a| a.contains("chiralauncher://launch/") || a == "--hidden");
 
             if !is_background_launch {
                 if let Some(window) = app.get_webview_window("main") {
@@ -107,6 +109,15 @@ pub fn run() {
 
             let read_pool = db::create_read_pool(&db_path);
             let app_settings = crate::settings::get_settings(&read_pool).unwrap_or_default();
+
+            let args: Vec<String> = std::env::args().collect();
+            let is_hidden_startup = args.iter().any(|a| a == "--hidden");
+            if is_hidden_startup {
+                if let Some(window) = app.get_webview_window("main") {
+                    window.hide().unwrap_or_default();
+                    log::info!("Started minimized to tray due to --hidden flag");
+                }
+            }
 
             let (db_tx, db_rx) = tokio::sync::mpsc::unbounded_channel::<DbWrite>();
             let running_games = Arc::new(Mutex::new(HashMap::new()));
@@ -398,6 +409,7 @@ pub fn run() {
             commands::metadata::download_url_to_cache,
             commands::metadata::read_image_base64,
             commands::metadata::read_audio_base64,
+            commands::metadata::read_local_file_bytes, // <--- NEW RAW BYTE READER REGISTERED HERE
             commands::metadata::fetch_steam_app_details,
             commands::metadata::fetch_steam_reviews,
             commands::metadata::fetch_global_achievement_percentages,
@@ -455,6 +467,8 @@ pub fn run() {
             commands::http_dl::cancel_http_download,
             commands::http_dl::pause_http_download,
             commands::http_dl::resume_http_download,
+            commands::http_dl::delete_http_download,
+            commands::http_dl::retry_http_download,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

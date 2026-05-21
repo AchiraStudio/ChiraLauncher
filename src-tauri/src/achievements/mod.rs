@@ -44,13 +44,14 @@ pub struct Achievement {
     pub xp: u64,
 }
 
+// UPGRADED: display_name and description are now dynamic Values to handle localization objects
 #[derive(Debug, Deserialize, Clone)]
 pub struct AchievementDef {
     pub name: String,
     #[serde(rename = "displayName", default)]
-    pub display_name: String,
+    pub display_name: serde_json::Value,
     #[serde(default)]
-    pub description: String,
+    pub description: serde_json::Value,
     #[serde(default)]
     pub icon: String,
     #[serde(rename = "icongray", default)]
@@ -80,6 +81,24 @@ pub struct SyncOptions<'a> {
     pub db_tx: Option<&'a crate::state::DbWriteSender>,
 }
 
+// ── JSON String Extractor ─────────────────────────────────────────────────────
+pub fn extract_localized_string(val: &serde_json::Value) -> String {
+    if let Some(s) = val.as_str() {
+        return s.to_string();
+    }
+    if let Some(obj) = val.as_object() {
+        if let Some(eng) = obj.get("english").and_then(|s| s.as_str()) {
+            return eng.to_string();
+        }
+        for v in obj.values() {
+            if let Some(s) = v.as_str() {
+                return s.to_string();
+            }
+        }
+    }
+    String::new()
+}
+
 // ── XP Calculation ────────────────────────────────────────────────────────────
 pub fn calculate_xp(pct: Option<f32>) -> u64 {
     if let Some(p) = pct {
@@ -97,6 +116,62 @@ pub fn calculate_xp(pct: Option<f32>) -> u64 {
     } else {
         15 // Default offline fallback
     }
+}
+
+// ── Anadius CFG Parser ────────────────────────────────────────────────────────
+pub fn extract_last_quoted_token(line: &str) -> Option<String> {
+    let mut last = None;
+    let mut chars = line.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '"' {
+            let mut token = String::new();
+            for inner in chars.by_ref() {
+                if inner == '"' {
+                    break;
+                }
+                token.push(inner);
+            }
+            last = Some(token);
+        }
+    }
+    last
+}
+
+pub fn parse_anadius_cfg(path: &Path) -> (Option<String>, Option<String>, HashMap<String, String>) {
+    let text = std::fs::read_to_string(path).unwrap_or_default();
+    let mut content_id = None;
+    let mut ach_set = None;
+    let mut names = HashMap::new();
+    let mut in_ach_names = false;
+    
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("\"ContentId\"") || trimmed.to_lowercase().contains("\"contentid\"") {
+            content_id = extract_last_quoted_token(trimmed);
+        }
+        if trimmed.starts_with("\"AchievementsSet\"") || trimmed.to_lowercase().contains("\"achievementsset\"") {
+            ach_set = extract_last_quoted_token(trimmed);
+        }
+        
+        if trimmed.starts_with("\"AchievementNames\"") || trimmed.to_lowercase().contains("\"achievementnames\"") {
+            in_ach_names = true;
+            continue;
+        }
+        
+        if in_ach_names {
+            if trimmed == "}" {
+                in_ach_names = false;
+            } else if trimmed.starts_with('"') {
+                let parts: Vec<&str> = trimmed.split('"').collect();
+                if parts.len() >= 4 {
+                    let id = parts[1].to_string();
+                    let name = parts[3].to_string();
+                    names.insert(id, name);
+                }
+            }
+        }
+    }
+    (content_id, ach_set, names)
 }
 
 // ── Phase 1: Discovery ────────────────────────────────────────────────────────
@@ -174,14 +249,8 @@ pub fn resolve_save_path(
     scan_roots: &[PathBuf],
     crack_type: Option<&CrackType>,
 ) -> Option<PathBuf> {
-    let opts = SyncOptions {
-        crack_type: crack_type.cloned(),
-        known_app_id: app_id,
-        manual_save_path,
-        scan_roots,
-        ..Default::default()
-    };
-    discover_achievements(game_dir, app_id, &opts).save_path
+    let mut log = Vec::new();
+    find_save_path(app_id, game_dir, manual_save_path, scan_roots, crack_type, &mut log)
 }
 
 pub fn find_achievements_json(
@@ -189,12 +258,8 @@ pub fn find_achievements_json(
     app_id: Option<&str>,
     manual_metadata_path: Option<&str>,
 ) -> Option<PathBuf> {
-    let opts = SyncOptions {
-        known_app_id: app_id,
-        manual_metadata_path,
-        ..Default::default()
-    };
-    discover_achievements(game_dir, app_id, &opts).metadata_path
+    let mut log = Vec::new();
+    find_metadata_path(game_dir, app_id, manual_metadata_path, &mut log)
 }
 
 fn find_metadata_path(
@@ -326,6 +391,9 @@ fn find_save_path(
             if let Some(local) = std::env::var_os("LOCALAPPDATA") {
                 let emu_base = PathBuf::from(&local).join("anadius").join("LSX emu");
                 let search_dirs = [emu_base.clone(), emu_base.join(id)];
+                
+                let (_, ach_set, _) = parse_anadius_cfg(&game_dir.join("anadius.cfg"));
+                
                 for dir in search_dirs {
                     if let Ok(entries) = fs::read_dir(&dir) {
                         for entry in entries.flatten() {
@@ -334,8 +402,15 @@ fn find_save_path(
                                 .file_name()
                                 .map(|n| n.to_string_lossy().to_lowercase())
                                 .unwrap_or_default();
+                            
+                            if let Some(ref set_id) = ach_set {
+                                if name == format!("achievement-{}.xml", set_id.to_lowercase()) {
+                                    candidates.push(p.clone());
+                                }
+                            }
+                            
                             if name.starts_with("achievement-")
-                                && name.contains(id)
+                                && name.contains(&id.to_lowercase())
                                 && name.ends_with(".xml")
                             {
                                 candidates.push(p);
@@ -449,13 +524,11 @@ pub fn looks_like_metadata(path: &Path) -> bool {
         Err(_) => return false,
     };
     if let Ok(v) = serde_json::from_str::<serde_json::Value>(&s) {
-        // Handle array root
         if let Some(arr) = v.as_array() {
             return arr.first().map_or(false, |e| {
                 e.get("name").is_some() || e.get("displayName").is_some()
             });
         }
-        // Handle object root with achievements key
         if let Some(arr) = v.get("achievements").and_then(|a| a.as_array()) {
             return arr.first().map_or(false, |e| {
                 e.get("name").is_some() || e.get("displayName").is_some()
@@ -481,11 +554,14 @@ pub fn looks_like_save_state(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-pub fn load_earned_map(save_path: &Path) -> HashMap<String, u64> {
+pub fn load_earned_map(save_path: &Path, game_dir: &Path) -> HashMap<String, u64> {
     match save_path.extension().and_then(|e| e.to_str()) {
         Some("ini") => crate::achievement_watcher::read_codex_earned(save_path),
         Some("json") => crate::achievement_watcher::read_goldberg_earned(save_path),
-        Some("xml") => crate::achievement_watcher::read_earned_anadius(save_path),
+        Some("xml") => {
+            let (_, _, map) = parse_anadius_cfg(&game_dir.join("anadius.cfg"));
+            crate::achievement_watcher::read_earned_anadius(save_path, &map)
+        },
         _ => HashMap::new(),
     }
 }
@@ -521,25 +597,20 @@ fn build_list(
 ) -> Vec<Achievement> {
     defs.into_iter()
         .map(|def| {
+            let display_name = extract_localized_string(&def.display_name);
+            let description = extract_localized_string(&def.description);
+            let final_display = if display_name.is_empty() { def.name.clone() } else { display_name };
+
             let earned_time = if is_anadius {
-                let display = if def.display_name.is_empty() {
-                    &def.name
-                } else {
-                    &def.display_name
-                };
-                earned_map.get(display.as_str()).copied()
+                earned_map.get(final_display.as_str()).copied()
             } else {
                 earned_map.get(&def.name).copied()
             };
             let xp = calculate_xp(def.global_percent);
             Achievement {
                 api_name: def.name.clone(),
-                display_name: if def.display_name.is_empty() {
-                    def.name.clone()
-                } else {
-                    def.display_name
-                },
-                description: def.description,
+                display_name: final_display,
+                description,
                 hidden: def.hidden == 1,
                 earned: earned_time.is_some(),
                 earned_time,
@@ -588,7 +659,7 @@ pub fn sync_achievements(
     let earned_map = discovery
         .save_path
         .as_deref()
-        .map(load_earned_map)
+        .map(|p| load_earned_map(p, base))
         .unwrap_or_default();
 
     if let Some(tx) = opts.db_tx {
@@ -630,7 +701,6 @@ pub fn sync_achievements(
         vec![]
     };
 
-    // ── FIRE OFF RETROACTIVE XP SYNC ──
     if let Some(tx) = opts.db_tx {
         let earned_sync: Vec<crate::state::AchSync> = list
             .iter()

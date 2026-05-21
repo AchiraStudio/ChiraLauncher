@@ -7,7 +7,7 @@ import { useUiStore } from "./store/uiStore";
 import { toast } from "sonner";
 import {
     Settings2, Paintbrush, HardDrive, Gamepad2,
-    FolderOpen, MonitorSmartphone, Bell, Zap, AlertOctagon, Volume2, Music, Trophy, X, Play
+    FolderOpen, MonitorSmartphone, Bell, Zap, AlertOctagon, Volume2, Music, Trophy, X, Play, ArrowUp, ArrowDown, Shuffle, Plus, Rocket
 } from "lucide-react";
 import { cn } from "./lib/utils";
 import { smartAudio } from "./services/SmartAudio";
@@ -46,16 +46,18 @@ export function Settings() {
         }
     };
 
-    const handlePickAudio = async (type: "launcher_bgm" | "default_ach") => {
+    const handlePickAudio = async (type: "playlist" | "default_ach") => {
         try {
-            const selected = await openDialog({ multiple: false, filters: [{ name: "Audio", extensions: ["mp3", "wav", "ogg", "flac"] }] });
-            if (selected && typeof selected === "string") {
-                if (type === "launcher_bgm") {
-                    await updateSettings({ launcher_bgm_path: selected });
-                    toast.success("Launcher BGM updated.");
-                    // Immediately trigger playback of new bgm if we are on global bgm
-                    smartAudio.playGlobalBGM();
-                } else {
+            if (type === "playlist") {
+                const selected = await openDialog({ multiple: true, filters: [{ name: "Audio", extensions: ["mp3", "wav", "ogg", "flac"] }] });
+                if (selected && Array.isArray(selected)) {
+                    const newPaths = [...settings.launcher_bgm_paths, ...selected];
+                    await updateSettings({ launcher_bgm_paths: newPaths });
+                    toast.success(`${selected.length} tracks added to playlist.`);
+                }
+            } else {
+                const selected = await openDialog({ multiple: false, filters: [{ name: "Audio", extensions: ["mp3", "wav", "ogg", "flac"] }] });
+                if (selected && typeof selected === "string") {
                     await updateSettings({ default_ach_sound_path: selected });
                     toast.success("Default Achievement sound updated.");
                 }
@@ -63,6 +65,33 @@ export function Settings() {
         } catch (e) {
             toast.error("Failed to select audio file");
         }
+    };
+
+    const handlePickLauncher = async () => {
+        try {
+            const selected = await openDialog({ multiple: false, filters: [{ name: "Executable", extensions: ["exe"] }] });
+            if (selected && typeof selected === "string") {
+                await updateSettings({ default_launcher_path: selected });
+                toast.success("Default launcher path updated.");
+            }
+        } catch (e) {
+            toast.error("Failed to select executable");
+        }
+    }
+
+    const moveTrack = (index: number, direction: -1 | 1) => {
+        const newPaths = [...settings.launcher_bgm_paths];
+        if (index + direction < 0 || index + direction >= newPaths.length) return;
+        const temp = newPaths[index];
+        newPaths[index] = newPaths[index + direction];
+        newPaths[index + direction] = temp;
+        updateSettings({ launcher_bgm_paths: newPaths });
+    };
+
+    const removeTrack = (index: number) => {
+        const newPaths = [...settings.launcher_bgm_paths];
+        newPaths.splice(index, 1);
+        updateSettings({ launcher_bgm_paths: newPaths });
     };
 
     const handleTestAchievement = async (formatType: string) => {
@@ -176,31 +205,59 @@ export function Settings() {
                                 <motion.div key="audio" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} className="space-y-10">
                                     <div className="space-y-6">
                                         <div>
-                                            <h3 className="text-lg font-black text-white uppercase tracking-wider mb-1">Global Sounds & BGM</h3>
+                                            <h3 className="text-lg font-black text-white uppercase tracking-wider mb-1">Audio & Acoustics</h3>
                                             <p className="text-xs text-white/40 font-medium">Personalize the launcher's background music and default achievement unlock effect.</p>
                                         </div>
 
-                                        <div className="space-y-2">
-                                            <label className="text-[10px] font-black text-white/40 tracking-widest uppercase">Launcher Background Music</label>
-                                            <div className="flex gap-2 items-center">
-                                                <Music size={16} className="text-accent/60 shrink-0 ml-1" />
-                                                <input
-                                                    type="text"
-                                                    value={settings.launcher_bgm_path}
-                                                    onChange={e => updateSettings({ launcher_bgm_path: e.target.value })}
-                                                    className="flex-1 bg-black/40 border border-white/10 focus:border-accent rounded-xl px-4 py-3 text-xs text-white outline-none transition-colors font-mono"
-                                                    placeholder="C:\Music\launcher_theme.mp3"
-                                                />
-                                                <button onClick={() => handlePickAudio("launcher_bgm")} className="shrink-0 bg-white/5 hover:bg-white/10 text-white/60 hover:text-white px-4 py-3 rounded-xl font-bold text-xs transition-all border border-white/10 flex items-center gap-1.5">
-                                                    <FolderOpen size={14} /> Browse
+                                        <div className="space-y-4">
+                                            <div className="flex items-center justify-between">
+                                                <label className="text-[10px] font-black text-white/40 tracking-widest uppercase">Launcher BGM Playlist</label>
+                                                <button onClick={() => handlePickAudio("playlist")} className="bg-white/5 hover:bg-white/10 text-white/60 hover:text-white px-3 py-1.5 rounded-lg font-bold text-xs transition-all border border-white/10 flex items-center gap-1.5">
+                                                    <Plus size={14} /> Add Tracks
                                                 </button>
-                                                {settings.launcher_bgm_path && (
-                                                    <button onClick={() => { updateSettings({ launcher_bgm_path: "" }); smartAudio.playGlobalBGM(); }} className="text-red-400/60 hover:text-red-400 p-3 bg-red-500/5 hover:bg-red-500/10 rounded-xl border border-red-500/10 transition-colors">
-                                                        <X size={14} />
-                                                    </button>
+                                            </div>
+
+                                            <div className="bg-black/40 border border-white/5 rounded-2xl p-2 max-h-[250px] overflow-y-auto custom-scrollbar shadow-inner space-y-1">
+                                                {settings.launcher_bgm_paths.length === 0 ? (
+                                                    <div className="py-10 flex flex-col items-center justify-center text-white/20 gap-2">
+                                                        <Music size={24} />
+                                                        <span className="text-[10px] font-bold uppercase tracking-widest">Playlist Empty</span>
+                                                    </div>
+                                                ) : (
+                                                    settings.launcher_bgm_paths.map((path, i) => (
+                                                        <div key={i} className="flex items-center gap-3 bg-white/[0.02] hover:bg-white/[0.04] p-3 rounded-xl border border-white/5 group transition-colors">
+                                                            <Music size={14} className="text-accent/60 shrink-0" />
+                                                            <div className="flex-1 min-w-0">
+                                                                <p className="text-xs font-mono text-white/70 truncate">{path.split('\\').pop()?.split('/').pop()}</p>
+                                                            </div>
+                                                            <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity gap-1">
+                                                                <button onClick={() => moveTrack(i, -1)} disabled={i === 0} className="p-1.5 text-white/40 hover:text-white disabled:opacity-30 rounded-md hover:bg-white/10"><ArrowUp size={14} /></button>
+                                                                <button onClick={() => moveTrack(i, 1)} disabled={i === settings.launcher_bgm_paths.length - 1} className="p-1.5 text-white/40 hover:text-white disabled:opacity-30 rounded-md hover:bg-white/10"><ArrowDown size={14} /></button>
+                                                                <div className="w-px h-4 bg-white/10 mx-1" />
+                                                                <button onClick={() => removeTrack(i)} className="p-1.5 text-red-400/60 hover:text-red-400 rounded-md hover:bg-red-500/10"><X size={14} /></button>
+                                                            </div>
+                                                        </div>
+                                                    ))
                                                 )}
                                             </div>
+
+                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                                <label className={cn("flex items-center justify-center gap-2 p-3 rounded-xl border transition-all cursor-pointer", settings.bgm_shuffle ? "bg-accent/10 border-accent/40 text-accent" : "bg-black/30 border-white/5 text-white/50 hover:bg-white/5 hover:text-white")}>
+                                                    <input type="checkbox" checked={settings.bgm_shuffle} onChange={e => updateSettings({ bgm_shuffle: e.target.checked })} className="hidden" />
+                                                    <Shuffle size={14} /> <span className="text-[10px] font-black uppercase tracking-widest">Shuffle</span>
+                                                </label>
+                                                <label className={cn("flex items-center justify-center gap-2 p-3 rounded-xl border transition-all cursor-pointer", settings.bgm_play_unfocused ? "bg-accent/10 border-accent/40 text-accent" : "bg-black/30 border-white/5 text-white/50 hover:bg-white/5 hover:text-white")}>
+                                                    <input type="checkbox" checked={settings.bgm_play_unfocused} onChange={e => updateSettings({ bgm_play_unfocused: e.target.checked })} className="hidden" />
+                                                    <Volume2 size={14} /> <span className="text-[10px] font-black uppercase tracking-widest">Play Unfocused</span>
+                                                </label>
+                                                <label className={cn("flex items-center justify-center gap-2 p-3 rounded-xl border transition-all cursor-pointer", settings.bgm_play_in_tray ? "bg-accent/10 border-accent/40 text-accent" : "bg-black/30 border-white/5 text-white/50 hover:bg-white/5 hover:text-white")}>
+                                                    <input type="checkbox" checked={settings.bgm_play_in_tray} onChange={e => updateSettings({ bgm_play_in_tray: e.target.checked })} className="hidden" />
+                                                    <MonitorSmartphone size={14} /> <span className="text-[10px] font-black uppercase tracking-widest">Play In Tray</span>
+                                                </label>
+                                            </div>
                                         </div>
+
+                                        <div className="h-px w-full bg-white/5 my-6" />
 
                                         <div className="space-y-2">
                                             <label className="text-[10px] font-black text-white/40 tracking-widest uppercase">Default Achievement Sound</label>
@@ -229,39 +286,34 @@ export function Settings() {
                                             </div>
                                             <p className="text-white/20 text-[10px] ml-7">Games with specific sound overrides in Edit Metadata will ignore this default.</p>
                                         </div>
-                                    </div>
 
-                                    <div className="h-px w-full bg-white/5" />
+                                        <div className="space-y-6 pt-6">
+                                            <div className="space-y-2 max-w-md">
+                                                <div className="flex justify-between items-center">
+                                                    <label className="text-xs font-bold text-white/60 tracking-widest uppercase">SFX / Overlays</label>
+                                                    <span className="text-accent font-bold text-xs">{settings.volume_sfx}%</span>
+                                                </div>
+                                                <input
+                                                    type="range" min="0" max="100"
+                                                    value={settings.volume_sfx}
+                                                    onChange={e => updateSettings({ volume_sfx: parseInt(e.target.value) })}
+                                                    className="w-full h-2 bg-black/50 rounded-lg appearance-none cursor-pointer accent-accent border border-white/5"
+                                                />
+                                            </div>
+                                            <div className="space-y-2 max-w-md">
+                                                <div className="flex justify-between items-center">
+                                                    <label className="text-xs font-bold text-white/60 tracking-widest uppercase">Background Music (BGM)</label>
+                                                    <span className="text-accent font-bold text-xs">{settings.volume_bgm}%</span>
+                                                </div>
+                                                <input
+                                                    type="range" min="0" max="100"
+                                                    value={settings.volume_bgm}
+                                                    onChange={e => updateSettings({ volume_bgm: parseInt(e.target.value) })}
+                                                    className="w-full h-2 bg-black/50 rounded-lg appearance-none cursor-pointer accent-accent border border-white/5"
+                                                />
+                                            </div>
+                                        </div>
 
-                                    <div className="space-y-6">
-                                        <div>
-                                            <h3 className="text-lg font-black text-white uppercase tracking-wider mb-1">Volume Mixer</h3>
-                                            <p className="text-xs text-white/40 font-medium">Control the acoustics of the engine.</p>
-                                        </div>
-                                        <div className="space-y-2 max-w-md">
-                                            <div className="flex justify-between items-center">
-                                                <label className="text-xs font-bold text-white/60 tracking-widest uppercase">SFX / Overlays</label>
-                                                <span className="text-accent font-bold text-xs">{settings.volume_sfx}%</span>
-                                            </div>
-                                            <input
-                                                type="range" min="0" max="100"
-                                                value={settings.volume_sfx}
-                                                onChange={e => updateSettings({ volume_sfx: parseInt(e.target.value) })}
-                                                className="w-full h-2 bg-black/50 rounded-lg appearance-none cursor-pointer accent-accent border border-white/5"
-                                            />
-                                        </div>
-                                        <div className="space-y-2 max-w-md">
-                                            <div className="flex justify-between items-center">
-                                                <label className="text-xs font-bold text-white/60 tracking-widest uppercase">Background Music (BGM)</label>
-                                                <span className="text-accent font-bold text-xs">{settings.volume_bgm}%</span>
-                                            </div>
-                                            <input
-                                                type="range" min="0" max="100"
-                                                value={settings.volume_bgm}
-                                                onChange={e => updateSettings({ volume_bgm: parseInt(e.target.value) })}
-                                                className="w-full h-2 bg-black/50 rounded-lg appearance-none cursor-pointer accent-accent border border-white/5"
-                                            />
-                                        </div>
                                     </div>
                                 </motion.div>
                             )}
@@ -297,6 +349,29 @@ export function Settings() {
                                             />
                                             <div className="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-accent border border-white/10"></div>
                                         </label>
+                                    </div>
+
+                                    <div className="space-y-2 mt-8">
+                                        <label className="text-[10px] font-black text-white/40 tracking-widest uppercase">Default Secondary Launcher Path</label>
+                                        <div className="flex gap-2 items-center">
+                                            <Rocket size={16} className="text-accent/60 shrink-0 ml-1" />
+                                            <input
+                                                type="text"
+                                                value={settings.default_launcher_path}
+                                                onChange={e => updateSettings({ default_launcher_path: e.target.value })}
+                                                className="flex-1 bg-black/40 border border-white/10 focus:border-accent rounded-xl px-4 py-3 text-xs text-white outline-none transition-colors font-mono"
+                                                placeholder="C:\Program Files (x86)\Steam\Steam.exe"
+                                            />
+                                            <button onClick={handlePickLauncher} className="shrink-0 bg-white/5 hover:bg-white/10 text-white/60 hover:text-white px-4 py-3 rounded-xl font-bold text-xs transition-all border border-white/10 flex items-center gap-1.5">
+                                                <FolderOpen size={14} /> Browse
+                                            </button>
+                                            {settings.default_launcher_path && (
+                                                <button onClick={() => updateSettings({ default_launcher_path: "" })} className="text-red-400/60 hover:text-red-400 p-3 bg-red-500/5 hover:bg-red-500/10 rounded-xl border border-red-500/10 transition-colors">
+                                                    <X size={14} />
+                                                </button>
+                                            )}
+                                        </div>
+                                        <p className="text-white/20 text-[10px] ml-7">Fallback launcher if a game requires one but has no specific path set.</p>
                                     </div>
 
                                     {/* DANGER ZONE */}

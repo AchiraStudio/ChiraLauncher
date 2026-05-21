@@ -20,7 +20,7 @@ pub fn init_table(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
         [],
     )?;
 
-    // Safe schema migrations (Ignores errors if columns already exist)
+    // Safe schema migrations
     let _ = conn.execute(
         "ALTER TABLE settings ADD COLUMN rawg_api_key TEXT NOT NULL DEFAULT ''",
         [],
@@ -70,6 +70,32 @@ pub fn init_table(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
         [],
     );
 
+    let _ = conn.execute(
+        "ALTER TABLE settings ADD COLUMN launcher_bgm_paths TEXT NOT NULL DEFAULT '[]'",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE settings ADD COLUMN bgm_play_unfocused BOOLEAN NOT NULL DEFAULT 0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE settings ADD COLUMN bgm_play_in_tray BOOLEAN NOT NULL DEFAULT 0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE settings ADD COLUMN bgm_shuffle BOOLEAN NOT NULL DEFAULT 0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE settings ADD COLUMN default_launcher_path TEXT NOT NULL DEFAULT ''",
+        [],
+    );
+
+    let _ = conn.execute(
+        "ALTER TABLE settings ADD COLUMN auto_close_launcher BOOLEAN NOT NULL DEFAULT 0",
+        [],
+    );
+
     conn.execute(
         "INSERT OR IGNORE INTO settings (
             id, theme, language, download_path, auto_launch_on_boot, 
@@ -83,13 +109,18 @@ pub fn init_table(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
 
 pub fn get_settings(pool: &Pool<SqliteConnectionManager>) -> Result<AppSettings, rusqlite::Error> {
     let conn = pool.get().unwrap();
-
     let _ = init_table(&conn);
 
     let mut stmt = conn.prepare("SELECT * FROM settings WHERE id = 1")?;
 
     let settings = stmt
         .query_row([], |row| {
+            let paths_json: String = row
+                .get("launcher_bgm_paths")
+                .unwrap_or_else(|_| "[]".to_string());
+            let launcher_bgm_paths: Vec<String> =
+                serde_json::from_str(&paths_json).unwrap_or_default();
+
             Ok(AppSettings {
                 theme: row
                     .get::<&str, String>("theme")
@@ -134,6 +165,17 @@ pub fn get_settings(pool: &Pool<SqliteConnectionManager>) -> Result<AppSettings,
                 default_ach_sound_path: row
                     .get::<&str, String>("default_ach_sound_path")
                     .unwrap_or_default(),
+
+                launcher_bgm_paths,
+                bgm_play_unfocused: row.get::<&str, bool>("bgm_play_unfocused").unwrap_or(false),
+                bgm_play_in_tray: row.get::<&str, bool>("bgm_play_in_tray").unwrap_or(false),
+                bgm_shuffle: row.get::<&str, bool>("bgm_shuffle").unwrap_or(false),
+                default_launcher_path: row
+                    .get::<&str, String>("default_launcher_path")
+                    .unwrap_or_default(),
+                auto_close_launcher: row
+                    .get::<&str, bool>("auto_close_launcher")
+                    .unwrap_or(false),
             })
         })
         .optional()?
@@ -147,6 +189,10 @@ pub fn update_settings(
     settings: &AppSettings,
 ) -> rusqlite::Result<()> {
     let tx = conn.transaction()?;
+
+    let paths_json =
+        serde_json::to_string(&settings.launcher_bgm_paths).unwrap_or_else(|_| "[]".to_string());
+
     tx.execute(
         "UPDATE settings SET 
             theme = ?1, language = ?2, download_path = ?3, auto_launch_on_boot = ?4, 
@@ -154,7 +200,9 @@ pub fn update_settings(
             developer_mode = ?9, max_download_speed_kbps = ?10, max_upload_speed_kbps = ?11,
             max_concurrent_downloads = ?12, auto_add_to_library = ?13, sequential_download = ?14,
             steam_api_key = ?15, auto_fetch_achievements = ?16, accent_color = ?17,
-            launcher_bgm_path = ?18, default_ach_sound_path = ?19
+            launcher_bgm_path = ?18, default_ach_sound_path = ?19,
+            launcher_bgm_paths = ?20, bgm_play_unfocused = ?21, bgm_play_in_tray = ?22, bgm_shuffle = ?23, 
+            default_launcher_path = ?24, auto_close_launcher = ?25
          WHERE id = 1",
         params![
             &settings.theme,
@@ -175,7 +223,13 @@ pub fn update_settings(
             settings.auto_fetch_achievements,
             &settings.accent_color,
             &settings.launcher_bgm_path,
-            &settings.default_ach_sound_path
+            &settings.default_ach_sound_path,
+            &paths_json,
+            settings.bgm_play_unfocused,
+            settings.bgm_play_in_tray,
+            settings.bgm_shuffle,
+            &settings.default_launcher_path,
+            settings.auto_close_launcher
         ],
     )?;
     tx.commit()?;

@@ -222,13 +222,21 @@ export default function Library() {
     const mainScrollRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
+        const hasRunning = Object.keys(runningGames).length > 0;
+        smartAudio.setGameRunning(hasRunning);
+    }, [runningGames]);
+
+    useEffect(() => {
         const activeGame = activeGameId ? gamesById[activeGameId] : null;
         if (activeGame) {
-            smartAudio.playGameBGM(activeGame.id, activeGame.custom_bgm_path || null);
+            const paths = activeGame.custom_bgm_paths?.length > 0 
+                ? activeGame.custom_bgm_paths 
+                : (activeGame.custom_bgm_path ? [activeGame.custom_bgm_path] : []);
+                
+            smartAudio.playGameBGM(activeGame.id, paths);
         } else {
             smartAudio.playGlobalBGM();
         }
-        // Removed cleanup function to prevent global BGM resetting when navigating games
     }, [activeGameId, gamesById]);
 
 
@@ -307,12 +315,18 @@ export default function Library() {
         runningGames[gameToLaunch.id] ? await forceStopGame(gameToLaunch.id) : await launchGame(gameToLaunch.id);
     };
 
+    // ── FIXED: SMART SHORTCUT CREATOR ──
     const handleCreateShortcut = useCallback(async (gameToShortcut: Game) => {
         try {
+            const isLauncher = gameToShortcut.execution_method === "auto_launcher" || gameToShortcut.execution_method === "manual_launcher";
+            const targetExe = isLauncher && gameToShortcut.launcher_path && gameToShortcut.launcher_path.trim() !== ""
+                ? gameToShortcut.launcher_path 
+                : gameToShortcut.executable_path;
+
             await invoke("create_all_shortcuts", {
                 gameId: gameToShortcut.id,
                 title: gameToShortcut.title,
-                exePath: gameToShortcut.executable_path,
+                exePath: targetExe,
                 installDir: gameToShortcut.install_dir || ""
             });
             toast.success("Shortcuts Created", { description: `${gameToShortcut.title} added to Desktop & Start Menu.` });

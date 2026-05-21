@@ -1,3 +1,5 @@
+export type ExecutionMethod = "direct" | "auto_launcher" | "manual_launcher" | "unreal_engine";
+
 export interface GameMetadata {
     id: string;
     title: string;
@@ -63,8 +65,13 @@ export interface Game {
     detected_metadata_path: string | null;
     detected_earned_state_path: string | null;
     is_favorite: boolean;
-    custom_ach_sound_path: string | null; // ── NEW ──
-    custom_bgm_path: string | null; // ── NEW ──
+
+    custom_ach_sound_path: string | null;
+    custom_bgm_path: string | null; // Legacy single path
+    custom_bgm_paths: string[]; // NEW multi-path array
+
+    execution_method: ExecutionMethod | string;
+    launcher_path: string | null;
 }
 
 export type LaunchSource = "Launcher" | "AutoAttach";
@@ -100,8 +107,13 @@ export interface NewGame {
     detected_metadata_path?: string | null;
     detected_earned_state_path?: string | null;
     is_favorite: boolean;
-    custom_ach_sound_path: string | null; // ── NEW ──
-    custom_bgm_path: string | null; // ── NEW ──
+
+    custom_ach_sound_path: string | null;
+    custom_bgm_path: string | null;
+    custom_bgm_paths?: string[];
+
+    execution_method?: ExecutionMethod | string;
+    launcher_path?: string | null;
 }
 
 export interface ProcessIdentity {

@@ -161,13 +161,14 @@ def parse_anadius_cfg(cfg_path: Path) -> Dict[str, Any]:
     def extract_value(key: str) -> Optional[str]:
         for line in text.splitlines():
             stripped = line.strip()
-            if stripped.startswith(f'"{key}"'):
+            if stripped.startswith(f'"{key}"') or f'"{key.lower()}"' in stripped.lower():
                 parts = stripped.split('"')
                 if len(parts) >= 4:
                     return parts[3]
         return None
 
     result["ContentId"] = extract_value("ContentId")
+    result["AchievementsSet"] = extract_value("AchievementsSet")
     result["GameName"]  = extract_value("Name")
     result["Version"]   = extract_value("Version")
     result["Username"]  = extract_value("Username")
@@ -289,10 +290,9 @@ def find_goldberg_achievements(app_id: str) -> Dict[str, Optional[str]]:
     return result
 
 
-def find_anadius_achievements(content_id: str) -> Dict[str, Any]:
+def find_anadius_achievements(content_id: str, ach_set: str = None) -> Dict[str, Any]:
     r"""
-    XML file pattern: achievement-*_{content_id}_*.xml
-    JSON folder: %LOCALAPPDATA%\anadius\LSX emu\{content_id}\achievements.json
+    XML file pattern: achievement-{AchievementsSet}.xml OR achievement-*_{content_id}_*.xml
     """
     result: Dict[str, Any] = {"save_folder": None, "achievements_xml": None, "achievements_json": None}
     base = ANADIUS_SAVE_BASE
@@ -304,7 +304,12 @@ def find_anadius_achievements(content_id: str) -> Dict[str, Any]:
         if not search_dir.is_dir():
             continue
         for p in search_dir.glob("*.xml"):
-            if content_id in p.name and p.name.lower().startswith("achievement"):
+            name = p.name.lower()
+            if ach_set and name == f"achievement-{ach_set.lower()}.xml":
+                result["achievements_xml"] = str(p)
+                result["save_folder"] = str(search_dir)
+                break
+            if content_id in name and name.startswith("achievement"):
                 result["achievements_xml"] = str(p)
                 result["save_folder"] = str(search_dir)
                 break
@@ -462,10 +467,11 @@ def scan_game(game_path_str: str) -> dict:
     elif emu == "anadius":
         cfg = parse_anadius_cfg(game_root / "anadius.cfg")
         id = cfg.get("ContentId")
+        ach_set = cfg.get("AchievementsSet")
         result["app_id"] = id
-        log(f"Anadius ContentId: {id}")
+        log(f"Anadius ContentId: {id} | AchievementsSet: {ach_set}")
         if id:
-            ach = find_anadius_achievements(id)
+            ach = find_anadius_achievements(id, ach_set)
             save_folder = ach["save_folder"]
             ach_jsn = ach["achievements_json"]
 

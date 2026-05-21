@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
+import { smartAudio } from "../services/SmartAudio";
 
 export interface AppSettings {
     download_path: string;
@@ -8,8 +9,19 @@ export interface AppSettings {
     auto_launch_on_boot: boolean;
     minimize_to_tray: boolean;
     steam_api_key: string;
+
+    // Legacy single-track (kept for older DBs)
     launcher_bgm_path: string;
     default_ach_sound_path: string;
+
+    // Playlist & Playback Options
+    launcher_bgm_paths: string[];
+    bgm_play_unfocused: boolean;
+    bgm_play_in_tray: boolean;
+    bgm_shuffle: boolean;
+    default_launcher_path: string;
+    auto_close_launcher: boolean;
+
     volume_sfx: number;
     volume_bgm: number;
 }
@@ -59,8 +71,10 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
                 localStorage.setItem("steam_bg_pref", updates.steam_bg_pref);
             }
 
-            // Auto update live audio volume without refreshing if playing
-            import("../services/SmartAudio").then(m => m.smartAudio.updateLiveVolume());
+            // Auto update live audio volume and playlist states without refreshing
+            // Switched to static call to resolve Vite bundler chunking warnings
+            smartAudio.updateLiveVolume();
+
         } catch (e) {
             console.error("Failed to save settings to DB:", e);
             set({ settings: current });

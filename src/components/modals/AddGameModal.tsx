@@ -11,11 +11,11 @@ import { fetchSteamMetadata, parseSteamDate, SteamAppDetails } from "../../servi
 import { toast } from "sonner";
 import {
     FolderOpen, Gamepad2, CheckCircle2, X, ChevronLeft, Activity,
-    Hash, Globe, Sparkles
+    Hash, Globe, Sparkles, Rocket
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 
-type AddStep = "PICK_FILE" | "DETAILS" | "METADATA" | "CONFIRM";
+type AddStep = "PICK_FILE" | "DETAILS" | "EXECUTION" | "METADATA" | "CONFIRM";
 
 interface SingleScanResult {
     executable_path: string;
@@ -38,6 +38,12 @@ export function AddGameModal() {
     const [installDir, setInstallDir] = useState("");
 
     const [title, setTitle] = useState("");
+    const [launchArgs, setLaunchArgs] = useState("");
+
+    // Launcher config
+    const [executionMethod, setExecutionMethod] = useState<"direct" | "auto_launcher" | "manual_launcher" | "unreal_engine">("direct");
+    const [launcherPath, setLauncherPath] = useState("");
+
     const [description, setDescription] = useState("");
     const [coverPath, setCoverPath] = useState<string | null>(null);
     const [backgroundPath, setBackgroundPath] = useState<string | null>(null);
@@ -67,7 +73,11 @@ export function AddGameModal() {
     const reset = () => {
         setStep("PICK_FILE");
         setExePath("");
+        setInstallDir("");
         setTitle("");
+        setLaunchArgs("");
+        setExecutionMethod("direct");
+        setLauncherPath("");
         setDescription("");
         setCoverPath(null);
         setBackgroundPath(null);
@@ -230,7 +240,15 @@ export function AddGameModal() {
                 detected_earned_state_path: null,
                 custom_ach_sound_path: null,
                 custom_bgm_path: null,
+                custom_bgm_paths: [],
+                execution_method: executionMethod,
+                launcher_path: launcherPath || null,
             };
+
+            // Add launch_args if present
+            if (launchArgs.trim() !== "") {
+                (newGame as any).launch_args = launchArgs.trim();
+            }
 
             await invoke("add_game", { game: newGame });
 
@@ -266,8 +284,9 @@ export function AddGameModal() {
     const stepLabel = {
         PICK_FILE: "Phase 1: Selection",
         DETAILS: "Phase 2: Game Analysis",
-        METADATA: "Phase 3: Deep Sync",
-        CONFIRM: "Phase 4: Finalize",
+        EXECUTION: "Phase 3: Launch Routine",
+        METADATA: "Phase 4: Deep Sync",
+        CONFIRM: "Phase 5: Finalize",
     }[step];
 
     return (
@@ -302,7 +321,7 @@ export function AddGameModal() {
                             className="h-full bg-accent shadow-[0_0_15px_rgba(192,38,211,0.5)]"
                             initial={{ width: "0%" }}
                             animate={{
-                                width: step === "PICK_FILE" ? "25%" : step === "DETAILS" ? "50%" : step === "METADATA" ? "75%" : "100%"
+                                width: step === "PICK_FILE" ? "20%" : step === "DETAILS" ? "40%" : step === "EXECUTION" ? "60%" : step === "METADATA" ? "80%" : "100%"
                             }}
                             transition={{ duration: 0.5, ease: "circOut" }}
                         />
@@ -380,6 +399,17 @@ export function AddGameModal() {
                                                 </div>
                                             </div>
 
+                                            <div className="space-y-3">
+                                                <label className="text-white/30 text-[10px] font-black tracking-normal uppercase ml-1">Custom Launch Arguments</label>
+                                                <input
+                                                    type="text"
+                                                    value={launchArgs}
+                                                    onChange={(e) => setLaunchArgs(e.target.value)}
+                                                    className="w-full bg-white/[0.03] border border-white/10 focus:border-accent/40 rounded-xl px-4 py-3 text-white text-sm font-mono outline-none transition-all placeholder:text-white/20"
+                                                    placeholder="-novid -high -fullscreen"
+                                                />
+                                            </div>
+
                                             <div className="grid grid-cols-2 gap-4">
                                                 <div className="bg-white/[0.03] border border-white/5 p-5 rounded-3xl relative overflow-hidden group">
                                                     <div className="absolute top-0 right-0 p-4 text-accent/10 group-hover:text-accent/20 transition-colors"><Activity size={40} /></div>
@@ -401,8 +431,8 @@ export function AddGameModal() {
                                             <button onClick={() => setStep("PICK_FILE")} className="flex items-center gap-2 px-6 py-2 rounded-xl text-white/40 hover:text-white font-black transition-all text-xs tracking-widest uppercase">
                                                 <ChevronLeft size={16} /> Reselect
                                             </button>
-                                            <button onClick={fetchMetadata} className="bg-accent hover:brightness-110 text-white px-10 py-4 rounded-2xl font-black tracking-normal uppercase text-[10px] transition-all shadow-lg shadow-accent/20 active:scale-95 flex items-center gap-2">
-                                                <Globe size={16} /> {detectedAppId ? "Next Step" : "Next Step"}
+                                            <button onClick={() => setStep("EXECUTION")} className="bg-accent hover:brightness-110 text-white px-10 py-4 rounded-2xl font-black tracking-normal uppercase text-[10px] transition-all shadow-lg shadow-accent/20 active:scale-95 flex items-center gap-2">
+                                                Next Step
                                             </button>
                                         </div>
                                     </div>
@@ -410,8 +440,91 @@ export function AddGameModal() {
                             </motion.div>
                         )}
 
+                        {step === "EXECUTION" && (
+                            <motion.div key="step-exec" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="flex flex-col flex-1 gap-8">
+
+                                <div className="bg-accent/5 border border-accent/15 p-5 rounded-2xl flex gap-4 items-start shadow-inner">
+                                    <Rocket className="text-accent shrink-0 mt-0.5" size={24} />
+                                    <div>
+                                        <h4 className="text-accent text-sm font-black uppercase tracking-widest mb-1.5">Engine Routing</h4>
+                                        <p className="text-white/50 text-xs leading-relaxed font-medium">
+                                            Does this game require a secondary launcher, or is it built on an engine that spawns child processes? Configure how ChiraLauncher tracks the execution flow here.
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-6 flex-1">
+                                    <div className="space-y-3">
+                                        <label className="text-white/30 text-[10px] font-black tracking-normal uppercase ml-1">Execution Method</label>
+                                        <select
+                                            value={executionMethod}
+                                            onChange={(e) => setExecutionMethod(e.target.value as any)}
+                                            className="w-full bg-white/[0.03] border-2 border-white/5 focus:border-accent/40 rounded-2xl px-6 py-5 text-white font-black text-sm outline-none transition-all appearance-none cursor-pointer [&>option]:bg-[#0f1423] [&>option]:text-white"
+                                        >
+                                            <option value="direct">Standard Direct Launch (Default)</option>
+                                            <option value="unreal_engine">Unreal Engine (Bypass Bootstrap)</option>
+                                            <option value="auto_launcher">Auto-Launcher (Launcher → Wait 5s → Game)</option>
+                                            <option value="manual_launcher">Manual Launcher (Wait for user to click Play)</option>
+                                        </select>
+                                    </div>
+
+                                    <AnimatePresence>
+                                        {(executionMethod === "auto_launcher" || executionMethod === "manual_launcher") && (
+                                            <motion.div
+                                                initial={{ opacity: 0, height: 0 }}
+                                                animate={{ opacity: 1, height: "auto" }}
+                                                exit={{ opacity: 0, height: 0 }}
+                                                className="overflow-hidden"
+                                            >
+                                                <div className="pt-2 space-y-3">
+                                                    <label className="text-white/30 text-[10px] font-black tracking-normal uppercase ml-1 block">Launcher Executable Path</label>
+                                                    <div className="flex gap-2">
+                                                        <input
+                                                            type="text"
+                                                            value={launcherPath}
+                                                            onChange={(e) => setLauncherPath(e.target.value)}
+                                                            className="flex-1 bg-black/30 border border-white/10 border-dashed rounded-xl px-5 py-4 font-mono text-sm text-white outline-none focus:border-accent/40 transition-all"
+                                                            placeholder="C:\Games\Launcher.exe"
+                                                        />
+                                                        <button
+                                                            onClick={async () => {
+                                                                const selected = await openDialog({ multiple: false, filters: [{ name: "Executables", extensions: ["exe"] }] });
+                                                                if (selected && typeof selected === "string") setLauncherPath(selected);
+                                                            }}
+                                                            className="shrink-0 bg-white/5 hover:bg-white/10 text-white/60 hover:text-white px-4 rounded-xl font-bold text-xs transition-all border border-white/10 flex items-center gap-2"
+                                                        >
+                                                            <FolderOpen size={16} /> Browse
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </motion.div>
+                                        )}
+                                    </AnimatePresence>
+
+                                    <div className="p-5 bg-black/40 rounded-2xl border border-white/5 mt-4">
+                                        <h4 className="text-[10px] font-black text-white/40 uppercase tracking-widest mb-3">How it works</h4>
+                                        <ul className="text-xs text-white/50 space-y-3 list-disc pl-4 marker:text-white/20">
+                                            {executionMethod === "direct" && <li>Spawns the <span className="text-white/80 font-mono">Executable Path</span> directly and tracks its PID.</li>}
+                                            {executionMethod === "unreal_engine" && <li>Spawns the executable, but ignores it when it immediately dies. AutoAttach will intercept the real <span className="text-white/80 font-mono">Win64-Shipping.exe</span> automatically.</li>}
+                                            {executionMethod === "auto_launcher" && <li>Spawns the <span className="text-white/80 font-mono">Launcher Executable</span>, waits 5 seconds, then spawns the <span className="text-white/80 font-mono">Main Game Executable</span> automatically.</li>}
+                                            {executionMethod === "manual_launcher" && <li>Spawns the <span className="text-white/80 font-mono">Launcher Executable</span> and leaves it up to you to click "Play". AutoAttach intercepts the main game when it appears.</li>}
+                                        </ul>
+                                    </div>
+                                </div>
+
+                                <div className="flex items-center justify-between pt-4 border-t border-white/5 mt-auto">
+                                    <button onClick={() => setStep("DETAILS")} className="flex items-center gap-2 px-6 py-2 rounded-xl text-white/40 hover:text-white font-black transition-all text-xs tracking-widest uppercase">
+                                        <ChevronLeft size={16} /> Back
+                                    </button>
+                                    <button onClick={fetchMetadata} className="bg-accent hover:brightness-110 text-white px-10 py-4 rounded-2xl font-black tracking-normal uppercase text-[10px] transition-all shadow-lg shadow-accent/20 active:scale-95 flex items-center gap-2">
+                                        <Globe size={16} /> Next Step
+                                    </button>
+                                </div>
+                            </motion.div>
+                        )}
+
                         {step === "METADATA" && (
-                            <motion.div key="step3" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="flex flex-col flex-1 gap-8">
+                            <motion.div key="step4" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="flex flex-col flex-1 gap-8">
                                 {isFetchingSteam ? (
                                     <div className="flex-1 flex flex-col items-center justify-center py-20 gap-8">
                                         <div className="w-20 h-20 border-4 border-accent/10 border-t-accent rounded-full animate-spin" />
@@ -464,7 +577,7 @@ export function AddGameModal() {
                                         )}
 
                                         <div className="flex items-center justify-between pt-4 border-t border-white/5 mt-auto">
-                                            <button onClick={() => setStep("DETAILS")} className="px-6 py-2 rounded-xl text-white/40 hover:text-white font-black text-xs uppercase tracking-widest transition-all">Back</button>
+                                            <button onClick={() => setStep("EXECUTION")} className="px-6 py-2 rounded-xl text-white/40 hover:text-white font-black text-xs uppercase tracking-widest transition-all">Back</button>
                                             <button onClick={() => setStep("CONFIRM")} className="bg-accent hover:brightness-110 text-white px-10 py-4 rounded-2xl font-black text-[10px] tracking-widest uppercase transition-all shadow-lg shadow-accent/20 active:scale-95">
                                                 Review & Finalize
                                             </button>
@@ -475,7 +588,7 @@ export function AddGameModal() {
                         )}
 
                         {step === "CONFIRM" && (
-                            <motion.div key="step4" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="flex flex-col flex-1 items-center justify-center py-10 gap-10">
+                            <motion.div key="step5" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="flex flex-col flex-1 items-center justify-center py-10 gap-10">
                                 <div className="relative group">
                                     <div className="w-40 h-56 rounded-[2.5rem] bg-gradient-to-br from-white/[0.08] to-transparent border border-white/10 flex flex-col items-center justify-center p-8 text-center shadow-2xl relative z-10 group-hover:scale-105 transition-transform duration-500 overflow-hidden">
                                         {applySteamData && coverPath ? (
@@ -505,7 +618,7 @@ export function AddGameModal() {
                                 </div>
 
                                 <div className="flex gap-4 w-full justify-center">
-                                    <button onClick={() => setStep(detectedAppId ? "METADATA" : "DETAILS")} className="px-10 py-4 rounded-2xl text-white/40 font-black tracking-widest uppercase text-[10px] hover:bg-white/5 transition-all">Back</button>
+                                    <button onClick={() => setStep(detectedAppId ? "METADATA" : "EXECUTION")} className="px-10 py-4 rounded-2xl text-white/40 font-black tracking-widest uppercase text-[10px] hover:bg-white/5 transition-all">Back</button>
                                     <button onClick={handleConfirmImport} disabled={isImporting} className="relative bg-white text-black px-12 py-4 rounded-2xl font-black tracking-normal uppercase text-[10px] transition-all shadow-xl hover:scale-105 active:scale-95 disabled:opacity-50 flex items-center gap-3">
                                         {isImporting ? <><div className="w-3 h-3 border-2 border-black border-t-transparent rounded-full animate-spin" /> Finalizing...</> : <>Import to Library</>}
                                     </button>

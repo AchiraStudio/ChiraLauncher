@@ -1,20 +1,39 @@
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 
 interface TrackState {
-    buffer: AudioBuffer;
-    offset: number;     // Accumulated playtime of this track
-    startTime: number;  // The Context Time when this track was last started
+    buffer?: AudioBuffer; // Used only for SFX
+    offset: number;     
+    startTime: number;  
+    isPlaying: boolean;
+}
+
+interface PlaylistState {
+    paths: string[];
+    playQueue: number[];
+    currentIndex: number;
+    trackProgress: number; // The exact second the track was paused at
 }
 
 class SmartAudioEngine {
     private ctx: AudioContext | null = null;
     private tracks = new Map<string, TrackState>();
-    private activeTrackId: string | null = null;
-    private activeSource: AudioBufferSourceNode | null = null;
-    private activeGain: GainNode | null = null;
+    
+    // HTML Audio for BGM (Solves the RAM memory leak)
+    private bgmAudio: HTMLAudioElement | null = null;
+    private bgmFadeInterval: number | null = null;
+    private currentBgmBlobUrl: string | null = null;
+    
+    private activePlaylistType: string = 'none';
 
+    // State memory for every playlist (Global + per-game)
+    private playlists = new Map<string, PlaylistState>();
+    
+    private isPaused: boolean = false; 
     private isGameRunning: boolean = false;
     private isAppFocused: boolean = true;
+
+    // Track the absolute newest intent. If this changes while parsing a file, we abort.
+    private playbackIntentToken: number = 0;
 
     constructor() {
         this.evaluateContextState = this.evaluateContextState.bind(this);
@@ -33,38 +52,73 @@ class SmartAudioEngine {
     }
 
     private handleBlur() {
-        this.isAppFocused = false;
-        this.evaluateContextState();
+        setTimeout(() => {
+            this.isAppFocused = document.hasFocus();
+            this.evaluateContextState();
+        }, 150);
     }
 
-    private evaluateContextState() {
-        if (!this.ctx) return;
+    private getMimeType(path: string): string {
+        const ext = path.split('.').pop()?.toLowerCase();
+        if (ext === 'ogg') return 'audio/ogg';
+        if (ext === 'wav') return 'audio/wav';
+        if (ext === 'flac') return 'audio/flac';
+        return 'audio/mpeg'; 
+    }
 
-        // CRITICAL FIX: We NEVER suspend the AudioContext anymore. 
-        // Suspending the context kills all audio, including background achievement toasts.
-        // Instead, we force it to stay awake, and smoothly ramp the BGM volume to 0.
-        if (this.ctx.state === 'suspended') {
-            this.ctx.resume().catch(() => { });
+    // ── BGM VOLUME FADER ──
+    private fadeBgmVolume(targetVolume: number, durationMs: number = 500) {
+        if (!this.bgmAudio) return;
+        
+        if (this.bgmFadeInterval) {
+            clearInterval(this.bgmFadeInterval);
+            this.bgmFadeInterval = null;
         }
 
-        // Mute BGM if minimized, unfocused, or a game is playing
-        const shouldMuteBgm = document.hidden || !this.isAppFocused || this.isGameRunning;
+        // Instantly pause if target is 0 to avoid background throttle bugs
+        if (targetVolume === 0) {
+            this.bgmAudio.pause();
+            this.bgmAudio.volume = 0;
+            return;
+        }
 
-        if (this.activeGain) {
-            this.getVolumeSettings().then(settings => {
-                if (!this.activeGain || !this.ctx) return;
+        if (this.bgmAudio.paused) {
+            this.bgmAudio.volume = 0;
+            this.bgmAudio.play().catch(()=>{});
+        }
 
-                const now = this.ctx.currentTime;
-                this.activeGain.gain.cancelScheduledValues(now);
+        const startVolume = this.bgmAudio.volume;
+        const diff = targetVolume - startVolume;
+        const steps = 20;
+        const stepTime = durationMs / steps;
+        let currentStep = 0;
 
-                if (shouldMuteBgm) {
-                    // Smooth fade out
-                    this.activeGain.gain.linearRampToValueAtTime(0.001, now + 0.5);
-                } else {
-                    // Smooth fade in back to user's BGM setting
-                    this.activeGain.gain.linearRampToValueAtTime(settings.bgm, now + 0.5);
-                }
-            });
+        this.bgmFadeInterval = window.setInterval(() => {
+            currentStep++;
+            if (this.bgmAudio) {
+                this.bgmAudio.volume = Math.max(0, Math.min(1, startVolume + (diff * (currentStep / steps))));
+            }
+
+            if (currentStep >= steps) {
+                if (this.bgmFadeInterval) clearInterval(this.bgmFadeInterval);
+            }
+        }, stepTime);
+    }
+
+    private async evaluateContextState() {
+        const settings = await this.getVolumeSettings();
+        let shouldPause = false;
+        
+        if (this.isGameRunning) shouldPause = true;
+        if (!settings.bgm_play_unfocused && !this.isAppFocused) shouldPause = true;
+        if (!settings.bgm_play_in_tray && document.hidden) shouldPause = true;
+
+        if (shouldPause && !this.isPaused) {
+            this.isPaused = true;
+            this.fadeBgmVolume(0); 
+        } else if (!shouldPause && this.isPaused) {
+            this.isPaused = false;
+            this.fadeBgmVolume(settings.bgm);
         }
     }
 
@@ -72,23 +126,29 @@ class SmartAudioEngine {
         if (!this.ctx) {
             this.ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
 
-            // Aggressively attempt to unlock the Audio Context on user interaction
             document.addEventListener('mousedown', () => {
                 if (this.ctx?.state === 'suspended') this.ctx.resume().catch(() => { });
+                if (this.bgmAudio && this.bgmAudio.paused && !this.isPaused && this.activePlaylistType !== 'none') {
+                    this.bgmAudio.play().catch(() => { });
+                }
             }, { once: true });
 
             document.addEventListener('keydown', () => {
                 if (this.ctx?.state === 'suspended') this.ctx.resume().catch(() => { });
+                if (this.bgmAudio && this.bgmAudio.paused && !this.isPaused && this.activePlaylistType !== 'none') {
+                    this.bgmAudio.play().catch(() => { });
+                }
             }, { once: true });
 
-            // Native listeners for app visibility and focus state
-            document.addEventListener('visibilitychange', this.evaluateContextState);
+            document.addEventListener('visibilitychange', () => {
+                this.isAppFocused = document.hasFocus();
+                this.evaluateContextState();
+            });
             window.addEventListener('focus', this.handleFocus);
             window.addEventListener('blur', this.handleBlur);
 
             this.isAppFocused = document.hasFocus();
         }
-        this.evaluateContextState();
     }
 
     async getVolumeSettings() {
@@ -98,31 +158,315 @@ class SmartAudioEngine {
                 sfx: (settings.volume_sfx ?? 80) / 100,
                 bgm: (settings.volume_bgm ?? 50) / 100,
                 enabled: settings.enable_notifications ?? true,
-                globalBgmPath: settings.launcher_bgm_path || null,
+                launcher_bgm_paths: settings.launcher_bgm_paths as string[] || [],
+                bgm_play_unfocused: settings.bgm_play_unfocused ?? false,
+                bgm_play_in_tray: settings.bgm_play_in_tray ?? false,
+                bgm_shuffle: settings.bgm_shuffle ?? false,
                 globalAchSoundPath: settings.default_ach_sound_path || null,
             };
         } catch {
-            return { sfx: 0.8, bgm: 0.5, enabled: true, globalBgmPath: null, globalAchSoundPath: null };
+            return { 
+                sfx: 0.8, bgm: 0.5, enabled: true, 
+                launcher_bgm_paths: [], bgm_play_unfocused: false, 
+                bgm_play_in_tray: false, bgm_shuffle: false, globalAchSoundPath: null 
+            };
         }
     }
 
-    async loadAudio(path: string): Promise<AudioBuffer> {
+    // ── SECURE AUDIO LOADER (Rust Raw Byte Array IPC) ──
+    private async resolveAudioUrl(path: string, intentToken: number): Promise<string> {
+        if (path.startsWith('http') || path.startsWith('data:') || path.startsWith('blob:')) {
+            return path;
+        }
+
+        try {
+            const assetUrl = convertFileSrc(path);
+            const check = await fetch(assetUrl, { method: 'HEAD' }).catch(() => null);
+            if (check && check.ok) return assetUrl;
+        } catch (e) {}
+
+        if (this.playbackIntentToken !== intentToken) return "";
+
+        try {
+            // Memory efficient IPC transport using tauri::ipc::Response
+            const buffer = await invoke<ArrayBuffer>("read_local_file_bytes", { path });
+            if (this.playbackIntentToken !== intentToken) return "";
+
+            const blob = new Blob([buffer], { type: this.getMimeType(path) });
+            return URL.createObjectURL(blob);
+        } catch (e) {
+            console.error("IPC audio read failed", e);
+            return "";
+        }
+    }
+
+    // ── PLAYLIST & QUEUE LOGIC ──
+
+    private generateShuffleQueue(length: number) {
+        const arr = Array.from({ length }, (_, i) => i);
+        for (let i = arr.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [arr[i], arr[j]] = [arr[j], arr[i]];
+        }
+        return arr;
+    }
+
+    private async playNextTrack() {
+        const state = this.playlists.get(this.activePlaylistType);
+        if (!state || state.paths.length === 0) return;
+        
+        const settings = await this.getVolumeSettings();
+        
+        state.trackProgress = 0; // Reset progress for the next track
+
+        if (settings.bgm_shuffle) {
+            if (state.playQueue.length === 0) {
+                state.playQueue = this.generateShuffleQueue(state.paths.length);
+            }
+            state.currentIndex = state.playQueue.shift()!;
+        } else {
+            state.currentIndex = (state.currentIndex + 1) % state.paths.length;
+        }
+
+        const nextPath = state.paths[state.currentIndex];
+        await this.requestBGM(nextPath, 0);
+    }
+
+    private async requestBGM(path: string, resumeTime: number = 0) {
+        this.init();
+        
+        const myToken = ++this.playbackIntentToken;
+
+        // Instantly cut old track to prevent overlapping
+        if (this.bgmAudio) {
+            this.bgmAudio.pause();
+            this.bgmAudio.src = ""; 
+        }
+
+        try {
+            const url = await this.resolveAudioUrl(path, myToken);
+
+            if (this.playbackIntentToken !== myToken || !url) {
+                if (url.startsWith('blob:')) URL.revokeObjectURL(url);
+                return;
+            }
+
+            if (this.currentBgmBlobUrl) {
+                URL.revokeObjectURL(this.currentBgmBlobUrl);
+            }
+            
+            if (url.startsWith('blob:')) {
+                this.currentBgmBlobUrl = url;
+            }
+
+            if (!this.bgmAudio) {
+                this.bgmAudio = new Audio();
+            }
+
+            this.bgmAudio.src = url;
+            
+            const state = this.playlists.get(this.activePlaylistType);
+            this.bgmAudio.loop = state ? state.paths.length === 1 : false;
+            this.bgmAudio.volume = 0; 
+
+            // Bind onended behavior
+            this.bgmAudio.onended = () => {
+                if (this.playbackIntentToken !== myToken) return;
+
+                if (state && state.paths.length > 1) {
+                    this.playNextTrack();
+                } else if (state) {
+                    state.trackProgress = 0;
+                    if (this.bgmAudio) {
+                        this.bgmAudio.currentTime = 0;
+                        this.bgmAudio.play().catch(()=>{});
+                    }
+                }
+            };
+
+            // Restore the saved timestamp
+            if (resumeTime > 0) {
+                this.bgmAudio.addEventListener('loadedmetadata', () => {
+                    if (this.bgmAudio && this.bgmAudio.currentTime < resumeTime - 0.5) {
+                        this.bgmAudio.currentTime = resumeTime;
+                    }
+                }, { once: true });
+            }
+
+            try {
+                await this.bgmAudio.play();
+            } catch (err: any) {
+                if (err.name === 'NotAllowedError') {
+                    console.warn("Autoplay blocked. Waiting for user interaction.");
+                } else {
+                    throw err;
+                }
+            }
+            
+            const settings = await this.getVolumeSettings();
+            const shouldMuteBgm = document.hidden || (!settings.bgm_play_unfocused && !this.isAppFocused) || this.isGameRunning;
+            
+            if (!shouldMuteBgm) {
+                this.fadeBgmVolume(settings.bgm);
+                this.isPaused = false;
+            } else {
+                this.bgmAudio.pause();
+                this.isPaused = true;
+            }
+        } catch (e) {
+            console.error(`Failed to play BGM:`, e);
+            if (this.playbackIntentToken === myToken) {
+                this.playNextTrack();
+            }
+        }
+    }
+
+    private stopActiveBGM() {
+        this.playbackIntentToken++; // Invalidate pending operations
+        if (this.bgmAudio) {
+            // Save exact track progress before killing the audio source
+            const state = this.playlists.get(this.activePlaylistType);
+            if (state) {
+                state.trackProgress = this.bgmAudio.currentTime;
+            }
+
+            this.fadeBgmVolume(0);
+            this.bgmAudio.pause();
+            this.bgmAudio.src = "";
+        }
+        if (this.currentBgmBlobUrl) {
+            URL.revokeObjectURL(this.currentBgmBlobUrl);
+            this.currentBgmBlobUrl = null;
+        }
+        this.activePlaylistType = 'none';
+    }
+
+    private saveCurrentProgress() {
+        if (this.bgmAudio && this.activePlaylistType !== 'none') {
+            const state = this.playlists.get(this.activePlaylistType);
+            if (state) {
+                state.trackProgress = this.bgmAudio.currentTime;
+            }
+        }
+    }
+
+    async playGlobalBGM() {
+        const settings = await this.getVolumeSettings();
+        if (!settings.launcher_bgm_paths || settings.launcher_bgm_paths.length === 0) {
+            this.stopActiveBGM();
+            return;
+        }
+
+        // If we are switching from a game TO global, save the game's progress
+        if (this.activePlaylistType !== 'global') {
+            this.saveCurrentProgress();
+        }
+
+        const type = 'global';
+        let state = this.playlists.get(type);
+        const newPlaylistStr = JSON.stringify(settings.launcher_bgm_paths);
+
+        // If the playlist fundamentally changed, rebuild it
+        if (!state || JSON.stringify(state.paths) !== newPlaylistStr) {
+            state = {
+                paths: settings.launcher_bgm_paths,
+                playQueue: [],
+                currentIndex: 0,
+                trackProgress: 0
+            };
+            if (settings.bgm_shuffle && state.paths.length > 1) {
+                state.playQueue = this.generateShuffleQueue(state.paths.length);
+                state.currentIndex = state.playQueue.shift()!;
+            }
+            this.playlists.set(type, state);
+        }
+
+        // If it's already playing the global playlist, don't restart it
+        if (this.activePlaylistType === type) return;
+
+        this.activePlaylistType = type;
+        const path = state.paths[state.currentIndex];
+        await this.requestBGM(path, state.trackProgress);
+    }
+
+    async playGameBGM(gameId: string, paths: string[]) {
+        if (paths && paths.length > 0) {
+            const settings = await this.getVolumeSettings();
+            const type = `game_${gameId}`;
+            
+            // Save current progress before switching
+            if (this.activePlaylistType !== type) {
+                this.saveCurrentProgress();
+            }
+
+            let state = this.playlists.get(type);
+            const newPlaylistStr = JSON.stringify(paths);
+
+            if (!state || JSON.stringify(state.paths) !== newPlaylistStr) {
+                state = {
+                    paths: paths,
+                    playQueue: [],
+                    currentIndex: 0,
+                    trackProgress: 0
+                };
+                if (settings.bgm_shuffle && state.paths.length > 1) {
+                    state.playQueue = this.generateShuffleQueue(state.paths.length);
+                    state.currentIndex = state.playQueue.shift()!;
+                }
+                this.playlists.set(type, state);
+            }
+
+            if (this.activePlaylistType === type) return;
+
+            this.activePlaylistType = type;
+            const path = state.paths[state.currentIndex];
+            await this.requestBGM(path, state.trackProgress);
+        } else {
+            await this.playGlobalBGM();
+        }
+    }
+
+    async updateLiveVolume() {
+        const settings = await this.getVolumeSettings();
+        const shouldPause = this.isGameRunning || (!settings.bgm_play_unfocused && !this.isAppFocused) || (!settings.bgm_play_in_tray && document.hidden);
+
+        if (this.bgmAudio && this.activePlaylistType !== 'none') {
+            if (shouldPause) {
+                this.isPaused = true;
+                this.fadeBgmVolume(0);
+            } else {
+                this.isPaused = false;
+                this.fadeBgmVolume(settings.bgm);
+            }
+        } else if (this.activePlaylistType === 'none') {
+            this.playGlobalBGM();
+        }
+    }
+
+    // ── SFX Engine (Uses AudioContext) ──
+    
+    async loadSFX(path: string): Promise<AudioBuffer> {
         this.init();
         let url = path;
+        let requiresCleanup = false;
 
-        // If it's a local file path, bypass strict Tauri asset scopes via base64 IPC
         if (!path.startsWith('http') && !path.startsWith('data:')) {
             try {
-                url = await invoke<string>("read_audio_base64", { path });
+                const buffer = await invoke<ArrayBuffer>("read_local_file_bytes", { path });
+                const blob = new Blob([buffer], { type: this.getMimeType(path) });
+                url = URL.createObjectURL(blob);
+                requiresCleanup = true;
             } catch (e) {
-                console.warn("Failed to load audio via IPC, falling back to asset protocol", e);
                 url = convertFileSrc(path);
             }
         }
-
+        
         const response = await fetch(url);
         const arrayBuffer = await response.arrayBuffer();
-        return await this.ctx!.decodeAudioData(arrayBuffer);
+        const buffer = await this.ctx!.decodeAudioData(arrayBuffer);
+        
+        if (requiresCleanup) URL.revokeObjectURL(url);
+        return buffer;
     }
 
     analyzeSilence(buffer: AudioBuffer, threshold = 0.01) {
@@ -130,12 +474,10 @@ class SmartAudioEngine {
         let start = 0;
         let end = data.length - 1;
 
-        // Find first non-silent frame
         for (let i = 0; i < data.length; i++) {
             if (Math.abs(data[i]) > threshold) { start = i; break; }
         }
 
-        // Find last non-silent frame
         for (let i = data.length - 1; i >= 0; i--) {
             if (Math.abs(data[i]) > threshold) { end = i; break; }
         }
@@ -150,7 +492,6 @@ class SmartAudioEngine {
         this.init();
         if (!this.ctx) return 5000;
 
-        // Force context alive just in case browser policy suspended it
         if (this.ctx.state === 'suspended') {
             await this.ctx.resume().catch(() => { });
         }
@@ -166,13 +507,12 @@ class SmartAudioEngine {
         }
 
         try {
-            const buffer = await this.loadAudio(path);
+            const buffer = await this.loadSFX(path);
             const { startTime, duration } = this.analyzeSilence(buffer);
 
             const source = this.ctx.createBufferSource();
             source.buffer = buffer;
 
-            // Create a dedicated gain node for the SFX so it ignores BGM muting
             const sfxGain = this.ctx.createGain();
             sfxGain.gain.value = settings.sfx;
 
@@ -181,7 +521,6 @@ class SmartAudioEngine {
 
             source.start(0, startTime, duration);
 
-            // Ensure the toast stays visible for at least 3000ms (3 seconds) no matter how short the sound is
             return Math.max(3000, (duration * 1000) + 1500);
         } catch (e) {
             console.error("Failed to play custom achievement sound", e);
@@ -215,117 +554,6 @@ class SmartAudioEngine {
         } catch { }
     }
 
-    private async requestTrack(id: string, path: string | null) {
-        this.init();
-        if (!this.ctx) return;
-
-        if (this.activeTrackId === id) return; // Already playing the requested track
-
-        // FADE OUT PREVIOUS BGM
-        if (this.activeTrackId && this.activeSource && this.activeGain) {
-            const oldId = this.activeTrackId;
-            const oldSource = this.activeSource;
-            const oldGain = this.activeGain;
-            const oldState = this.tracks.get(oldId);
-
-            if (oldState) {
-                const elapsed = this.ctx.currentTime - oldState.startTime;
-                oldState.offset = (oldState.offset + elapsed) % oldState.buffer.duration;
-            }
-
-            oldGain.gain.cancelScheduledValues(this.ctx.currentTime);
-            oldGain.gain.setValueAtTime(oldGain.gain.value, this.ctx.currentTime);
-            oldGain.gain.linearRampToValueAtTime(0.001, this.ctx.currentTime + 1.0);
-
-            setTimeout(() => {
-                try { oldSource.stop(); } catch { }
-            }, 1000);
-        }
-
-        this.activeTrackId = id;
-        this.activeSource = null;
-        this.activeGain = null;
-
-        if (!path) {
-            // Fallback: If a game had no BGM, fall back to global launcher BGM
-            if (id !== 'global') {
-                const settings = await this.getVolumeSettings();
-                // 🛑 ASYNC SAFETY CHECK: Ensure we didn't switch tabs while fetching settings
-                if (this.activeTrackId !== id) return;
-
-                if (settings.globalBgmPath) {
-                    await this.requestTrack('global', settings.globalBgmPath);
-                }
-            }
-            return;
-        }
-
-        try {
-            // Group our async setups
-            const settings = await this.getVolumeSettings();
-            if (this.activeTrackId !== id) return;
-
-            let state = this.tracks.get(id);
-            if (!state) {
-                const buffer = await this.loadAudio(path);
-
-                // 🛑 ASYNC SAFETY CHECK: Did the user navigate away while the MP3 was decoding?
-                if (this.activeTrackId !== id) return;
-
-                state = { buffer, offset: 0, startTime: 0 };
-                this.tracks.set(id, state);
-            }
-
-            const source = this.ctx.createBufferSource();
-            source.buffer = state.buffer;
-            source.loop = true;
-
-            const gain = this.ctx.createGain();
-
-            // Check if we should immediately mute it upon creation (e.g., app is currently unfocused)
-            const shouldMuteBgm = document.hidden || !this.isAppFocused || this.isGameRunning;
-            const targetVolume = shouldMuteBgm ? 0.001 : settings.bgm;
-
-            gain.gain.setValueAtTime(0.001, this.ctx.currentTime);
-            gain.gain.linearRampToValueAtTime(targetVolume, this.ctx.currentTime + 1.0);
-
-            source.connect(gain);
-            gain.connect(this.ctx.destination);
-
-            state.startTime = this.ctx.currentTime;
-            source.start(0, state.offset);
-
-            this.activeSource = source;
-            this.activeGain = gain;
-        } catch (e) {
-            console.error(`Failed to play track ${id}:`, e);
-        }
-    }
-
-    async playGlobalBGM() {
-        const settings = await this.getVolumeSettings();
-        await this.requestTrack('global', settings.globalBgmPath);
-    }
-
-    async playGameBGM(gameId: string, path: string | null) {
-        if (path) {
-            await this.requestTrack(`game_${gameId}`, path);
-        } else {
-            await this.playGlobalBGM();
-        }
-    }
-
-    // Called instantly by settings panel so user doesn't have to restart tracks
-    async updateLiveVolume() {
-        if (this.ctx && this.activeGain) {
-            const settings = await this.getVolumeSettings();
-            const shouldMuteBgm = document.hidden || !this.isAppFocused || this.isGameRunning;
-
-            const targetVolume = shouldMuteBgm ? 0.001 : settings.bgm;
-            this.activeGain.gain.linearRampToValueAtTime(targetVolume, this.ctx.currentTime + 0.5);
-        }
-    }
-
     async playUI(soundFile: string) {
         this.init();
         if (!this.ctx) return;
@@ -342,12 +570,18 @@ class SmartAudioEngine {
             let state = this.tracks.get(url);
             
             if (!state) {
-                const response = await fetch(url);
-                const arrayBuffer = await response.arrayBuffer();
-                const buffer = await this.ctx.decodeAudioData(arrayBuffer);
-                state = { buffer, offset: 0, startTime: 0 };
+                const buffer = await this.loadSFX(url);
+                state = { buffer, offset: 0, startTime: 0, isPlaying: false };
                 this.tracks.set(url, state);
+                
+                if (this.tracks.size > 10) {
+                    for (const [k, v] of this.tracks.entries()) {
+                        if (!v.isPlaying) { this.tracks.delete(k); break; }
+                    }
+                }
             }
+            
+            if (!state.buffer) return;
             
             const source = this.ctx.createBufferSource();
             source.buffer = state.buffer;
@@ -367,7 +601,6 @@ class SmartAudioEngine {
 
 export const smartAudio = new SmartAudioEngine();
 
-// Auto-initialize context on first interaction
 if (typeof document !== "undefined") {
     document.addEventListener("mousedown", () => smartAudio.init(), { once: true });
     document.addEventListener("keydown", () => smartAudio.init(), { once: true });

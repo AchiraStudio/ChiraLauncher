@@ -210,21 +210,22 @@ pub async fn get_achievement_diagnostics(
         })
         .unwrap_or(0);
 
-    let mut log = discovery.probe_log.clone();
+    let mut probe_log = discovery.probe_log.clone();
     if let Some(ref p) = discovery.metadata_path {
-        log.push(format!(
+        probe_log.push(format!(
             "Metadata: {} ({} achievements)",
             p.display(),
             meta_count
         ));
     } else {
-        log.push("Metadata: not found. You may need to fetch it via the Steam API.".to_string());
+        probe_log
+            .push("Metadata: not found. You may need to fetch it via the Steam API.".to_string());
     }
 
     let (earned_path_str, earned_format, earned_count) = if let Some(ref p) = discovery.save_path {
-        let earned_map = crate::achievements::load_earned_map(p);
+        let earned_map = crate::achievements::load_earned_map(p, &install_dir);
         let count = earned_map.len();
-        log.push(format!(
+        probe_log.push(format!(
             "Save file: Found at {} ({} achievements unlocked)",
             p.display(),
             count
@@ -240,7 +241,7 @@ pub async fn get_achievement_diagnostics(
             count,
         )
     } else {
-        log.push("Save file: NOT FOUND. Checked automatic paths and scan roots.".to_string());
+        probe_log.push("Save file: NOT FOUND. Checked automatic paths and scan roots.".to_string());
         (None, None, 0)
     };
 
@@ -255,7 +256,7 @@ pub async fn get_achievement_diagnostics(
         earned_state_path: earned_path_str,
         earned_state_format: earned_format,
         earned_count,
-        probe_log: log,
+        probe_log,
     })
 }
 

@@ -1,10 +1,11 @@
 import { useEffect, useState, useMemo } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { useDownloadsStore } from "./store/downloadsStore";
 import { useHttpStore } from "./store/httpStore";
 import { useUiStore } from "./store/uiStore";
 import { BulkLinkModal } from "./components/modals/BulkLinkModal";
 import { motion, AnimatePresence } from "framer-motion";
-import { Play, Pause, X, HardDriveDownload, Link as LinkIcon, Activity, Clock, ArrowDownToLine, ArrowUpToLine, Users, CheckCircle2, AlertCircle, Globe, FolderTree } from "lucide-react";
+import { Play, Pause, X, HardDriveDownload, Link as LinkIcon, Activity, Clock, ArrowDownToLine, ArrowUpToLine, Users, CheckCircle2, AlertCircle, Globe, FolderTree, Trash2, RotateCcw } from "lucide-react";
 import { cn } from "./lib/utils";
 
 function formatBytes(bytes: number, decimals = 1) {
@@ -24,38 +25,94 @@ function formatETA(bytesRemaining: number, bytesPerSec: number) {
     return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
 }
 
+// Helper accessors for dealing with the union type of HTTP vs Torrent structures
+const getName = (item: any) => item.name || item.filename || "Unknown Download";
+const getStatus = (item: any) => item.state || item.status || "pending";
+const getDownloadSpeed = (item: any) => item.download_speed || item.speed_bytes_per_sec || 0;
+
+const isItemCompleted = (item: any) => {
+    const s = getStatus(item);
+    return s === "Finished" || s === "completed" || item.progress_percent >= 100;
+};
+
+const isItemError = (item: any) => {
+    const s = getStatus(item);
+    return s === "Error" || s === "failed" || s === "cancelled";
+};
+
+const isItemPaused = (item: any) => {
+    const s = getStatus(item);
+    return s === "Paused" || s === "paused";
+};
+
 function UnifiedDownloadCard({ item, index, type, onOpenFolder }: { item: any; index: number, type: "torrent" | "http" | "folder", onOpenFolder?: (folder: any) => void }) {
     const torrentStore = useDownloadsStore();
-    const httpStore = useHttpStore();
 
     const isFolder = type === "folder";
-
     const bytesRemaining = item.total_bytes - item.downloaded_bytes;
-    const isCompleted = item.state === "Finished" || item.progress_percent >= 100;
-    const isPaused = item.state === "Paused";
-    const isError = item.state === "Error";
 
-    const handlePause = () => {
+    const isCompleted = isFolder ? item.state === "Finished" : isItemCompleted(item);
+    const isPaused = isFolder ? item.state === "Paused" : isItemPaused(item);
+    const isError = isFolder ? item.state === "Error" : isItemError(item);
+    
+    const displayName = isFolder ? item.name : getName(item);
+    const downloadSpeed = isFolder ? item.download_speed : getDownloadSpeed(item);
+    const statusText = isFolder ? item.state : getStatus(item);
+
+    const handlePause = (e: React.MouseEvent) => {
+        e.stopPropagation();
         if (isFolder) {
-            item.files.forEach((f: any) => httpStore.pauseDownload(f.id));
+            item.files.forEach((f: any) => invoke("pause_http_download", { id: f.id }));
         } else {
-            type === "torrent" ? torrentStore.pauseDownload(item.id) : httpStore.pauseDownload(item.id);
+            type === "torrent" ? torrentStore.pauseDownload(item.id) : invoke("pause_http_download", { id: item.id });
         }
     };
 
-    const handleResume = () => {
+    const handleResume = (e: React.MouseEvent) => {
+        e.stopPropagation();
         if (isFolder) {
-            item.files.forEach((f: any) => httpStore.resumeDownload(f.id));
+            item.files.forEach((f: any) => invoke("resume_http_download", { id: f.id }));
         } else {
-            type === "torrent" ? torrentStore.resumeDownload(item.id) : httpStore.resumeDownload(item.id);
+            type === "torrent" ? torrentStore.resumeDownload(item.id) : invoke("resume_http_download", { id: item.id });
         }
     };
 
-    const handleCancel = () => {
+    const handleCancel = (e: React.MouseEvent) => {
+        e.stopPropagation();
         if (isFolder) {
-            item.files.forEach((f: any) => httpStore.cancelDownload(f.id));
+            item.files.forEach((f: any) => invoke("cancel_http_download", { id: f.id }));
         } else {
-            type === "torrent" ? torrentStore.cancelDownload(item.id) : httpStore.cancelDownload(item.id);
+            type === "torrent" ? torrentStore.cancelDownload(item.id) : invoke("cancel_http_download", { id: item.id });
+        }
+    };
+
+    const handleDelete = async (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (isFolder) {
+            for (const f of item.files) {
+                await invoke("delete_http_download", { id: f.id, deleteFile: true });
+            }
+        } else {
+            if (type === "torrent") {
+                torrentStore.cancelDownload(item.id);
+            } else {
+                await invoke("delete_http_download", { id: item.id, deleteFile: true });
+            }
+        }
+    };
+
+    const handleRetry = async (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (isFolder) {
+            for (const f of item.files) {
+                if (isItemError(f)) {
+                    await invoke("retry_http_download", { id: f.id });
+                }
+            }
+        } else {
+            if (type === "http") {
+                await invoke("retry_http_download", { id: item.id });
+            }
         }
     };
 
@@ -75,8 +132,8 @@ function UnifiedDownloadCard({ item, index, type, onOpenFolder }: { item: any; i
                 <div className="flex-1 min-w-0 pr-6">
                     <div className="flex items-center gap-3">
                         {isFolder ? <FolderTree size={16} className="text-purple-400" /> : type === "http" ? <Globe size={16} className="text-blue-400" /> : <Users size={16} className="text-accent" />}
-                        <h3 className="font-bold text-white text-xl truncate group-hover:text-white transition-colors" title={item.name}>
-                            {item.name} {isFolder && <span className="text-sm text-white/40 ml-2 font-medium">({item.files.length} files)</span>}
+                        <h3 className="font-bold text-white text-xl truncate group-hover:text-white transition-colors" title={displayName}>
+                            {displayName} {isFolder && <span className="text-sm text-white/40 ml-2 font-medium">({item.files.length} files)</span>}
                         </h3>
                     </div>
 
@@ -95,7 +152,7 @@ function UnifiedDownloadCard({ item, index, type, onOpenFolder }: { item: any; i
                         </div>
                         {isError ? (
                             <div className="flex items-center gap-2 text-red-500 text-xs font-semibold">
-                                <AlertCircle size={14} /> Error: {isFolder ? "Check internal files" : item.error_msg || "Unknown"}
+                                <AlertCircle size={14} /> Error: {isFolder ? "Check internal files" : item.error_message || item.error_msg || "Network issue"}
                             </div>
                         ) : isCompleted ? (
                             <div className="flex items-center gap-2 text-green-500 text-xs font-semibold">
@@ -107,28 +164,44 @@ function UnifiedDownloadCard({ item, index, type, onOpenFolder }: { item: any; i
                             </div>
                         ) : (
                             <div className="flex items-center gap-2 text-accent text-xs font-semibold animate-pulse">
-                                <Activity size={14} /> {item.state}
+                                <Activity size={14} /> {statusText}
                             </div>
                         )}
                     </div>
                 </div>
 
                 <div className="flex gap-3 opacity-0 group-hover:opacity-100 transition-all duration-300">
+                    {isError && (type === "http" || isFolder) && (
+                        <button
+                            onClick={handleRetry}
+                            className="w-12 h-12 rounded-2xl bg-cyan-400/20 hover:bg-cyan-400 hover:text-black text-cyan-400 transition-all active:scale-90 border border-cyan-400/20 flex items-center justify-center shadow-xl"
+                            title="Retry Download"
+                        >
+                            <RotateCcw size={20} />
+                        </button>
+                    )}
+
                     {!isCompleted && !isError && (
                         <button
                             onClick={isPaused ? handleResume : handlePause}
                             className="w-12 h-12 rounded-2xl bg-white/[0.03] hover:bg-white/[0.08] text-white transition-all active:scale-90 border border-white/5 flex items-center justify-center shadow-xl"
                             title={isPaused ? "Resume" : "Pause"}
                         >
-                            {isPaused ? <Play size={20} fill="currentColor" /> : <Pause size={20} fill="currentColor" />}
+                            {isPaused ? <Play size={20} fill="currentColor" className="ml-1" /> : <Pause size={20} fill="currentColor" />}
                         </button>
                     )}
+
                     <button
-                        onClick={handleCancel}
-                        className="w-12 h-12 rounded-2xl bg-white/[0.03] hover:bg-red-500/20 hover:text-red-500 text-white/40 transition-all active:scale-90 border border-white/5 flex items-center justify-center shadow-xl"
-                        title="Purge Task"
+                        onClick={isError || isCompleted ? handleDelete : handleCancel}
+                        className={cn(
+                            "w-12 h-12 rounded-2xl transition-all active:scale-90 border flex items-center justify-center shadow-xl",
+                            isError || isCompleted 
+                                ? "bg-red-500/10 border-red-500/20 text-red-400 hover:bg-red-500 hover:text-white" 
+                                : "bg-white/[0.03] hover:bg-red-500/20 border-white/5 text-white/40 hover:text-red-500"
+                        )}
+                        title={isError || isCompleted ? "Delete from list" : "Cancel & Purge"}
                     >
-                        <X size={20} />
+                        {isError || isCompleted ? <Trash2 size={20} /> : <X size={20} />}
                     </button>
                 </div>
             </div>
@@ -137,7 +210,7 @@ function UnifiedDownloadCard({ item, index, type, onOpenFolder }: { item: any; i
                 <div className="h-2.5 bg-black/40 rounded-full overflow-hidden border border-white/5 shadow-inner">
                     <motion.div
                         initial={{ width: 0 }}
-                        animate={{ width: `${Math.max(0, Math.min(100, item.progress_percent))}%` }}
+                        animate={{ width: `${Math.max(0, Math.min(100, item.progress_percent || (item.total_bytes ? (item.downloaded_bytes / item.total_bytes) * 100 : 0)))}%` }}
                         transition={{ duration: 1.2, ease: "linear" }}
                         className={cn(
                             "h-full rounded-full transition-colors duration-700 relative",
@@ -149,9 +222,6 @@ function UnifiedDownloadCard({ item, index, type, onOpenFolder }: { item: any; i
                         )}
                     </motion.div>
                 </div>
-                <div className="absolute -top-7 right-0 text-xs font-bold text-white/40">
-                    {Math.round(item.progress_percent)}%
-                </div>
             </div>
 
             <div className="flex items-center justify-between mt-auto">
@@ -160,7 +230,7 @@ function UnifiedDownloadCard({ item, index, type, onOpenFolder }: { item: any; i
                         <div className="flex items-center gap-10">
                             <div className="flex items-center gap-3">
                                 <ArrowDownToLine size={16} className={isFolder ? "text-purple-400/40" : type === "http" ? "text-blue-400/40" : "text-accent/40"} />
-                                <span className="text-white/60 tabular-nums">{formatBytes(item.download_speed)}/s</span>
+                                <span className="text-white/60 tabular-nums">{formatBytes(downloadSpeed)}/s</span>
                             </div>
                             {type === "torrent" && (
                                 <>
@@ -176,22 +246,21 @@ function UnifiedDownloadCard({ item, index, type, onOpenFolder }: { item: any; i
                             )}
                         </div>
 
-                        {!isPaused && item.download_speed > 0 && (
+                        {!isPaused && downloadSpeed > 0 && (
                             <div className="flex items-center gap-2 text-white/80 bg-white/5 border border-white/10 px-3 py-1 rounded-lg text-xs font-semibold">
                                 <Clock size={14} />
-                                {formatETA(bytesRemaining, item.download_speed)} remaining
+                                {formatETA(bytesRemaining, downloadSpeed)} remaining
                             </div>
                         )}
                     </div>
                 )}
 
                 {isFolder && (
-                    <button onClick={() => onOpenFolder && onOpenFolder(item)} className="ml-auto px-4 py-2 bg-white/5 hover:bg-white/10 text-[10px] text-white font-black uppercase tracking-widest rounded-xl transition-colors border border-white/10 shadow-md">
+                    <button onClick={(e) => { e.stopPropagation(); onOpenFolder && onOpenFolder(item); }} className="ml-auto px-4 py-2 bg-white/5 hover:bg-white/10 text-[10px] text-white font-black uppercase tracking-widest rounded-xl transition-colors border border-white/10 shadow-md">
                         View Contents
                     </button>
                 )}
             </div>
-
         </motion.div>
     );
 }
@@ -206,7 +275,6 @@ export function Downloads() {
     const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
     const [selectedFolder, setSelectedFolder] = useState<any | null>(null);
 
-    // NOTIFICATION SYSTEM 
     const [notifiedIds] = useState(() => new Set<string>());
 
     useEffect(() => {
@@ -224,19 +292,19 @@ export function Downloads() {
         };
     }, []);
 
+    // Combine and normalize items for robust filtering
     const allDownloads = [
         ...torrents.map(t => ({ ...t, _type: "torrent" as const, id: `t_${t.id}` })),
-        ...https.map(h => ({ ...h, _type: "http" as const, id: `h_${h.id}` }))
-    ].sort((a, b) => a.name.localeCompare(b.name));
+        ...https.map(h => ({ ...h, _type: "http" as const, id: h.id }))
+    ].sort((a, b) => getName(a).localeCompare(getName(b)));
 
-    // Check for newly completed downloads and notify
     useEffect(() => {
         allDownloads.forEach(d => {
-            if ((d.state === "Finished" || d.progress_percent >= 100) && !notifiedIds.has(d.id)) {
+            if (isItemCompleted(d) && !notifiedIds.has(d.id)) {
                 notifiedIds.add(d.id);
                 if (Notification.permission === "granted") {
                     new Notification("Download Complete", {
-                        body: `${d.name} has finished downloading.`,
+                        body: `${getName(d)} has finished downloading.`,
                         icon: "/cl_logo.png"
                     });
                 }
@@ -245,9 +313,9 @@ export function Downloads() {
     }, [allDownloads, notifiedIds]);
 
     const filteredDownloads = allDownloads.filter(d => {
-        const isCompleted = d.state === "Finished" || d.progress_percent >= 100;
-        if (filter === 'active') return !isCompleted;
-        if (filter === 'completed') return isCompleted;
+        const completed = isItemCompleted(d);
+        if (filter === 'active') return !completed;
+        if (filter === 'completed') return completed;
         return true;
     });
 
@@ -256,9 +324,10 @@ export function Downloads() {
         const standalone: any[] = [];
 
         filteredDownloads.forEach(d => {
-            if (d._type === "http" && d.folder_name) {
-                if (!groups[d.folder_name]) groups[d.folder_name] = [];
-                groups[d.folder_name].push(d);
+            if (d._type === "http" && (d as any).folder_name) {
+                const folderName = (d as any).folder_name;
+                if (!groups[folderName]) groups[folderName] = [];
+                groups[folderName].push(d);
             } else {
                 standalone.push(d);
             }
@@ -267,11 +336,11 @@ export function Downloads() {
         const folderItems = Object.entries(groups).map(([folderName, files]) => {
             const totalBytes = files.reduce((s, f) => s + f.total_bytes, 0);
             const downloadedBytes = files.reduce((s, f) => s + f.downloaded_bytes, 0);
-            const downloadSpeed = files.reduce((s, f) => s + f.download_speed, 0);
+            const downloadSpeed = files.reduce((s, f) => s + getDownloadSpeed(f), 0);
             const progress = totalBytes > 0 ? (downloadedBytes / totalBytes) * 100 : 0;
-            const isError = files.some(f => f.state === "Error");
-            const isFinished = files.every(f => f.state === "Finished" || f.progress_percent >= 100);
-            const isPaused = files.every(f => f.state === "Paused");
+            const isError = files.some(f => isItemError(f));
+            const isFinished = files.every(f => isItemCompleted(f));
+            const isPaused = files.every(f => isItemPaused(f));
 
             return {
                 id: `folder_${folderName}`,
@@ -286,10 +355,10 @@ export function Downloads() {
             };
         });
 
-        return [...folderItems, ...standalone].sort((a, b) => a.name.localeCompare(b.name));
+        return [...folderItems, ...standalone].sort((a, b) => getName(a).localeCompare(getName(b)));
     }, [filteredDownloads]);
 
-    const activeDownloads = allDownloads.filter(d => d.state !== "Finished" && d.progress_percent < 100);
+    const activeDownloads = allDownloads.filter(d => !isItemCompleted(d));
     const globalDownloaded = activeDownloads.reduce((sum, d) => sum + d.downloaded_bytes, 0);
     const globalTotal = activeDownloads.reduce((sum, d) => sum + d.total_bytes, 0);
     const globalProgress = globalTotal > 0 ? (globalDownloaded / globalTotal) * 100 : 0;
@@ -298,7 +367,6 @@ export function Downloads() {
         <>
             <BulkLinkModal isOpen={isBulkModalOpen} onClose={() => setIsBulkModalOpen(false)} />
 
-            {/* Folder Contents Modal */}
             <AnimatePresence>
                 {selectedFolder && (
                     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">

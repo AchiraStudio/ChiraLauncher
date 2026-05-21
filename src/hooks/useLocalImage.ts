@@ -1,7 +1,9 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
-// Memory cache prevents stuttering and excessive backend calls when scrolling
+// Memory cache limit prevents massive RAM leaks from Base64 strings.
+// 40 images is enough to keep the current viewport snappy without hoarding memory.
+const MAX_CACHE_SIZE = 40;
 const imageCache = new Map<string, string>();
 
 export function useLocalImage(path: string | null | undefined) {
@@ -25,16 +27,27 @@ export function useLocalImage(path: string | null | undefined) {
             return;
         }
 
-        // Check in-memory cache first
+        // Check in-memory cache first (LRU behavior)
         if (imageCache.has(cleanPath)) {
-            setSrc(imageCache.get(cleanPath)!);
+            const b64 = imageCache.get(cleanPath)!;
+            // Move to the end to mark as recently used
+            imageCache.delete(cleanPath);
+            imageCache.set(cleanPath, b64);
+            setSrc(b64);
             return;
         }
 
-        // Call the Rust backend to securely read the file and bypass Tauri asset restrictions
+        // Call the Rust backend to securely read the file
         invoke<string>("read_image_base64", { path: cleanPath })
             .then((b64) => {
                 if (active) {
+                    // Enforce Cache Size Limit
+                    if (imageCache.size >= MAX_CACHE_SIZE) {
+                        // Delete the oldest entry (first item in the Map)
+                        const firstKey = imageCache.keys().next().value;
+                        if (firstKey) imageCache.delete(firstKey);
+                    }
+
                     imageCache.set(cleanPath, b64);
                     setSrc(b64);
                 }

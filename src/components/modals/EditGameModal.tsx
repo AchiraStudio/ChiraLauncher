@@ -10,13 +10,13 @@ import { toast } from "sonner";
 import {
     X, FolderOpen, Image, Monitor, User2, Calendar,
     Save, Gamepad2, FileText, StickyNote, Pencil, Globe, Hash, Link2,
-    Trophy, Activity, Terminal, RefreshCcw, Volume2, Play
+    Trophy, Activity, Terminal, RefreshCcw, Play, Zap, Rocket, Music, ArrowUp, ArrowDown, Plus
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { useLocalImage } from "../../hooks/useLocalImage";
 import { smartAudio } from "../../services/SmartAudio";
 
-type Tab = "general" | "media" | "extra" | "achievements" | "diagnostics";
+type Tab = "general" | "execution" | "media" | "extra" | "achievements" | "diagnostics";
 
 interface AchievementDiagnostics {
     emulator: string;
@@ -101,13 +101,18 @@ export function EditGameModal() {
     const [tab, setTab] = useState<Tab>("general");
     const [title, setTitle] = useState("");
     const [exePath, setExePath] = useState("");
+    const [launchArgs, setLaunchArgs] = useState("");
+
+    const [executionMethod, setExecutionMethod] = useState<"direct" | "auto_launcher" | "manual_launcher" | "unreal_engine">("direct");
+    const [launcherPath, setLauncherPath] = useState("");
 
     const [coverPath, setCoverPath] = useState("");
     const [backgroundPath, setBackgroundPath] = useState("");
     const [logoPath, setLogoPath] = useState("");
     const [focalPoint, setFocalPoint] = useState("center");
     const [customAchSoundPath, setCustomAchSoundPath] = useState("");
-    const [customBgmPath, setCustomBgmPath] = useState("");
+
+    const [customBgmPaths, setCustomBgmPaths] = useState<string[]>([]);
 
     const [developer, setDeveloper] = useState("");
     const [publisher, setPublisher] = useState("");
@@ -130,6 +135,10 @@ export function EditGameModal() {
             setTab("general");
             setTitle(gameToEdit.title || "");
             setExePath(gameToEdit.executable_path || "");
+            setLaunchArgs(gameToEdit.launch_args || "");
+
+            setExecutionMethod((gameToEdit.execution_method as any) || "direct");
+            setLauncherPath(gameToEdit.launcher_path || "");
 
             setCoverPath(gameToEdit.cover_image_path || (gameToEdit as any).cover_path || "");
             setLogoPath(gameToEdit.logo_path || "");
@@ -140,7 +149,11 @@ export function EditGameModal() {
             setFocalPoint(posPart || "center");
 
             setCustomAchSoundPath(gameToEdit.custom_ach_sound_path || "");
-            setCustomBgmPath(gameToEdit.custom_bgm_path || "");
+
+            const paths = gameToEdit.custom_bgm_paths?.length > 0
+                ? gameToEdit.custom_bgm_paths
+                : (gameToEdit.custom_bgm_path ? [gameToEdit.custom_bgm_path] : []);
+            setCustomBgmPaths(paths);
 
             setDeveloper(gameToEdit.developer || "");
             setPublisher(gameToEdit.publisher || "");
@@ -217,13 +230,14 @@ export function EditGameModal() {
                 title,
                 executable_path: exePath,
                 install_dir: newInstallDir,
+                launch_args: launchArgs || null,
                 cover_image_path: finalCover || null,
                 background_image_path: finalBg || null,
                 logo_path: finalLogo || null,
                 cover_path: finalCover || null,
                 background_path: finalBg || null,
                 custom_ach_sound_path: customAchSoundPath || null,
-                custom_bgm_path: customBgmPath || null,
+                custom_bgm_paths: customBgmPaths,
                 developer: developer || null,
                 publisher: publisher || null,
                 release_date: releaseDate || null,
@@ -233,6 +247,8 @@ export function EditGameModal() {
                 steam_app_id: appIdInput ? parseInt(appIdInput) : null,
                 manual_achievement_path: manualAchPath.trim() || null,
                 manual_save_path: manualSavePath.trim() || null,
+                execution_method: executionMethod,
+                launcher_path: launcherPath || null,
             };
 
             await invoke("update_game", { game: updatedGame });
@@ -244,9 +260,7 @@ export function EditGameModal() {
                 await invoke("set_manual_save_path", { gameId: gameToEdit.id, path: manualSavePath.trim() || null });
             }
 
-            // Re-fetch games; Library.tsx will auto-detect changes and update BGM if this is the active game
             await fetchGames();
-
             close();
         } catch (e) {
             console.error(e);
@@ -277,12 +291,8 @@ export function EditGameModal() {
         if (!steamDataToImport) return;
         const data = steamDataToImport;
 
-        if (importOptions.title && data.name) {
-            setTitle(data.name);
-        }
-        if (importOptions.description) {
-            setDescription(data.detailed_description || data.short_description || description);
-        }
+        if (importOptions.title && data.name) setTitle(data.name);
+        if (importOptions.description) setDescription(data.detailed_description || data.short_description || description);
         if (importOptions.details) {
             setDeveloper(data.developers?.[0] || developer);
             setPublisher(data.publishers?.[0] || publisher);
@@ -316,11 +326,8 @@ export function EditGameModal() {
                     appId: appIdInput,
                     gameDir: gameToEdit.install_dir || "",
                     apiKey
-                }).then(() => {
-                    toast.success("Achievements generated in steam_settings");
-                }).catch(e => {
-                    toast.error("Failed to generate achievements", { description: String(e) });
-                });
+                }).then(() => toast.success("Achievements generated in steam_settings"))
+                    .catch(e => toast.error("Failed to generate achievements", { description: String(e) }));
             } else {
                 toast.warning("Cannot generate achievements: No Steam API Key configured.");
             }
@@ -368,10 +375,18 @@ export function EditGameModal() {
     };
 
     const handlePickAudio = async (type: "bgm" | "achievement") => {
-        const selected = await openDialog({ multiple: false, filters: [{ name: "Audio", extensions: ["mp3", "wav", "ogg", "flac"] }] });
-        if (selected && typeof selected === "string") {
-            if (type === "bgm") setCustomBgmPath(selected);
-            else setCustomAchSoundPath(selected);
+        if (type === "bgm") {
+            const selected = await openDialog({ multiple: true, filters: [{ name: "Audio", extensions: ["mp3", "wav", "ogg", "flac"] }] });
+            if (selected && Array.isArray(selected)) {
+                setCustomBgmPaths(prev => [...prev, ...selected]);
+            } else if (selected && typeof selected === "string") {
+                setCustomBgmPaths(prev => [...prev, selected]);
+            }
+        } else {
+            const selected = await openDialog({ multiple: false, filters: [{ name: "Audio", extensions: ["mp3", "wav", "ogg", "flac"] }] });
+            if (selected && typeof selected === "string") {
+                setCustomAchSoundPath(selected);
+            }
         }
     };
 
@@ -385,8 +400,28 @@ export function EditGameModal() {
         if (selected && typeof selected === "string") setManualSavePath(selected);
     };
 
+    const moveTrack = (index: number, direction: -1 | 1) => {
+        setCustomBgmPaths(prev => {
+            const newPaths = [...prev];
+            if (index + direction < 0 || index + direction >= newPaths.length) return prev;
+            const temp = newPaths[index];
+            newPaths[index] = newPaths[index + direction];
+            newPaths[index + direction] = temp;
+            return newPaths;
+        });
+    };
+
+    const removeTrack = (index: number) => {
+        setCustomBgmPaths(prev => {
+            const newPaths = [...prev];
+            newPaths.splice(index, 1);
+            return newPaths;
+        });
+    };
+
     const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
         { id: "general", label: "General", icon: <Gamepad2 size={14} /> },
+        { id: "execution", label: "Execution", icon: <Zap size={14} /> },
         { id: "media", label: "Media & Assets", icon: <Image size={14} /> },
         { id: "extra", label: "Details", icon: <FileText size={14} /> },
         { id: "achievements", label: "Achievements", icon: <Trophy size={14} /> },
@@ -496,14 +531,30 @@ export function EditGameModal() {
                                                 <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} className={inputCls} />
                                             </div>
                                             <div>
-                                                <Label>Executable Path</Label>
+                                                <Label>Main Game Executable</Label>
                                                 <div className="flex gap-2">
                                                     <input type="text" value={exePath} onChange={(e) => setExePath(e.target.value)} className={cn(inputCls, "flex-1 font-mono text-xs")} />
                                                     <button onClick={handlePickExe} className="shrink-0 bg-white/5 hover:bg-white/10 text-white/60 hover:text-white px-4 rounded-xl font-bold text-xs transition-all border border-white/10 flex items-center gap-2">
                                                         <FolderOpen size={14} /> Browse
                                                     </button>
                                                 </div>
+                                                <p className="text-white/30 text-[10px] mt-1 ml-1">The primary game executable (e.g. Game.exe, or Shipping.exe for Unreal Engine).</p>
                                             </div>
+
+                                            <div>
+                                                <Label>Custom Launch Arguments</Label>
+                                                <div className="flex gap-2">
+                                                    <input
+                                                        type="text"
+                                                        value={launchArgs}
+                                                        onChange={(e) => setLaunchArgs(e.target.value)}
+                                                        className={cn(inputCls, "font-mono text-sm placeholder:text-white/20")}
+                                                        placeholder="-novid -high -fullscreen"
+                                                    />
+                                                </div>
+                                                <p className="text-white/30 text-[10px] mt-1 ml-1">Optional parameters appended when starting the executable.</p>
+                                            </div>
+
                                             <div className="grid grid-cols-2 gap-4">
                                                 <div>
                                                     <Label>Steam App ID</Label>
@@ -539,6 +590,79 @@ export function EditGameModal() {
                                         </motion.div>
                                     )}
 
+                                    {tab === "execution" && (
+                                        <motion.div key="execution" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }} className="space-y-6">
+                                            <div className="bg-accent/5 border border-accent/15 p-5 rounded-2xl flex gap-4 items-start shadow-inner">
+                                                <Rocket className="text-accent shrink-0 mt-0.5" size={24} />
+                                                <div>
+                                                    <h4 className="text-accent text-sm font-black uppercase tracking-widest mb-1.5">Engine Routing</h4>
+                                                    <p className="text-white/50 text-xs leading-relaxed font-medium">
+                                                        Does this game require a secondary launcher, or is it built on an engine that spawns child processes? Configure how ChiraLauncher tracks the execution flow here.
+                                                    </p>
+                                                </div>
+                                            </div>
+
+                                            <div className="space-y-4">
+                                                <div>
+                                                    <Label>Execution Method</Label>
+                                                    <select
+                                                        value={executionMethod}
+                                                        onChange={(e) => setExecutionMethod(e.target.value as any)}
+                                                        className={cn(inputCls, "appearance-none cursor-pointer [&>option]:bg-[#0f1423] [&>option]:text-white")}
+                                                    >
+                                                        <option value="direct">Standard Direct Launch (Default)</option>
+                                                        <option value="unreal_engine">Unreal Engine (Bypass Bootstrap)</option>
+                                                        <option value="auto_launcher">Auto-Launcher (Launcher → Wait 5s → Game)</option>
+                                                        <option value="manual_launcher">Manual Launcher (Wait for user to click Play)</option>
+                                                    </select>
+                                                </div>
+
+                                                <AnimatePresence>
+                                                    {(executionMethod === "auto_launcher" || executionMethod === "manual_launcher") && (
+                                                        <motion.div
+                                                            initial={{ opacity: 0, height: 0 }}
+                                                            animate={{ opacity: 1, height: "auto" }}
+                                                            exit={{ opacity: 0, height: 0 }}
+                                                            className="overflow-hidden"
+                                                        >
+                                                            <div className="pt-2">
+                                                                <Label>Secondary Launcher Executable</Label>
+                                                                <div className="flex gap-2">
+                                                                    <input
+                                                                        type="text"
+                                                                        value={launcherPath}
+                                                                        onChange={(e) => setLauncherPath(e.target.value)}
+                                                                        className={cn(inputCls, "flex-1 font-mono text-xs border-dashed bg-black/20")}
+                                                                        placeholder="C:\Games\Launcher.exe"
+                                                                    />
+                                                                    <button
+                                                                        onClick={async () => {
+                                                                            const selected = await openDialog({ multiple: false, filters: [{ name: "Executables", extensions: ["exe"] }] });
+                                                                            if (selected && typeof selected === "string") setLauncherPath(selected);
+                                                                        }}
+                                                                        className="shrink-0 bg-white/5 hover:bg-white/10 text-white/60 hover:text-white px-4 rounded-xl font-bold text-xs transition-all border border-white/10 flex items-center gap-2"
+                                                                    >
+                                                                        <FolderOpen size={14} /> Browse
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        </motion.div>
+                                                    )}
+                                                </AnimatePresence>
+
+                                                <div className="p-4 bg-black/40 rounded-xl border border-white/5 mt-4">
+                                                    <h4 className="text-[10px] font-black text-white/40 uppercase tracking-widest mb-2">How it works</h4>
+                                                    <ul className="text-xs text-white/50 space-y-2 list-disc pl-4 marker:text-white/20">
+                                                        {executionMethod === "direct" && <li>Spawns the <span className="text-white/80 font-mono">Executable Path</span> directly and tracks its PID.</li>}
+                                                        {executionMethod === "unreal_engine" && <li>Spawns the executable, but ignores it when it immediately dies. AutoAttach will intercept the real <span className="text-white/80 font-mono">Win64-Shipping.exe</span> automatically.</li>}
+                                                        {executionMethod === "auto_launcher" && <li>Spawns the <span className="text-white/80 font-mono">Launcher Executable</span>, waits 5 seconds, then spawns the <span className="text-white/80 font-mono">Main Game Executable</span> automatically.</li>}
+                                                        {executionMethod === "manual_launcher" && <li>Spawns the <span className="text-white/80 font-mono">Launcher Executable</span> and leaves it up to you to click "Play". AutoAttach intercepts the main game when it appears.</li>}
+                                                    </ul>
+                                                </div>
+                                            </div>
+                                        </motion.div>
+                                    )}
+
                                     {tab === "media" && (
                                         <motion.div key="media" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }} className="space-y-6">
 
@@ -567,7 +691,7 @@ export function EditGameModal() {
                                                 <div className="flex-1 space-y-2">
                                                     <div className="flex items-center justify-between">
                                                         <Label>Background / Hero Image</Label>
-                                                        <select value={focalPoint} onChange={(e) => setFocalPoint(e.target.value)} className="bg-white/5 border border-white/10 text-[9px] font-bold uppercase tracking-widest px-2 py-1 rounded outline-none text-white/60">
+                                                        <select value={focalPoint} onChange={(e) => setFocalPoint(e.target.value)} className="bg-white/5 border border-white/10 text-[9px] font-bold uppercase tracking-widest px-2 py-1 rounded outline-none text-white/60 [&>option]:bg-[#0f1423] [&>option]:text-white">
                                                             <option value="center">Center</option>
                                                             <option value="top">Top</option>
                                                             <option value="bottom">Bottom</option>
@@ -611,23 +735,45 @@ export function EditGameModal() {
 
                                             <div className="space-y-5">
                                                 <div className="space-y-2">
-                                                    <Label>Custom Background Music (BGM)</Label>
-                                                    <div className="flex gap-2">
-                                                        <Volume2 size={16} className="mt-2.5 text-white/20 shrink-0" />
-                                                        <input type="text" value={customBgmPath} onChange={(e) => setCustomBgmPath(e.target.value)} className={cn(inputCls, "flex-1 text-xs font-mono")} placeholder="C:\Music\track.mp3" />
-                                                        {customBgmPath && (
-                                                            <button onClick={() => smartAudio.playGameBGM(gameToEdit.id, customBgmPath)} className="shrink-0 bg-accent/10 hover:bg-accent/20 text-accent px-4 py-3 rounded-xl font-bold text-xs transition-all border border-accent/20 flex items-center justify-center" title="Preview BGM">
-                                                                <Play size={14} fill="currentColor" />
-                                                            </button>
-                                                        )}
-                                                        <button onClick={() => handlePickAudio("bgm")} className="shrink-0 bg-white/5 hover:bg-white/10 text-white/60 hover:text-white px-3 rounded-xl font-bold text-xs transition-all border border-white/10 flex items-center gap-1.5">
-                                                            <FolderOpen size={13} />
+                                                    <div className="flex items-center justify-between">
+                                                        <Label>Custom Background Music Playlist</Label>
+                                                        <button onClick={() => handlePickAudio("bgm")} className="bg-white/5 hover:bg-white/10 text-white/60 hover:text-white px-3 py-1.5 rounded-lg font-bold text-xs transition-all border border-white/10 flex items-center gap-1.5">
+                                                            <Plus size={14} /> Add Tracks
                                                         </button>
                                                     </div>
-                                                    {customBgmPath && (
-                                                        <button onClick={() => { setCustomBgmPath(""); smartAudio.playGlobalBGM(); }} className="text-red-400/60 hover:text-red-400 text-xs font-semibold transition-colors flex items-center gap-1 ml-6 mt-1">
-                                                            <X size={11} /> Clear BGM
-                                                        </button>
+
+                                                    <div className="bg-black/40 border border-white/5 rounded-2xl p-2 max-h-[150px] overflow-y-auto custom-scrollbar shadow-inner space-y-1">
+                                                        {customBgmPaths.length === 0 ? (
+                                                            <div className="py-6 flex flex-col items-center justify-center text-white/20 gap-2">
+                                                                <Music size={20} />
+                                                                <span className="text-[10px] font-bold uppercase tracking-widest">No Custom Tracks</span>
+                                                            </div>
+                                                        ) : (
+                                                            customBgmPaths.map((path, i) => (
+                                                                <div key={i} className="flex items-center gap-3 bg-white/[0.02] hover:bg-white/[0.04] p-2.5 rounded-xl border border-white/5 group transition-colors">
+                                                                    <Music size={12} className="text-accent/60 shrink-0" />
+                                                                    <div className="flex-1 min-w-0">
+                                                                        <p className="text-xs font-mono text-white/70 truncate">{path.split('\\').pop()?.split('/').pop()}</p>
+                                                                    </div>
+                                                                    <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity gap-1">
+                                                                        <button onClick={() => moveTrack(i, -1)} disabled={i === 0} className="p-1.5 text-white/40 hover:text-white disabled:opacity-30 rounded-md hover:bg-white/10"><ArrowUp size={12} /></button>
+                                                                        <button onClick={() => moveTrack(i, 1)} disabled={i === customBgmPaths.length - 1} className="p-1.5 text-white/40 hover:text-white disabled:opacity-30 rounded-md hover:bg-white/10"><ArrowDown size={12} /></button>
+                                                                        <div className="w-px h-4 bg-white/10 mx-1" />
+                                                                        <button onClick={() => removeTrack(i)} className="p-1.5 text-red-400/60 hover:text-red-400 rounded-md hover:bg-red-500/10"><X size={12} /></button>
+                                                                    </div>
+                                                                </div>
+                                                            ))
+                                                        )}
+                                                    </div>
+                                                    {customBgmPaths.length > 0 && (
+                                                        <div className="flex justify-end gap-2 mt-2">
+                                                            <button onClick={() => smartAudio.playGameBGM(gameToEdit.id, customBgmPaths)} className="bg-accent/10 hover:bg-accent/20 text-accent px-4 py-2 rounded-xl font-bold text-[10px] uppercase tracking-widest transition-all border border-accent/20 flex items-center gap-2">
+                                                                <Play size={12} fill="currentColor" /> Preview Playlist
+                                                            </button>
+                                                            <button onClick={() => { setCustomBgmPaths([]); smartAudio.playGlobalBGM(); }} className="text-red-400/60 hover:text-red-400 px-4 py-2 bg-red-500/5 hover:bg-red-500/10 rounded-xl border border-red-500/10 transition-colors text-[10px] font-bold uppercase tracking-widest">
+                                                                Clear All
+                                                            </button>
+                                                        </div>
                                                     )}
                                                 </div>
 

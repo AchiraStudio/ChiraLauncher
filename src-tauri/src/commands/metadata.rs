@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use crate::state::AppState;
 use tauri::State;
 
@@ -92,6 +90,14 @@ pub async fn read_audio_base64(path: String) -> Result<String, String> {
     use base64::Engine;
     let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
     Ok(format!("data:{};base64,{}", mime, b64))
+}
+
+// ── NEW: Raw Binary Reader (Fixes 200MB+ Memory Leaks & Tauri Scopes) ──
+// Uses tauri::ipc::Response to stream raw bytes without JSON array serialization!
+#[tauri::command]
+pub fn read_local_file_bytes(path: String) -> Result<tauri::ipc::Response, String> {
+    let bytes = std::fs::read(&path).map_err(|e| format!("Failed to read file bytes: {}", e))?;
+    Ok(tauri::ipc::Response::new(bytes))
 }
 
 #[tauri::command]

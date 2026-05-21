@@ -34,20 +34,23 @@ pub async fn get_profile(state: State<'_, AppState>) -> Result<Option<UserProfil
     let profile = stmt.query_row([], |row| {
         let id: String = row.get(0)?;
         let mut p = UserProfile {
-            id,
+            id: id.clone(),
             username: row.get(1)?,
             steam_id: row.get(2)?,
             avatar_url: row.get(3)?,
             xp: row.get(4).unwrap_or(0),
             supabase_user_id: row.get(5).unwrap_or(None),
             is_cloud_synced: row.get::<_, i32>(6).unwrap_or(0) != 0,
-            private_key: None,
+            private_key: row.get(7).unwrap_or(None), // Read from local DB fallback first
             public_key: row.get(8).unwrap_or(None),
         };
 
+        // Attempt to read from OS Keychain (takes precedence if available)
         if let Ok(entry) = Entry::new(KEYRING_SERVICE, &p.id) {
             if let Ok(secret) = entry.get_password() {
-                p.private_key = Some(secret);
+                if !secret.is_empty() {
+                    p.private_key = Some(secret);
+                }
             }
         }
 
@@ -116,14 +119,22 @@ pub async fn set_profile_keys(
     private_key: String,
 ) -> Result<(), String> {
     if let Some(mut p) = get_profile(state.clone()).await? {
-        p.public_key = Some(public_key);
+        p.public_key = Some(public_key.clone());
+        p.private_key = Some(private_key.clone()); // FIX: Save to DB as fallback
 
+        // Try to save to OS Keychain (more secure)
         if let Ok(entry) = Entry::new(KEYRING_SERVICE, &p.id) {
             if let Err(e) = entry.set_password(&private_key) {
-                return Err(format!("Failed to save to keychain: {}", e));
+                log::warn!(
+                    "Failed to save to OS keychain (falling back to SQLite): {}",
+                    e
+                );
             }
+        } else {
+            log::warn!("Failed to initialize OS keychain (falling back to SQLite)");
         }
 
+        // Regardless of Keychain success/failure, update the local SQLite profile
         state
             .db_tx
             .send(DbWrite::Profile(ProfileDbWrite::UpdateProfile(p)))

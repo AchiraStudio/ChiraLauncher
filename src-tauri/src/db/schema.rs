@@ -397,5 +397,62 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         tx.commit()?;
     }
 
+    if current_version < 30 {
+        let tx = conn.unchecked_transaction()?;
+        let _ = tx.execute(
+            "ALTER TABLE games ADD COLUMN execution_method TEXT NOT NULL DEFAULT 'direct'",
+            [],
+        );
+        let _ = tx.execute("ALTER TABLE games ADD COLUMN launcher_path TEXT", []);
+        tx.execute("INSERT INTO schema_migrations (version) VALUES (30)", [])?;
+        tx.commit()?;
+    }
+
+    if current_version < 31 {
+        let tx = conn.unchecked_transaction()?;
+        let _ = tx.execute(
+            "ALTER TABLE settings ADD COLUMN launcher_bgm_paths TEXT NOT NULL DEFAULT '[]'",
+            [],
+        );
+        let _ = tx.execute(
+            "ALTER TABLE settings ADD COLUMN bgm_play_unfocused BOOLEAN NOT NULL DEFAULT 0",
+            [],
+        );
+        let _ = tx.execute(
+            "ALTER TABLE settings ADD COLUMN bgm_play_in_tray BOOLEAN NOT NULL DEFAULT 0",
+            [],
+        );
+        let _ = tx.execute(
+            "ALTER TABLE settings ADD COLUMN bgm_shuffle BOOLEAN NOT NULL DEFAULT 0",
+            [],
+        );
+        let _ = tx.execute(
+            "ALTER TABLE settings ADD COLUMN default_launcher_path TEXT NOT NULL DEFAULT ''",
+            [],
+        );
+        tx.execute("INSERT INTO schema_migrations (version) VALUES (31)", [])?;
+        tx.commit()?;
+    }
+
+    if current_version < 32 {
+        let tx = conn.unchecked_transaction()?;
+        let _ = tx.execute(
+            "ALTER TABLE games ADD COLUMN custom_bgm_paths TEXT NOT NULL DEFAULT '[]'",
+            [],
+        );
+        tx.execute("INSERT INTO schema_migrations (version) VALUES (32)", [])?;
+        tx.commit()?;
+    }
+
+    if current_version < 33 {
+        let tx = conn.unchecked_transaction()?;
+        let _ = tx.execute(
+            "ALTER TABLE settings ADD COLUMN auto_close_launcher BOOLEAN NOT NULL DEFAULT 0",
+            [],
+        );
+        tx.execute("INSERT INTO schema_migrations (version) VALUES (33)", [])?;
+        tx.commit()?;
+    }
+
     Ok(())
 }

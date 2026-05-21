@@ -11,9 +11,9 @@ use crate::state::{AppState, LaunchSource, ProcessIdentity};
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
-/// Launch a process elevated using ShellExecuteExW to immediately retrieve its Process ID.
+/// Launch a process elevated using ShellExecuteExW.
 #[cfg(target_os = "windows")]
-fn launch_elevated(exe_path: &str, working_dir: &str) -> Result<u32, String> {
+fn launch_elevated(exe_path: &str, working_dir: &str, args: &str) -> Result<u32, String> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Foundation::{CloseHandle, GetLastError};
     use windows_sys::Win32::System::Threading::GetProcessId;
@@ -35,17 +35,27 @@ fn launch_elevated(exe_path: &str, working_dir: &str) -> Result<u32, String> {
         .chain(std::iter::once(0))
         .collect();
 
+    let args_utf16: Vec<u16> = std::ffi::OsStr::new(args)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
     let mut info: SHELLEXECUTEINFOW = unsafe { std::mem::zeroed() };
     info.cbSize = std::mem::size_of::<SHELLEXECUTEINFOW>() as u32;
     info.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI;
     info.lpVerb = verb_utf16.as_ptr();
     info.lpFile = exe_utf16.as_ptr();
+
+    if !args.is_empty() {
+        info.lpParameters = args_utf16.as_ptr();
+    }
+
     if !working_dir.is_empty() {
         info.lpDirectory = cwd_utf16.as_ptr();
     }
     info.nShow = SW_SHOWNORMAL as i32;
 
-    log::info!("Launching elevated via ShellExecute: {}", exe_path);
+    log::info!("Launching elevated via ShellExecute: {} {}", exe_path, args);
 
     let res = unsafe { ShellExecuteExW(&mut info) };
     if res == 0 {
@@ -69,13 +79,200 @@ fn launch_elevated(exe_path: &str, working_dir: &str) -> Result<u32, String> {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn launch_elevated(exe_path: &str, working_dir: &str) -> Result<u32, String> {
+fn launch_elevated(exe_path: &str, working_dir: &str, args: &str) -> Result<u32, String> {
     let _ = working_dir;
-    let child = Command::new(exe_path)
-        .spawn()
-        .map_err(|e| format!("Failed to spawn: {e}"))?;
+    let mut cmd = Command::new(exe_path);
+    if !args.is_empty() {
+        cmd.args(args.split_whitespace());
+    }
+    let child = cmd.spawn().map_err(|e| format!("Failed to spawn: {e}"))?;
     Ok(child.id())
 }
+
+/// Safely and aggressively kill a secondary launcher using Native Windows Task Management.
+/// We explicitly DO NOT use the /T flag, so the main game continues running safely!
+async fn kill_launcher_process(pid: u32, exe_path: &str, is_elevated: bool) {
+    let exe_file_name = std::path::Path::new(exe_path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    log::info!(
+        "Assassin Task: Terminating Launcher PID {} / EXE {}",
+        pid,
+        exe_file_name
+    );
+
+    // Double-tap loop: Run the kill sequence twice, 2 seconds apart, in case the launcher tries to auto-restart
+    for i in 0..2 {
+        let mut sys = sysinfo::System::new();
+        sys.refresh_processes(sysinfo::ProcessesToUpdate::All);
+
+        // 1. Terminate matching processes via Rust native sysinfo (Equivalent to Task Manager "End Task")
+        if let Some(proc) = sys.process(sysinfo::Pid::from_u32(pid)) {
+            proc.kill();
+        }
+
+        if !exe_file_name.is_empty() {
+            let exe_lower = exe_file_name.to_lowercase();
+            for (_, proc) in sys.processes() {
+                let proc_name = proc.name().to_string_lossy().to_lowercase();
+                // Kill if name matches OR if the absolute path matches perfectly
+                if proc_name == exe_lower || proc_name == format!("{}.exe", exe_lower) {
+                    proc.kill();
+                }
+                if let Some(p_exe) = proc.exe() {
+                    if p_exe.to_string_lossy().to_lowercase() == exe_path.to_lowercase() {
+                        proc.kill();
+                    }
+                }
+            }
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            // 2. OS-Level Force Kill (Absolute Backup)
+            if is_elevated {
+                let mut ps_args = format!("Start-Process taskkill -ArgumentList '/F /PID {}' -Verb RunAs -WindowStyle Hidden; ", pid);
+                if !exe_file_name.is_empty() {
+                    ps_args.push_str(&format!("Start-Process taskkill -ArgumentList '/F /IM \"{}\"' -Verb RunAs -WindowStyle Hidden", exe_file_name));
+                }
+                let _ = std::process::Command::new("powershell")
+                    .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &ps_args])
+                    .creation_flags(0x08000000)
+                    .output();
+            } else {
+                // Direct Taskkill invocation
+                let _ = std::process::Command::new("taskkill")
+                    .args(["/F", "/PID", &pid.to_string()])
+                    .creation_flags(0x08000000)
+                    .output();
+
+                if !exe_file_name.is_empty() {
+                    let _ = std::process::Command::new("taskkill")
+                        .args(["/F", "/IM", &exe_file_name])
+                        .creation_flags(0x08000000)
+                        .output();
+
+                    // 3. Ultimate Backup: WMIC deletion for frozen/hung GUI processes
+                    let _ = std::process::Command::new("wmic")
+                        .args([
+                            "process",
+                            "where",
+                            &format!("name='{}'", exe_file_name),
+                            "delete",
+                        ])
+                        .creation_flags(0x08000000)
+                        .output();
+                }
+            }
+        }
+
+        if i == 0 {
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        }
+    }
+}
+
+// ── AGGRESSIVE PROCESS KILLER (Main Game) ──
+#[cfg(target_os = "windows")]
+async fn kill_process(pid: u32, exe_path: &str, install_dir: &str, is_elevated: bool) -> bool {
+    let mut sys = sysinfo::System::new();
+    sys.refresh_processes(sysinfo::ProcessesToUpdate::All);
+
+    let target_dir = std::path::Path::new(install_dir);
+    let mut pids_to_kill = vec![pid];
+
+    let exe_file_name = std::path::Path::new(exe_path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+
+    // 1. Gather PIDs: Any process running from within the game folder, OR matching the exe name exactly
+    for (p, proc) in sys.processes() {
+        let pid_val = p.as_u32();
+        if pid_val == pid {
+            continue;
+        }
+
+        let mut should_kill = false;
+
+        if let Some(exe) = proc.exe() {
+            if !target_dir.as_os_str().is_empty() && exe.starts_with(target_dir) {
+                should_kill = true;
+            }
+        }
+
+        if !should_kill && !exe_file_name.is_empty() {
+            let proc_name = proc.name().to_string_lossy().to_lowercase();
+            if proc_name == exe_file_name || proc_name == format!("{}.exe", exe_file_name) {
+                should_kill = true;
+            }
+        }
+
+        if should_kill {
+            pids_to_kill.push(pid_val);
+        }
+    }
+
+    log::info!("Aggressive Kill: Terminating PIDs {:?}", pids_to_kill);
+
+    // 2. Execute Kills
+    if is_elevated {
+        let mut ps_args = String::from("Start-Process cmd -ArgumentList '/C ");
+        // Here we DO use /T because we want to kill the game and all its sub-processes
+        for p in &pids_to_kill {
+            ps_args.push_str(&format!("taskkill /F /T /PID {} & ", p));
+        }
+        if !exe_file_name.is_empty() {
+            ps_args.push_str(&format!("taskkill /F /T /IM \"{}\" & ", exe_file_name));
+        }
+        ps_args.push_str("echo done' -Verb RunAs -WindowStyle Hidden");
+
+        let _ = Command::new("powershell")
+            .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &ps_args])
+            .creation_flags(0x08000000)
+            .output();
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(1500)).await;
+        return true;
+    }
+
+    for p in &pids_to_kill {
+        if let Some(proc) = sys.process(sysinfo::Pid::from_u32(*p)) {
+            proc.kill();
+        }
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/T", "/PID", &p.to_string()])
+            .creation_flags(0x08000000)
+            .output();
+    }
+
+    if !exe_file_name.is_empty() {
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/T", "/IM", &exe_file_name])
+            .creation_flags(0x08000000)
+            .output();
+    }
+
+    true
+}
+
+#[cfg(not(target_os = "windows"))]
+async fn kill_process(pid: u32, _exe_path: &str, _install_dir: &str, _is_elevated: bool) -> bool {
+    let mut sys = sysinfo::System::new();
+    sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[sysinfo::Pid::from_u32(
+        pid,
+    )]));
+    if let Some(process) = sys.process(sysinfo::Pid::from_u32(pid)) {
+        process.kill();
+        true
+    } else {
+        false
+    }
+}
+
+// ── COMMANDS ──────────────────────────────────────────────────────────────
 
 #[tauri::command]
 pub async fn launch_game(
@@ -89,6 +286,7 @@ pub async fn launch_game(
 
     log::info!("Launching game '{}' ({})", game.title, id);
 
+    // Apply patches if needed
     if let Ok(Some(profile)) = crate::profile::get_profile(state.clone()).await {
         if let Some(install_dir) = game.install_dir.as_ref() {
             let path = Path::new(install_dir);
@@ -106,6 +304,97 @@ pub async fn launch_game(
         }
     }
 
+    let exec_method = game.execution_method.as_str();
+    let settings = crate::settings::get_settings(&state.read_pool).unwrap_or_default();
+
+    let mut pre_launcher_pid: Option<u32> = None;
+    let mut actual_launcher_path: Option<String> = None;
+
+    // ── 1. LAUNCHER PRE-EXECUTION ──
+    if exec_method == "auto_launcher" || exec_method == "manual_launcher" {
+        let mut launcher_path_raw = game.launcher_path.clone();
+        if launcher_path_raw.as_deref().unwrap_or("").trim().is_empty() {
+            launcher_path_raw = Some(settings.default_launcher_path.clone());
+        }
+
+        if let Some(l_path_str) = launcher_path_raw {
+            let clean_launcher_path = l_path_str.trim().trim_matches('"').trim().to_string();
+
+            if !clean_launcher_path.is_empty() {
+                let l_path = Path::new(&clean_launcher_path);
+                if l_path.exists() {
+                    actual_launcher_path = Some(clean_launcher_path.clone());
+                    let l_working_dir = l_path
+                        .parent()
+                        .map(|p| p.to_string_lossy().to_string())
+                        .unwrap_or_default();
+
+                    log::info!("Spawning Pre-Launcher: {}", clean_launcher_path);
+
+                    if game.run_as_admin {
+                        let l_pid = launch_elevated(&clean_launcher_path, &l_working_dir, "")
+                            .map_err(|e| format!("Failed to start elevated launcher: {}", e))?;
+                        pre_launcher_pid = Some(l_pid);
+                    } else {
+                        let mut l_cmd = Command::new(&clean_launcher_path);
+                        if !l_working_dir.is_empty() {
+                            l_cmd.current_dir(&l_working_dir);
+                        }
+
+                        #[cfg(target_os = "windows")]
+                        l_cmd.creation_flags(0x00000008);
+
+                        match l_cmd.spawn() {
+                            Ok(child) => {
+                                pre_launcher_pid = Some(child.id());
+                            }
+                            Err(e) => {
+                                if let Some(740) = e.raw_os_error() {
+                                    log::info!(
+                                        "Launcher requires elevation (OS 740), retrying RunAs"
+                                    );
+                                    let l_pid =
+                                        launch_elevated(&clean_launcher_path, &l_working_dir, "")
+                                            .map_err(|e| {
+                                            format!(
+                                                "Failed to start elevated launcher (fallback): {}",
+                                                e
+                                            )
+                                        })?;
+                                    pre_launcher_pid = Some(l_pid);
+                                } else {
+                                    return Err(format!("Failed to start launcher: {}", e));
+                                }
+                            }
+                        }
+                    }
+
+                    if exec_method == "manual_launcher" {
+                        log::info!(
+                            "Manual Launcher mode: Waiting for AutoAttach to catch the game."
+                        );
+                        // Exit early, the assassin is handled below in section 4.
+                        // return Ok(());  <-- Removed so it falls through to Section 4
+                    }
+
+                    if exec_method == "auto_launcher" {
+                        log::info!("Auto Launcher mode: Sleeping for 5 seconds before spawning main executable...");
+                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    }
+                } else {
+                    log::warn!("Launcher path does not exist: {}", clean_launcher_path);
+                    if exec_method == "manual_launcher" {
+                        return Err(format!(
+                            "Launcher path does not exist: {}",
+                            clean_launcher_path
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    // ── 2. MAIN GAME EXECUTION ──
     let clean_exe_path = game.exe_path.trim().trim_matches('"').trim().to_string();
     let mut working_dir = game
         .install_dir
@@ -115,30 +404,65 @@ pub async fn launch_game(
         .trim_matches('"')
         .trim()
         .to_string();
-
     let exe_path = Path::new(&clean_exe_path);
+    let launch_args = game.launch_args.clone().unwrap_or_default();
 
-    if !exe_path.exists() {
-        return Err(format!("Executable not found: {}", clean_exe_path));
-    }
+    if exec_method != "manual_launcher" {
+        if !exe_path.exists() {
+            return Err(format!("Executable not found: {}", clean_exe_path));
+        }
 
-    if working_dir.is_empty() {
-        working_dir = exe_path
-            .parent()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_default();
-    }
+        if working_dir.is_empty() {
+            working_dir = exe_path
+                .parent()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default();
+        }
 
-    if game.run_as_admin {
-        log::info!("Game '{}' requires admin rights", game.title);
+        let pid = if game.run_as_admin {
+            log::info!(
+                "Game '{}' requires admin rights. Args: {}",
+                game.title,
+                launch_args
+            );
+            launch_elevated(&clean_exe_path, &working_dir, &launch_args)?
+        } else {
+            let mut cmd = Command::new(&clean_exe_path);
+            if !working_dir.is_empty() {
+                cmd.current_dir(&working_dir);
+            }
+            if !launch_args.is_empty() {
+                cmd.args(launch_args.split_whitespace());
+            }
 
-        let pid = launch_elevated(&clean_exe_path, &working_dir)?;
+            #[cfg(target_os = "windows")]
+            cmd.creation_flags(0x00000008);
 
-        app.emit(
-            "game-started",
-            json!({ "game_id": id, "source": "Launcher", "elevated": true, "pid": pid }),
-        )
-        .ok();
+            match cmd.spawn() {
+                Ok(child) => child.id(),
+                Err(e) => {
+                    if let Some(740) = e.raw_os_error() {
+                        log::info!("Game requires elevation (OS 740), retrying RunAs");
+                        launch_elevated(&clean_exe_path, &working_dir, &launch_args)?
+                    } else {
+                        return Err(format!("Failed to launch '{}': {}", clean_exe_path, e));
+                    }
+                }
+            }
+        };
+
+        // ── 3. UNREAL ENGINE BYPASS ──
+        if exec_method == "unreal_engine" {
+            log::info!("Unreal Engine mode: Bootstrap spawned (PID {}). Exiting early to let AutoAttach catch Win64-Shipping.exe.", pid);
+            return Ok(());
+        }
+
+        // ── 5. STANDARD TRACKING ──
+        let mut sys = sysinfo::System::new();
+        sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[sysinfo::Pid::from_u32(
+            pid,
+        )]));
+        let start_time = crate::process::identity::get_process_start_time(pid, &sys).unwrap_or(0);
 
         let stop_flag = show_overlay_and_start_watcher(
             &app,
@@ -147,15 +471,9 @@ pub async fn launch_game(
             game.cover_path.as_ref(),
             &working_dir,
             game.steam_app_id,
-            true,
+            game.run_as_admin,
             &state,
         );
-
-        let mut sys = sysinfo::System::new();
-        sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[sysinfo::Pid::from_u32(
-            pid,
-        )]));
-        let start_time = crate::process::identity::get_process_start_time(pid, &sys).unwrap_or(0);
 
         {
             let mut running = state.running_games.lock().unwrap();
@@ -169,133 +487,220 @@ pub async fn launch_game(
                     game_id: id.clone(),
                     game_title: game.title.clone(),
                     launched_by: LaunchSource::Launcher,
-                    elevated: true,
+                    elevated: game.run_as_admin,
                     elevated_stop_flag: stop_flag,
                     achievement_watcher_stop_flag: None,
                 },
             );
         }
 
-        log::info!(
-            "Elevated game '{}' launched successfully (PID {})",
-            game.title,
-            pid
-        );
-        return Ok(());
+        app.emit("game-started", json!({ "game_id": id, "source": "Launcher", "pid": pid, "elevated": game.run_as_admin })).ok();
+        log::info!("Game '{}' launched successfully (PID {})", game.title, pid);
     }
 
-    let mut cmd = Command::new(&clean_exe_path);
-
-    if !working_dir.is_empty() {
-        cmd.current_dir(&working_dir);
-    }
-
-    #[cfg(target_os = "windows")]
-    cmd.creation_flags(0x00000008); // DETACHED_PROCESS
-
-    let pid = match cmd.spawn() {
-        Ok(child) => child.id(),
-        Err(e) => {
-            if let Some(740) = e.raw_os_error() {
-                log::info!("Game requires elevation (OS 740), retrying RunAs");
-                let pid = launch_elevated(&clean_exe_path, &working_dir)?;
-
-                app.emit(
-                    "game-started",
-                    json!({ "game_id": id, "source": "Launcher", "elevated": true, "pid": pid }),
-                )
-                .ok();
-
-                let stop_flag = show_overlay_and_start_watcher(
-                    &app,
-                    &id,
-                    &game.title,
-                    game.cover_path.as_ref(),
-                    &working_dir,
-                    game.steam_app_id,
-                    true,
-                    &state,
-                );
-
-                let mut sys = sysinfo::System::new();
-                sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[sysinfo::Pid::from_u32(
-                    pid,
-                )]));
-                let start_time =
-                    crate::process::identity::get_process_start_time(pid, &sys).unwrap_or(0);
-
-                {
-                    let mut running = state.running_games.lock().unwrap();
-                    running.insert(
-                        id.clone(),
-                        ProcessIdentity {
-                            pid,
-                            exe_path: clean_exe_path.to_lowercase(),
-                            install_dir: working_dir.clone(),
-                            start_time,
-                            game_id: id.clone(),
-                            game_title: game.title.clone(),
-                            launched_by: LaunchSource::Launcher,
-                            elevated: true,
-                            elevated_stop_flag: stop_flag,
-                            achievement_watcher_stop_flag: None,
-                        },
-                    );
-                }
-
-                return Ok(());
-            }
-
-            return Err(format!("Failed to launch '{}': {}", clean_exe_path, e));
-        }
-    };
-
-    let mut sys = sysinfo::System::new();
-    sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[sysinfo::Pid::from_u32(
-        pid,
-    )]));
-
-    let start_time = crate::process::identity::get_process_start_time(pid, &sys).unwrap_or(0);
-
+    // ── 4. AUTO-CLOSE LAUNCHER ASSASSIN TASK ──
+    // Works for both auto_launcher and manual_launcher!
+    if settings.auto_close_launcher
+        && (exec_method == "auto_launcher" || exec_method == "manual_launcher")
     {
-        let mut running = state.running_games.lock().unwrap();
-        running.insert(
-            id.clone(),
-            ProcessIdentity {
-                pid,
-                exe_path: clean_exe_path.to_lowercase(),
-                install_dir: working_dir.clone(),
-                start_time,
-                game_id: id.clone(),
-                game_title: game.title.clone(),
-                launched_by: LaunchSource::Launcher,
-                elevated: false,
-                elevated_stop_flag: None,
-                achievement_watcher_stop_flag: None,
-            },
-        );
+        if let Some(pid_to_kill) = pre_launcher_pid {
+            let running_games_arc = state.running_games.clone();
+            let game_id_clone = id.clone();
+            let is_elevated = game.run_as_admin;
+            let l_path_clone = actual_launcher_path.unwrap_or_default();
+
+            tokio::spawn(async move {
+                let mut found = false;
+                // Wait up to 120 seconds for the main game to appear in our running tracking pool
+                for _ in 0..120 {
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    if running_games_arc
+                        .lock()
+                        .unwrap()
+                        .contains_key(&game_id_clone)
+                    {
+                        found = true;
+                        break;
+                    }
+                }
+                if found {
+                    // Game is officially running. Wait 10 seconds for it to stabilize/pass Auth checks
+                    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                    log::info!(
+                        "Assassin Task: Preparing to execute Launcher PID: {} / Path: {}",
+                        pid_to_kill,
+                        l_path_clone
+                    );
+                    kill_launcher_process(pid_to_kill, &l_path_clone, is_elevated).await;
+                } else {
+                    log::warn!("Assassin Task Aborted: Main game never started within 120s.");
+                }
+            });
+        }
     }
-
-    app.emit(
-        "game-started",
-        json!({ "game_id": id, "source": "Launcher", "pid": pid }),
-    )
-    .ok();
-
-    show_overlay_and_start_watcher(
-        &app,
-        &id,
-        &game.title,
-        game.cover_path.as_ref(),
-        &working_dir,
-        game.steam_app_id,
-        false,
-        &state,
-    );
-
-    log::info!("Game '{}' launched successfully (PID {})", game.title, pid);
 
     Ok(())
+}
+
+#[tauri::command]
+pub async fn force_stop_game(id: String, state: State<'_, AppState>) -> Result<(), String> {
+    let identity = {
+        let running = state.running_games.lock().unwrap();
+        running.get(&id).cloned()
+    };
+
+    if let Some(identity) = identity {
+        let killed = kill_process(
+            identity.pid,
+            &identity.exe_path,
+            &identity.install_dir,
+            identity.elevated,
+        )
+        .await;
+
+        if killed {
+            if let Some(flag) = &identity.elevated_stop_flag {
+                flag.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+
+            log::info!("Force stopped game '{}' (PID {})", id, identity.pid);
+        } else {
+            log::warn!(
+                "PID {} for game '{}' could not be killed — it may require elevation or has already exited.",
+                identity.pid,
+                id
+            );
+            return Err("Failed to force stop the game. The process may require admin privileges or is already closed.".to_string());
+        }
+    } else {
+        log::warn!(
+            "force_stop called for '{}' but it's not in running_games",
+            id
+        );
+        return Err("Game is not tracked as running.".to_string());
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn open_path_in_explorer(path: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("explorer")
+            .args(["/select,", &path])
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = path;
+        Err("Not supported on this OS".to_string())
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RefreshResult {
+    pub app_id_updated: bool,
+    pub save_path_found: bool,
+    pub rawg_refreshed: bool,
+}
+
+#[tauri::command]
+pub async fn resolve_game_app_id(
+    game_id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<String>, String> {
+    let game = get_game_by_id(&state.read_pool, &game_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Game not found: {}", game_id))?;
+
+    let game_path = PathBuf::from(game.install_dir.as_ref().unwrap_or(&game.exe_path));
+    let app_id = crate::achievements::resolve_app_id(&game_path);
+    Ok(app_id)
+}
+
+#[tauri::command]
+pub async fn refresh_game_metadata(
+    game_id: String,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<RefreshResult, String> {
+    {
+        let mut in_flight = state.metadata_refresh_lock.lock().await;
+        if !in_flight.insert(game_id.clone()) {
+            return Err("Refresh already in progress for this game".into());
+        }
+    }
+    let result = refresh_game_metadata_internal(&game_id, &state, &app).await;
+    state.metadata_refresh_lock.lock().await.remove(&game_id);
+    result
+}
+
+async fn refresh_game_metadata_internal(
+    game_id: &str,
+    state: &State<'_, AppState>,
+    app: &AppHandle,
+) -> Result<RefreshResult, String> {
+    let game = get_game_by_id(&state.read_pool, &game_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Game not found: {}", game_id))?;
+
+    let install_dir = game.install_dir.clone().unwrap_or_else(|| {
+        Path::new(&game.exe_path)
+            .parent()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default()
+    });
+    let game_path = PathBuf::from(&install_dir);
+
+    let found_app_id = crate::achievements::resolve_app_id(&game_path);
+    let app_id_changed = found_app_id.is_some()
+        && found_app_id.as_deref()
+            != game
+                .steam_app_id
+                .as_ref()
+                .map(|id| id.to_string())
+                .as_deref();
+
+    if let Some(ref id_str) = found_app_id {
+        if app_id_changed {
+            if let Ok(app_id_u32) = id_str.parse::<u32>() {
+                state
+                    .db_tx
+                    .send(crate::state::DbWrite::Game(
+                        crate::state::GameDbWrite::UpdateSteamAppId {
+                            game_id: game_id.to_string(),
+                            steam_app_id: Some(app_id_u32),
+                        },
+                    ))
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+    }
+
+    let scan_roots = crate::settings::default_scan_roots();
+    let effective_app_id = found_app_id
+        .clone()
+        .or_else(|| game.steam_app_id.as_ref().map(|id| id.to_string()));
+    let save_path = crate::achievements::resolve_save_path(
+        effective_app_id.as_deref(),
+        &game_path,
+        game.manual_achievement_path.as_deref(),
+        &scan_roots,
+        None,
+    );
+
+    let rawg_refreshed = false;
+    let _ = app.emit("game-metadata-refreshed", &game_id);
+
+    Ok(RefreshResult {
+        app_id_updated: app_id_changed,
+        save_path_found: save_path.is_some(),
+        rawg_refreshed,
+    })
 }
 
 fn show_overlay_and_start_watcher(
@@ -430,260 +835,6 @@ pub async fn toggle_run_as_admin(
             },
         ))
         .map_err(|e| e.to_string())
-}
-
-// ── AGGRESSIVE PROCESS KILLER ──
-#[cfg(target_os = "windows")]
-async fn kill_process(pid: u32, exe_path: &str, install_dir: &str, is_elevated: bool) -> bool {
-    let mut sys = sysinfo::System::new();
-    sys.refresh_processes(sysinfo::ProcessesToUpdate::All);
-
-    let target_dir = std::path::Path::new(install_dir);
-    let mut pids_to_kill = vec![pid];
-
-    let exe_file_name = std::path::Path::new(exe_path)
-        .file_name()
-        .map(|n| n.to_string_lossy().to_lowercase())
-        .unwrap_or_default();
-
-    // 1. Gather PIDs: Any process running from within the game folder, OR matching the exe name exactly
-    for (p, proc) in sys.processes() {
-        let pid_val = p.as_u32();
-        if pid_val == pid { continue; }
-
-        let mut should_kill = false;
-        
-        if let Some(exe) = proc.exe() {
-            if !target_dir.as_os_str().is_empty() && exe.starts_with(target_dir) {
-                should_kill = true;
-            }
-        }
-        
-        if !should_kill && !exe_file_name.is_empty() {
-            let proc_name = proc.name().to_string_lossy().to_lowercase();
-            if proc_name == exe_file_name || proc_name == format!("{}.exe", exe_file_name) {
-                should_kill = true;
-            }
-        }
-
-        if should_kill {
-            pids_to_kill.push(pid_val);
-        }
-    }
-
-    log::info!("Aggressive Kill: Terminating PIDs {:?}", pids_to_kill);
-
-    // 2. Execute Kills
-    if is_elevated {
-        // Build an elevated PowerShell command to nuke everything
-        let mut ps_args = String::from("Start-Process cmd -ArgumentList '/C ");
-        for p in &pids_to_kill {
-            ps_args.push_str(&format!("taskkill /F /T /PID {} & ", p));
-        }
-        if !exe_file_name.is_empty() {
-            ps_args.push_str(&format!("taskkill /F /T /IM \"{}\" & ", exe_file_name));
-        }
-        ps_args.push_str("echo done' -Verb RunAs -WindowStyle Hidden");
-
-        let _ = Command::new("powershell")
-            .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &ps_args])
-            .creation_flags(0x08000000)
-            .output();
-
-        // Give Windows a second to process the elevated kills
-        tokio::time::sleep(tokio::time::Duration::from_millis(1500)).await;
-        return true;
-    }
-
-    // Standard loop kill
-    for p in &pids_to_kill {
-        if let Some(proc) = sys.process(sysinfo::Pid::from_u32(*p)) {
-            proc.kill();
-        }
-        // Fallback: forcefully wipe them out
-        let _ = Command::new("taskkill")
-            .args(["/F", "/T", "/PID", &p.to_string()])
-            .creation_flags(0x08000000)
-            .output();
-    }
-
-    // Broad sweep just in case
-    if !exe_file_name.is_empty() {
-        let _ = Command::new("taskkill")
-            .args(["/F", "/T", "/IM", &exe_file_name])
-            .creation_flags(0x08000000)
-            .output();
-    }
-
-    true
-}
-
-#[cfg(not(target_os = "windows"))]
-async fn kill_process(pid: u32, _exe_path: &str, _install_dir: &str, _is_elevated: bool) -> bool {
-    let mut sys = sysinfo::System::new();
-    sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[sysinfo::Pid::from_u32(pid)]));
-    if let Some(process) = sys.process(sysinfo::Pid::from_u32(pid)) {
-        process.kill();
-        true
-    } else {
-        false
-    }
-}
-
-#[tauri::command]
-pub async fn force_stop_game(id: String, state: State<'_, AppState>) -> Result<(), String> {
-    let identity = {
-        let running = state.running_games.lock().unwrap();
-        running.get(&id).cloned()
-    };
-
-    if let Some(identity) = identity {
-        let killed = kill_process(identity.pid, &identity.exe_path, &identity.install_dir, identity.elevated).await;
-
-        if killed {
-            if let Some(flag) = &identity.elevated_stop_flag {
-                flag.store(true, std::sync::atomic::Ordering::Relaxed);
-            }
-
-            log::info!("Force stopped game '{}' (PID {})", id, identity.pid);
-        } else {
-            log::warn!(
-                "PID {} for game '{}' could not be killed — it may require elevation or has already exited.",
-                identity.pid,
-                id
-            );
-            return Err("Failed to force stop the game. The process may require admin privileges or is already closed.".to_string());
-        }
-    } else {
-        log::warn!(
-            "force_stop called for '{}' but it's not in running_games",
-            id
-        );
-        return Err("Game is not tracked as running.".to_string());
-    }
-
-    Ok(())
-}
-
-// ... remaining commands (open_path_in_explorer, etc.)
-#[tauri::command]
-pub async fn open_path_in_explorer(path: String) -> Result<(), String> {
-    #[cfg(target_os = "windows")]
-    {
-        Command::new("explorer")
-            .args(["/select,", &path])
-            .spawn()
-            .map_err(|e| e.to_string())?;
-        Ok(())
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        let _ = path;
-        Err("Not supported on this OS".to_string())
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct RefreshResult {
-    pub app_id_updated: bool,
-    pub save_path_found: bool,
-    pub rawg_refreshed: bool,
-}
-
-#[tauri::command]
-pub async fn resolve_game_app_id(
-    game_id: String,
-    state: State<'_, AppState>,
-) -> Result<Option<String>, String> {
-    let game = get_game_by_id(&state.read_pool, &game_id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Game not found: {}", game_id))?;
-
-    let game_path = PathBuf::from(game.install_dir.as_ref().unwrap_or(&game.exe_path));
-    let app_id = crate::achievements::resolve_app_id(&game_path);
-    Ok(app_id)
-}
-
-#[tauri::command]
-pub async fn refresh_game_metadata(
-    game_id: String,
-    state: State<'_, AppState>,
-    app: AppHandle,
-) -> Result<RefreshResult, String> {
-    {
-        let mut in_flight = state.metadata_refresh_lock.lock().await;
-        if !in_flight.insert(game_id.clone()) {
-            return Err("Refresh already in progress for this game".into());
-        }
-    }
-    let result = refresh_game_metadata_internal(&game_id, &state, &app).await;
-    state.metadata_refresh_lock.lock().await.remove(&game_id);
-    result
-}
-
-async fn refresh_game_metadata_internal(
-    game_id: &str,
-    state: &State<'_, AppState>,
-    app: &AppHandle,
-) -> Result<RefreshResult, String> {
-    let game = get_game_by_id(&state.read_pool, &game_id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Game not found: {}", game_id))?;
-
-    let install_dir = game.install_dir.clone().unwrap_or_else(|| {
-        Path::new(&game.exe_path)
-            .parent()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_default()
-    });
-    let game_path = PathBuf::from(&install_dir);
-
-    let found_app_id = crate::achievements::resolve_app_id(&game_path);
-    let app_id_changed = found_app_id.is_some()
-        && found_app_id.as_deref()
-            != game
-                .steam_app_id
-                .as_ref()
-                .map(|id| id.to_string())
-                .as_deref();
-
-    if let Some(ref id_str) = found_app_id {
-        if app_id_changed {
-            if let Ok(app_id_u32) = id_str.parse::<u32>() {
-                state
-                    .db_tx
-                    .send(crate::state::DbWrite::Game(
-                        crate::state::GameDbWrite::UpdateSteamAppId {
-                            game_id: game_id.to_string(),
-                            steam_app_id: Some(app_id_u32),
-                        },
-                    ))
-                    .map_err(|e| e.to_string())?;
-            }
-        }
-    }
-
-    let scan_roots = crate::settings::default_scan_roots();
-    let effective_app_id = found_app_id
-        .clone()
-        .or_else(|| game.steam_app_id.as_ref().map(|id| id.to_string()));
-    let save_path = crate::achievements::resolve_save_path(
-        effective_app_id.as_deref(),
-        &game_path,
-        game.manual_achievement_path.as_deref(),
-        &scan_roots,
-        None,
-    );
-
-    let rawg_refreshed = false;
-    let _ = app.emit("game-metadata-refreshed", &game_id);
-
-    Ok(RefreshResult {
-        app_id_updated: app_id_changed,
-        save_path_found: save_path.is_some(),
-        rawg_refreshed,
-    })
 }
 
 #[tauri::command]

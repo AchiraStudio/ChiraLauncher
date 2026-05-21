@@ -18,7 +18,7 @@ A personal game launcher built with Tauri, Rust, and React. ChiraLauncher lets y
 
 ---
 
-## ✨ Recent Updates
+## Recent Updates
 
 ### Giving the UI and Audio some love
 - **All-New Audio Tab:** I added a dedicated spot in the Settings to manage how the launcher sounds. You can now set your own universal background music and change the default achievement pop sound. I also threw in some live volume sliders so you don't have to guess how loud things are.

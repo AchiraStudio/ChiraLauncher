@@ -44,9 +44,13 @@ pub struct Game {
     pub detected_metadata_path: Option<String>,
     pub detected_earned_state_path: Option<String>,
     pub is_favorite: bool,
-    // ── NEW FIELDS ──
     pub custom_ach_sound_path: Option<String>,
     pub custom_bgm_path: Option<String>,
+    pub execution_method: String,
+    pub launcher_path: Option<String>,
+    pub custom_bgm_paths: Vec<String>,
+    pub custom_cover: bool,          // FIXED
+    pub launch_args: Option<String>, // FIXED
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -81,12 +85,21 @@ pub struct NewGame {
     pub detected_metadata_path: Option<String>,
     pub detected_earned_state_path: Option<String>,
     pub is_favorite: bool,
-    // ── NEW FIELDS ──
     pub custom_ach_sound_path: Option<String>,
     pub custom_bgm_path: Option<String>,
+    pub execution_method: Option<String>,
+    pub launcher_path: Option<String>,
+    pub custom_bgm_paths: Option<Vec<String>>,
+    #[serde(default)]
+    pub custom_cover: bool, // FIXED
+    pub launch_args: Option<String>, // FIXED
 }
 
 fn map_game_row(row: &rusqlite::Row) -> rusqlite::Result<Game> {
+    let custom_bgm_paths_json: String = row
+        .get("custom_bgm_paths")
+        .unwrap_or_else(|_| "[]".to_string());
+
     Ok(Game {
         id: row.get::<_, String>(0)?,
         title: row.get::<_, String>(1)?,
@@ -101,6 +114,9 @@ fn map_game_row(row: &rusqlite::Row) -> rusqlite::Result<Game> {
         rating: row.get::<_, Option<f64>>(10)?,
         igdb_id: row.get::<_, Option<i64>>(11)?,
         steam_app_id: row.get::<_, Option<i32>>(12)?.map(|x| x as u32),
+        custom_cover: row.get::<_, Option<i32>>(13)?.unwrap_or(0) != 0, // Now cleanly maps to struct field
+        launch_args: row.get::<_, Option<String>>("launch_args").unwrap_or(None), // Maps to struct field
+        install_dir: row.get::<_, Option<String>>("install_dir").unwrap_or(None),
         source: row
             .get::<_, String>("source")
             .unwrap_or_else(|_| "manual".to_string()),
@@ -109,7 +125,6 @@ fn map_game_row(row: &rusqlite::Row) -> rusqlite::Result<Game> {
             .get::<_, Option<i64>>("installed_size")
             .unwrap_or(None)
             .map(|x| x as u64),
-        install_dir: row.get::<_, Option<String>>("install_dir").unwrap_or(None),
         publisher: row.get::<_, Option<String>>("publisher").unwrap_or(None),
         release_date: row.get::<_, Option<String>>("release_date").unwrap_or(None),
         genres: row.get::<_, Option<String>>("genres").unwrap_or(None),
@@ -163,6 +178,13 @@ fn map_game_row(row: &rusqlite::Row) -> rusqlite::Result<Game> {
         custom_bgm_path: row
             .get::<_, Option<String>>("custom_bgm_path")
             .unwrap_or(None),
+        execution_method: row
+            .get::<_, String>("execution_method")
+            .unwrap_or_else(|_| "direct".to_string()),
+        launcher_path: row
+            .get::<_, Option<String>>("launcher_path")
+            .unwrap_or(None),
+        custom_bgm_paths: serde_json::from_str(&custom_bgm_paths_json).unwrap_or_default(),
     })
 }
 
@@ -240,6 +262,12 @@ pub fn insert_game_conn(conn: &Connection, game: NewGame) -> rusqlite::Result<us
         )
         .unwrap_or((0, 0, None, None, 0, 0));
 
+    let execution_method = game
+        .execution_method
+        .unwrap_or_else(|| "direct".to_string());
+    let custom_bgm_paths_json = serde_json::to_string(&game.custom_bgm_paths.unwrap_or_default())
+        .unwrap_or_else(|_| "[]".to_string());
+
     conn.execute(
         "INSERT INTO games (
             id, title, exe_path, cover_path, background_path, description,
@@ -248,10 +276,10 @@ pub fn insert_game_conn(conn: &Connection, game: NewGame) -> rusqlite::Result<us
             repack_info, run_as_admin, manual_achievement_path, manual_save_path, steam_app_id,
             crack_type, app_id, playtime_seconds, session_count, first_played, last_played,
             achievements_unlocked, achievements_total, detected_metadata_path, detected_earned_state_path, logo_path,
-            is_favorite, custom_ach_sound_path, custom_bgm_path
+            is_favorite, custom_ach_sound_path, custom_bgm_path, execution_method, launcher_path, custom_bgm_paths, launch_args, custom_cover
          ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
-            ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37
+            ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42
          )",
         params![
             game.id, game.title, game.exe_path, game.cover_path, game.background_path, game.description,
@@ -260,7 +288,8 @@ pub fn insert_game_conn(conn: &Connection, game: NewGame) -> rusqlite::Result<us
             game.repack_info, game.run_as_admin as i32, game.manual_achievement_path, game.manual_save_path, game.steam_app_id,
             game.crack_type, game.app_id, restored_secs, restored_sessions, restored_first, restored_last,
             restored_ach_unlocked, restored_ach_total, game.detected_metadata_path, game.detected_earned_state_path, game.logo_path,
-            game.is_favorite as i32, game.custom_ach_sound_path, game.custom_bgm_path
+            game.is_favorite as i32, game.custom_ach_sound_path, game.custom_bgm_path, execution_method, game.launcher_path,
+            custom_bgm_paths_json, game.launch_args, game.custom_cover as i32
         ],
     )
 }
@@ -283,13 +312,16 @@ pub fn delete_game_conn(conn: &Connection, id: &str) -> rusqlite::Result<usize> 
 }
 
 pub fn update_game_conn(conn: &Connection, game: Game) -> rusqlite::Result<usize> {
+    let custom_bgm_paths_json =
+        serde_json::to_string(&game.custom_bgm_paths).unwrap_or_else(|_| "[]".to_string());
     conn.execute(
         "UPDATE games SET 
             title = ?1, exe_path = ?2, cover_path = ?3, background_path = ?4, developer = ?5, 
             publisher = ?6, release_date = ?7, description = ?8, genre = ?9, steam_app_id = ?10,
             run_as_admin = ?11, manual_achievement_path = ?12, manual_save_path = ?13, logo_path = ?14, 
-            is_favorite = ?15, custom_ach_sound_path = ?16, custom_bgm_path = ?17
-         WHERE id = ?18",
+            is_favorite = ?15, custom_ach_sound_path = ?16, custom_bgm_path = ?17, execution_method = ?18, 
+            launcher_path = ?19, custom_bgm_paths = ?20, launch_args = ?21, custom_cover = ?22
+         WHERE id = ?23",
         params![
             game.title,
             game.exe_path,
@@ -308,6 +340,11 @@ pub fn update_game_conn(conn: &Connection, game: Game) -> rusqlite::Result<usize
             game.is_favorite as i32,
             game.custom_ach_sound_path,
             game.custom_bgm_path,
+            game.execution_method,
+            game.launcher_path,
+            custom_bgm_paths_json,
+            game.launch_args,
+            game.custom_cover as i32,
             game.id
         ],
     )?;

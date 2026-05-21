@@ -21,7 +21,10 @@ pub fn start(
         let mut sys = sysinfo::System::new();
 
         let mut process_interval = tokio::time::interval(Duration::from_secs(2));
-        let mut last_db_refresh = Instant::now() - Duration::from_secs(60);
+
+        // FIX: Replaced Instant subtraction with an Option to prevent underflow panics
+        // on systems that have recently booted.
+        let mut last_db_refresh: Option<Instant> = None;
         let mut last_overlay_refresh = Instant::now();
 
         let mut exe_map: HashMap<String, String> = HashMap::new();
@@ -33,11 +36,16 @@ pub fn start(
 
             sys.refresh_processes(sysinfo::ProcessesToUpdate::All);
 
-            if last_db_refresh.elapsed() > Duration::from_secs(20) {
+            // FIX: Safely evaluate if 20 seconds have passed, or if this is the very first run
+            let needs_db_refresh = last_db_refresh
+                .map(|i| i.elapsed() > Duration::from_secs(20))
+                .unwrap_or(true);
+
+            if needs_db_refresh {
                 if let Ok(map) = get_game_exe_map(&read_pool) {
                     exe_map = map;
                 }
-                last_db_refresh = Instant::now();
+                last_db_refresh = Some(Instant::now());
             }
 
             if last_overlay_refresh.elapsed() > Duration::from_secs(4) {
@@ -408,7 +416,7 @@ fn start_achievement_watcher_for_game(
             game.manual_achievement_path,
             game.manual_save_path,
             crack_type,
-            game.custom_ach_sound_path, // <--- FIXED HERE
+            game.custom_ach_sound_path,
         ) {
             watchers.insert(watcher_key, stop_flag);
             log::info!(

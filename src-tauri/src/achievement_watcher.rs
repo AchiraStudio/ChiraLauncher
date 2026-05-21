@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::achievements::{GOLDBERG_APPDATA_DIRS, PUBLIC_EMU_DIRS};
+use crate::achievements::{GOLDBERG_APPDATA_DIRS, PUBLIC_EMU_DIRS, extract_localized_string};
 use crate::commands::scanner::CrackType;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -38,9 +38,9 @@ pub struct SaveDiscoveredPayload {
 pub struct AchievementMeta {
     pub name: String,
     #[serde(rename = "displayName", default)]
-    pub display_name: String,
+    pub display_name: serde_json::Value,
     #[serde(default)]
-    pub description: String,
+    pub description: serde_json::Value,
     #[serde(default)]
     pub icon: String,
     #[serde(rename = "icongray", default)]
@@ -99,7 +99,7 @@ pub fn find_anadius_xml(save_dir: &Path, content_id: &str) -> Option<PathBuf> {
         .map(|e| e.path())
 }
 
-pub fn read_earned_anadius(xml_path: &Path) -> HashMap<String, u64> {
+pub fn read_earned_anadius(xml_path: &Path, cfg_map: &HashMap<String, String>) -> HashMap<String, u64> {
     let text = match std::fs::read_to_string(xml_path) {
         Ok(t) => t,
         Err(e) => {
@@ -113,16 +113,18 @@ pub fn read_earned_anadius(xml_path: &Path) -> HashMap<String, u64> {
         if !t.starts_with("<Achievement ") {
             continue;
         }
-        let Some(name) = xml_attr(t, "Name") else {
-            continue;
-        };
-        let Some(grant) = xml_attr(t, "Grant") else {
-            continue;
-        };
-        if name.is_empty() {
-            continue;
+        let id = xml_attr(t, "Id");
+        let grant = xml_attr(t, "Grant");
+        
+        if let Some(grant_str) = grant {
+            let name = id.and_then(|i| cfg_map.get(&i).cloned())
+                .or_else(|| xml_attr(t, "Name"))
+                .unwrap_or_default();
+                
+            if !name.is_empty() {
+                result.insert(name, parse_iso8601(&grant_str).unwrap_or(0));
+            }
         }
-        result.insert(name, parse_iso8601(&grant).unwrap_or(0));
     }
     result
 }
@@ -269,7 +271,10 @@ fn looks_like_goldberg_save(path: &Path) -> bool {
 
 fn build_display_map(meta: &HashMap<String, AchievementMeta>) -> HashMap<String, String> {
     meta.values()
-        .map(|m| (m.display_name.to_lowercase(), m.name.clone()))
+        .map(|m| {
+            let extracted = extract_localized_string(&m.display_name);
+            (extracted.to_lowercase(), m.name.clone())
+        })
         .collect()
 }
 
@@ -434,11 +439,14 @@ pub fn read_codex_earned(path: &Path) -> HashMap<String, u64> {
     unlocked
 }
 
-fn read_candidate_earned(cand: &AchievementCandidate) -> HashMap<String, u64> {
+fn read_candidate_earned(cand: &AchievementCandidate, game_dir: &Path) -> HashMap<String, u64> {
     match cand.format {
         AchievementFormat::GoldbergJson => read_goldberg_earned(&cand.path),
         AchievementFormat::CodExIni => read_codex_earned(&cand.path),
-        AchievementFormat::AnadiusXml => read_earned_anadius(&cand.path),
+        AchievementFormat::AnadiusXml => {
+            let (_, _, map) = crate::achievements::parse_anadius_cfg(&game_dir.join("anadius.cfg"));
+            read_earned_anadius(&cand.path, &map)
+        },
     }
 }
 
@@ -483,8 +491,8 @@ fn payload_api(
     let icon_base = meta_path.parent().unwrap_or(Path::new(""));
     let (display_name, description, icon, icon_gray, global_percent) = match meta.get(api_name) {
         Some(m) => (
-            m.display_name.clone(),
-            m.description.clone(),
+            extract_localized_string(&m.display_name),
+            extract_localized_string(&m.description),
             resolve_icon(icon_base, &m.icon),
             resolve_icon(icon_base, &m.icon_gray),
             m.global_percent,
@@ -499,7 +507,7 @@ fn payload_api(
     };
     AchievementUnlockedPayload {
         api_name: api_name.to_string(),
-        display_name,
+        display_name: if display_name.is_empty() { api_name.to_string() } else { display_name },
         game_title: game_title.to_string(),
         description,
         icon,
@@ -529,13 +537,13 @@ fn payload_display(
     let icon_base = meta_path.parent().unwrap_or(Path::new(""));
     let found = meta.get(&api_name).or_else(|| {
         meta.values()
-            .find(|m| m.display_name.eq_ignore_ascii_case(display_name))
+            .find(|m| extract_localized_string(&m.display_name).eq_ignore_ascii_case(display_name))
     });
 
     let (resolved_display, description, icon, icon_gray, global_percent) = match found {
         Some(m) => (
-            m.display_name.clone(),
-            m.description.clone(),
+            extract_localized_string(&m.display_name),
+            extract_localized_string(&m.description),
             resolve_icon(icon_base, &m.icon),
             resolve_icon(icon_base, &m.icon_gray),
             m.global_percent,
@@ -545,7 +553,7 @@ fn payload_display(
 
     AchievementUnlockedPayload {
         api_name,
-        display_name: resolved_display,
+        display_name: if resolved_display.is_empty() { display_name.to_string() } else { resolved_display },
         game_title: game_title.to_string(),
         description,
         icon,
@@ -580,13 +588,28 @@ fn find_active_candidate(
     }
 
     if matches!(crack_type, Some(CrackType::Anadius)) {
-        if !app_id.is_empty() {
-            if let Some(dir) = anadius_save_dir(app_id) {
-                if let Some(xml) = find_anadius_xml(&dir, app_id) {
-                    return Some(AchievementCandidate {
-                        path: xml,
-                        format: AchievementFormat::AnadiusXml,
-                    });
+        let (_, ach_set, _) = crate::achievements::parse_anadius_cfg(&game_dir.join("anadius.cfg"));
+        let id = if app_id.is_empty() { "default_anadius" } else { app_id };
+
+        if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+            let base = PathBuf::from(local).join("anadius").join("LSX emu");
+            let search_dirs = [base.clone(), base.join(&id)];
+            for dir in search_dirs {
+                if let Ok(entries) = std::fs::read_dir(&dir) {
+                    for entry in entries.flatten() {
+                        let p = entry.path();
+                        let name = p.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
+                        
+                        if let Some(ref set_id) = ach_set {
+                            if name == format!("achievement-{}.xml", set_id.to_lowercase()) {
+                                return Some(AchievementCandidate { path: p, format: AchievementFormat::AnadiusXml });
+                            }
+                        }
+                        
+                        if name.starts_with("achievement-") && name.contains(&id.to_lowercase()) && name.ends_with(".xml") {
+                            return Some(AchievementCandidate { path: p, format: AchievementFormat::AnadiusXml });
+                        }
+                    }
                 }
             }
         }
@@ -801,7 +824,7 @@ pub fn start_watching_for_game(
                         file_mtime.map(|mt| mt < watcher_start).unwrap_or(true);
 
                     if file_predates_session {
-                        let baseline = read_candidate_earned(&c);
+                        let baseline = read_candidate_earned(&c, &game_path);
                         log::info!(
                             "[Prober] Pre-existing save (mtime < session start), snapshotting {} baseline achievements",
                             baseline.len()
@@ -841,7 +864,7 @@ pub fn start_watching_for_game(
 
                     if changed {
                         last_mtime = current_mtime;
-                        let now = read_candidate_earned(cand);
+                        let now = read_candidate_earned(cand, &game_path);
                         let new_unlocks: Vec<(String, u64)> = now
                             .iter()
                             .filter(|(k, _)| !seen.contains(*k))
@@ -921,7 +944,7 @@ pub fn watch_game_achievements(
     let crack_type: Option<CrackType> = game
         .crack_type
         .as_deref()
-        .and_then(|s| serde_json::from_str(&format!("\"{}\"", s)).ok());
+        .and_then(|s| serde_json::from_str::<CrackType>(&format!("\"{}\"", s)).ok());
 
     let watcher_key = if app_id.is_empty() {
         game_id.clone()
@@ -971,7 +994,7 @@ pub fn debug_fire_achievement(app: AppHandle, format_type: String) -> Result<(),
             .unwrap_or_default()
             .as_secs(),
         global_percent: Some(2.1),
-        xp: 0, // EXTREME SAFETY: Zero XP for tests from the backend
+        xp: 0, 
         is_debug: true,
         custom_sound_path: None,
     };
@@ -984,7 +1007,7 @@ pub fn debug_fire_custom(
     app: AppHandle,
     mut payload: AchievementUnlockedPayload,
 ) -> Result<(), String> {
-    payload.xp = 0; // EXTREME SAFETY: Zero XP for custom tests from the backend
+    payload.xp = 0; 
     payload.is_debug = true;
     fire_overlay(&app, &payload);
     Ok(())

@@ -24,8 +24,18 @@ pub struct AppSettings {
     pub steam_api_key: String,
     pub auto_fetch_achievements: bool,
     pub accent_color: String,
-    pub launcher_bgm_path: String,      // NEW
-    pub default_ach_sound_path: String, // NEW
+
+    // Playlist and Background Play Settings
+    pub launcher_bgm_paths: Vec<String>,
+    pub bgm_play_unfocused: bool,
+    pub bgm_play_in_tray: bool,
+    pub bgm_shuffle: bool,
+    pub default_launcher_path: String,
+    pub auto_close_launcher: bool, // NEW
+
+    // Legacy fields
+    pub launcher_bgm_path: String,
+    pub default_ach_sound_path: String,
 }
 
 impl Default for AppSettings {
@@ -48,6 +58,14 @@ impl Default for AppSettings {
             steam_api_key: String::new(),
             auto_fetch_achievements: true,
             accent_color: "#22d3ee".to_string(),
+
+            launcher_bgm_paths: Vec::new(),
+            bgm_play_unfocused: false,
+            bgm_play_in_tray: false,
+            bgm_shuffle: false,
+            default_launcher_path: String::new(),
+            auto_close_launcher: false,
+
             launcher_bgm_path: String::new(),
             default_ach_sound_path: String::new(),
         }
