@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
@@ -7,7 +7,8 @@ import { useUiStore } from "./store/uiStore";
 import { toast } from "sonner";
 import {
     Settings2, Paintbrush, HardDrive, Gamepad2,
-    FolderOpen, MonitorSmartphone, Bell, Zap, AlertOctagon, Volume2, Music, Trophy, X, Play, ArrowUp, ArrowDown, Shuffle, Plus, Rocket
+    FolderOpen, MonitorSmartphone, Bell, Zap, AlertOctagon, Volume2, Music, Trophy, X, Play, ArrowUp, ArrowDown, Shuffle, Plus, Rocket,
+    Key, Eye, EyeOff, CheckCircle2, XCircle
 } from "lucide-react";
 import { cn } from "./lib/utils";
 import { smartAudio } from "./services/SmartAudio";
@@ -23,16 +24,47 @@ const ACCENT_COLORS = [
     { name: "Stealth Gray", value: "#94a3b8" },
 ];
 
-type Tab = "general" | "appearance" | "audio" | "downloads" | "overlay";
+type Tab = "general" | "appearance" | "audio" | "downloads" | "overlay" | "integrations";
 
 export function Settings() {
     const { settings, updateSettings, isLoading } = useSettingsStore();
     const setResetModalOpen = useUiStore((s) => s.setResetModalOpen);
     const [activeTab, setActiveTab] = useState<Tab>("appearance");
+    const [apiKeyInput, setApiKeyInput] = useState(settings?.steam_api_key || "");
+    const [showApiKey, setShowApiKey] = useState(false);
+    const [isValidatingKey, setIsValidatingKey] = useState(false);
+    const [apiKeyStatus, setApiKeyStatus] = useState<'idle' | 'valid' | 'invalid'>('idle');
+
+    useEffect(() => {
+        if (settings?.steam_api_key !== undefined) {
+            setApiKeyInput(settings.steam_api_key);
+        }
+    }, [settings?.steam_api_key]);
 
     if (isLoading || !settings) {
         return <div className="h-full w-full flex items-center justify-center text-white/20">Loading Core Systems...</div>;
     }
+
+    const handleValidateApiKey = async () => {
+        if (!apiKeyInput.trim()) return;
+        setIsValidatingKey(true);
+        setApiKeyStatus('idle');
+        try {
+            const isValid = await invoke<boolean>("validate_steam_api_key", { apiKey: apiKeyInput.trim() });
+            setApiKeyStatus(isValid ? 'valid' : 'invalid');
+            if (isValid) {
+                await updateSettings({ steam_api_key: apiKeyInput.trim() });
+                toast.success("API Key saved and validated!");
+            } else {
+                toast.error("Invalid Steam API Key");
+            }
+        } catch (e: any) {
+            setApiKeyStatus('invalid');
+            toast.error("Validation failed", { description: e.toString() });
+        } finally {
+            setIsValidatingKey(false);
+        }
+    };
 
     const handlePickDownloadDir = async () => {
         try {
@@ -109,6 +141,7 @@ export function Settings() {
         { id: "audio", label: "Audio & Acoustics", icon: <Volume2 size={18} /> },
         { id: "downloads", label: "Storage & Paths", icon: <HardDrive size={18} /> },
         { id: "overlay", label: "Overlay & Tracking", icon: <Gamepad2 size={18} /> },
+        { id: "integrations", label: "Integrations", icon: <Key size={18} /> },
     ] as const;
 
     return (
@@ -414,6 +447,88 @@ export function Settings() {
                                             </button>
                                         </div>
                                     </div>
+
+                                    <div className="h-px w-full bg-white/5" />
+
+                                    <div className="space-y-8">
+                                        <h3 className="text-lg font-black text-white uppercase tracking-wider">Transfer Limits</h3>
+
+                                        <div className="space-y-2 max-w-md">
+                                            <div className="flex justify-between items-center">
+                                                <label className="text-xs font-bold text-white/60 tracking-widest uppercase">Max Download Speed</label>
+                                                <span className="text-accent font-bold text-xs">{settings.max_download_speed_kbps === 0 ? 'Unlimited' : `${settings.max_download_speed_kbps} KB/s`}</span>
+                                            </div>
+                                            <input
+                                                type="range" min="0" max="10000" step="100"
+                                                value={settings.max_download_speed_kbps}
+                                                onChange={e => updateSettings({ max_download_speed_kbps: parseInt(e.target.value) })}
+                                                className="w-full h-2 bg-black/50 rounded-lg appearance-none cursor-pointer accent-accent border border-white/5"
+                                            />
+                                            <p className="text-white/20 text-[10px]">Set to 0 for unlimited download speed.</p>
+                                        </div>
+
+                                        <div className="space-y-2 max-w-md">
+                                            <div className="flex justify-between items-center">
+                                                <label className="text-xs font-bold text-white/60 tracking-widest uppercase">Max Upload Speed</label>
+                                                <span className="text-accent font-bold text-xs">{settings.max_upload_speed_kbps === 0 ? 'Unlimited' : `${settings.max_upload_speed_kbps} KB/s`}</span>
+                                            </div>
+                                            <input
+                                                type="range" min="0" max="5000" step="50"
+                                                value={settings.max_upload_speed_kbps}
+                                                onChange={e => updateSettings({ max_upload_speed_kbps: parseInt(e.target.value) })}
+                                                className="w-full h-2 bg-black/50 rounded-lg appearance-none cursor-pointer accent-accent border border-white/5"
+                                            />
+                                            <p className="text-white/20 text-[10px]">Set to 0 for unlimited upload speed. Affects BitTorrent seeding only.</p>
+                                        </div>
+
+                                        <div className="space-y-2 max-w-xs">
+                                            <label className="text-xs font-bold text-white/60 tracking-widest uppercase block">Max Concurrent Downloads</label>
+                                            <input
+                                                type="number" min="1" max="10"
+                                                value={settings.max_concurrent_downloads}
+                                                onChange={e => updateSettings({ max_concurrent_downloads: Math.max(1, Math.min(10, parseInt(e.target.value) || 1)) })}
+                                                className="w-full bg-black/40 border border-white/10 focus:border-accent rounded-xl px-4 py-3 text-white text-sm outline-none transition-colors font-mono"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="h-px w-full bg-white/5" />
+
+                                    <div className="space-y-4">
+                                        <h3 className="text-lg font-black text-white uppercase tracking-wider">Torrent Options</h3>
+
+                                        <div className="bg-white/5 border border-white/10 p-5 rounded-2xl flex items-center justify-between">
+                                            <div>
+                                                <h4 className="text-white font-bold text-sm">Sequential Download</h4>
+                                                <p className="text-white/40 text-xs mt-1">Download torrent pieces in order from start to finish. Useful for streaming video files before fully downloaded.</p>
+                                            </div>
+                                            <label className="relative inline-flex items-center cursor-pointer">
+                                                <input
+                                                    type="checkbox"
+                                                    className="sr-only peer"
+                                                    checked={settings.sequential_download}
+                                                    onChange={(e) => updateSettings({ sequential_download: e.target.checked })}
+                                                />
+                                                <div className="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-accent border border-white/10"></div>
+                                            </label>
+                                        </div>
+
+                                        <div className="bg-white/5 border border-white/10 p-5 rounded-2xl flex items-center justify-between">
+                                            <div>
+                                                <h4 className="text-white font-bold text-sm">Close Launcher When Game Starts</h4>
+                                                <p className="text-white/40 text-xs mt-1">Automatically minimize ChiraLauncher to tray when a game launches.</p>
+                                            </div>
+                                            <label className="relative inline-flex items-center cursor-pointer">
+                                                <input
+                                                    type="checkbox"
+                                                    className="sr-only peer"
+                                                    checked={settings.auto_close_launcher}
+                                                    onChange={(e) => updateSettings({ auto_close_launcher: e.target.checked })}
+                                                />
+                                                <div className="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-accent border border-white/10"></div>
+                                            </label>
+                                        </div>
+                                    </div>
                                 </motion.div>
                             )}
 
@@ -452,6 +567,82 @@ export function Settings() {
                                                 <span className="font-bold text-white text-sm">Test Anadius</span>
                                             </button>
                                         </div>
+                                    </div>
+                                </motion.div>
+                            )}
+
+                            {activeTab === "integrations" && (
+                                <motion.div key="integrations" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} className="space-y-10">
+                                    {/* Steam Web API */}
+                                    <div className="space-y-4">
+                                        <div>
+                                            <h3 className="text-lg font-black text-white uppercase tracking-wider mb-1 flex items-center gap-2">
+                                                <Key size={18} className="text-accent" /> Steam Web API
+                                            </h3>
+                                            <p className="text-xs text-white/40 font-medium leading-relaxed">
+                                                Required to generate achievement data for your games. Get your key from{' '}
+                                                <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noreferrer" className="text-accent hover:underline">steamcommunity.com/dev/apikey</a>
+                                            </p>
+                                        </div>
+
+                                        {/* API Key input */}
+                                        <div className="space-y-2">
+                                            <label className="text-[10px] font-black text-white/40 tracking-widest uppercase">API Key</label>
+                                            <div className="flex gap-2">
+                                                <div className="relative flex-1">
+                                                    <input
+                                                        type={showApiKey ? "text" : "password"}
+                                                        value={apiKeyInput}
+                                                        onChange={e => setApiKeyInput(e.target.value)}
+                                                        onBlur={() => { if (apiKeyInput !== settings.steam_api_key) updateSettings({ steam_api_key: apiKeyInput }); }}
+                                                        className="w-full bg-black/40 border border-white/10 focus:border-accent rounded-xl px-4 py-3 text-sm text-white outline-none transition-colors font-mono pr-12"
+                                                        placeholder="XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+                                                    />
+                                                    <button
+                                                        onClick={() => setShowApiKey(!showApiKey)}
+                                                        className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60 transition-colors"
+                                                    >
+                                                        {showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                                                    </button>
+                                                </div>
+                                                <button
+                                                    onClick={handleValidateApiKey}
+                                                    disabled={isValidatingKey || !apiKeyInput.trim()}
+                                                    className="shrink-0 bg-accent/10 hover:bg-accent/20 disabled:opacity-50 text-accent border border-accent/20 px-5 py-3 rounded-xl font-bold text-xs uppercase tracking-widest transition-all flex items-center gap-2"
+                                                >
+                                                    {isValidatingKey ? <div className="w-4 h-4 border-2 border-accent border-t-transparent rounded-full animate-spin" /> : 'Validate'}
+                                                </button>
+                                            </div>
+                                            {apiKeyStatus === 'valid' && (
+                                                <div className="flex items-center gap-2 text-green-400 text-xs font-bold mt-1">
+                                                    <CheckCircle2 size={14} /> Key validated successfully
+                                                </div>
+                                            )}
+                                            {apiKeyStatus === 'invalid' && (
+                                                <div className="flex items-center gap-2 text-red-400 text-xs font-bold mt-1">
+                                                    <XCircle size={14} /> Invalid API key
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    <div className="h-px w-full bg-white/5" />
+
+                                    {/* Auto-fetch achievements toggle */}
+                                    <div className="bg-white/5 border border-white/10 p-5 rounded-2xl flex items-center justify-between">
+                                        <div>
+                                            <h4 className="text-white font-bold text-sm">Auto-Generate Achievements</h4>
+                                            <p className="text-white/40 text-xs mt-1">Automatically fetch and write achievements.json to steam_settings when adding a game with a valid App ID and API Key.</p>
+                                        </div>
+                                        <label className="relative inline-flex items-center cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                className="sr-only peer"
+                                                checked={settings.auto_fetch_achievements}
+                                                onChange={(e) => updateSettings({ auto_fetch_achievements: e.target.checked })}
+                                            />
+                                            <div className="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-accent border border-white/10"></div>
+                                        </label>
                                     </div>
                                 </motion.div>
                             )}

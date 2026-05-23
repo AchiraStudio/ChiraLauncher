@@ -70,7 +70,13 @@ export function useCloudSyncEngine() {
                         .from("user_game_stats")
                         .upsert(statsToUpload, { onConflict: 'user_id,game_title' });
 
-                    if (bulkErr) console.error("Cloud Sync: Failed bulk upload:", bulkErr);
+                    if (bulkErr) {
+                        if (bulkErr.code?.includes("PGRST301") || bulkErr.message?.includes("JWSError")) {
+                            // Suppress unauthorized errors silently
+                        } else {
+                            console.error("Cloud Sync: Failed bulk upload:", bulkErr);
+                        }
+                    }
                 }
 
                 hasSyncedPlaytimeDown.current = true;

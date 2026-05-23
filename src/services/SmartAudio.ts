@@ -1,4 +1,4 @@
-import { convertFileSrc, invoke } from '@tauri-apps/api/core';
+import { invoke } from '@tauri-apps/api/core';
 
 interface TrackState {
     buffer?: AudioBuffer; // Used only for SFX
@@ -179,12 +179,6 @@ class SmartAudioEngine {
             return path;
         }
 
-        try {
-            const assetUrl = convertFileSrc(path);
-            const check = await fetch(assetUrl, { method: 'HEAD' }).catch(() => null);
-            if (check && check.ok) return assetUrl;
-        } catch (e) {}
-
         if (this.playbackIntentToken !== intentToken) return "";
 
         try {
@@ -298,8 +292,10 @@ class SmartAudioEngine {
             } catch (err: any) {
                 if (err.name === 'NotAllowedError') {
                     console.warn("Autoplay blocked. Waiting for user interaction.");
+                } else if (err.name === 'AbortError') {
+                    // Ignored since play was interrupted by pause
                 } else {
-                    throw err;
+                    console.error("BGM Play error:", err);
                 }
             }
             
@@ -450,14 +446,19 @@ class SmartAudioEngine {
         let url = path;
         let requiresCleanup = false;
 
-        if (!path.startsWith('http') && !path.startsWith('data:')) {
+        if (path.startsWith('http') || path.startsWith('data:') || (!path.includes('\\') && !path.includes(':/'))) {
+            // It's a relative URL, a web URL, or data URI
+            url = path.startsWith('/') ? path.substring(1) : path;
+        } else {
+            // Absolute local path
             try {
                 const buffer = await invoke<ArrayBuffer>("read_local_file_bytes", { path });
                 const blob = new Blob([buffer], { type: this.getMimeType(path) });
                 url = URL.createObjectURL(blob);
                 requiresCleanup = true;
             } catch (e) {
-                url = convertFileSrc(path);
+                console.error("Failed to read local SFX via IPC", e);
+                throw e;
             }
         }
         
@@ -566,7 +567,7 @@ class SmartAudioEngine {
         if (!settings.enabled) return;
         
         try {
-            const url = `/${soundFile}`;
+            const url = soundFile.startsWith('/') ? soundFile.substring(1) : soundFile;
             let state = this.tracks.get(url);
             
             if (!state) {

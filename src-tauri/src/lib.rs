@@ -469,6 +469,7 @@ pub fn run() {
             commands::http_dl::resume_http_download,
             commands::http_dl::delete_http_download,
             commands::http_dl::retry_http_download,
+            commands::http_dl::resolve_premium_link,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

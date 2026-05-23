@@ -24,6 +24,13 @@ export interface AppSettings {
 
     volume_sfx: number;
     volume_bgm: number;
+
+    // Advanced Limits & Toggles
+    max_download_speed_kbps: number;
+    max_upload_speed_kbps: number;
+    max_concurrent_downloads: number;
+    sequential_download: boolean;
+    auto_fetch_achievements: boolean;
 }
 
 interface SettingsStore {

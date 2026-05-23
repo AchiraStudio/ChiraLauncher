@@ -136,19 +136,35 @@ impl TorrentEngine {
         let output_folder = save_path.unwrap_or_else(|| self.default_download_dir.clone());
         let output_folder_str = output_folder.to_string_lossy().to_string();
 
-        let response = self.session
+        let response = match self.session
             .add_torrent(
                 AddTorrent::from_url(&magnet_url),
                 Some(AddTorrentOptions {
-                    output_folder: Some(output_folder_str),
-                    only_files: selected_files,
+                    output_folder: Some(output_folder_str.clone()),
+                    only_files: selected_files.clone(),
                     ..Default::default()
                 }),
             )
-            .await
-            .context("Failed to add torrent")?;
+            .await {
+            Ok(r) => r,
+            Err(e) => {
+                log::warn!("Failed to add torrent with options: {}. Retrying without options...", e);
+                self.session
+                    .add_torrent(
+                        AddTorrent::from_url(&magnet_url),
+                        None,
+                    )
+                    .await
+                    .context("Failed to add torrent on retry")?
+            }
+        };
 
-        let handle = response.into_handle().context("No handle generated")?;
+        let handle = match response {
+            librqbit::AddTorrentResponse::Added(_, handle) => handle,
+            librqbit::AddTorrentResponse::AlreadyManaged(_, handle) => handle,
+            _ => anyhow::bail!("No handle generated from AddTorrentResponse"),
+        };
+
         self.session.unpause(&handle).await.context("failed to unpause torrent")?;
 
         Ok(handle.id())
@@ -167,7 +183,10 @@ impl TorrentEngine {
     }
 
     pub async fn cancel(&self, id: usize) -> Result<()> {
-        self.session.delete(TorrentIdOrHash::Id(id), false).await.context("failed to delete")?;
+        if let Some(handle) = self.session.get(TorrentIdOrHash::Id(id)) {
+            let _ = self.session.pause(&handle).await;
+        }
+        let _ = self.session.delete(TorrentIdOrHash::Id(id), true).await;
         Ok(())
     }
 

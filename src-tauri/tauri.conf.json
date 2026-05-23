@@ -14,7 +14,10 @@
       {
         "title": "ChiraLauncher",
         "maximized": true,
-        "devtools": true
+        "devtools": true,
+        "decorations": false,
+        "shadow": true,
+        "resizable": true
       }
     ],
     "security": {

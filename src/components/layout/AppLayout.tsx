@@ -13,10 +13,11 @@ import { AuthModal } from "../modals/AuthModal";
 import { ResetAppModal } from "../modals/ResetAppModal";
 import { DownloadManager } from "../ui/DownloadManager";
 import { Sidebar } from "./Sidebar";
+import { TitleBar } from "./TitleBar";
 import { useLocalImage } from "../../hooks/useLocalImage";
 import { useProfileStore } from "../../store/profileStore";
 import { useEffect } from "react";
-import { smartAudio } from "../../services/SmartAudio"; // NEW
+import { smartAudio } from "../../services/SmartAudio";
 
 function Modals() {
     return (
@@ -43,7 +44,7 @@ function GlobalBackground() {
     const focalStr = currentBgPath?.includes("?pos=") ? currentBgPath.split("?pos=")[1].replace("-", " ") : "center";
 
     return (
-        <div className="fixed inset-0 z-[-1] overflow-hidden pointer-events-none">
+        <div className="absolute inset-0 z-[-1] overflow-hidden pointer-events-none">
             <div className="absolute inset-0 bg-background" />
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,_var(--tw-gradient-from),_transparent_80%)] from-accent/10 to-transparent opacity-40" />
 
@@ -84,9 +85,8 @@ export function AppLayout() {
         initAuthListener();
     }, [initAuthListener]);
 
-    // ── NEW: Background Music Router ──
+    // ── Background Music Router ──
     useEffect(() => {
-        // If we are not actively in the library browsing a specific game, fallback to Global Launcher BGM
         if (!location.pathname.startsWith('/library')) {
             smartAudio.playGlobalBGM();
         }
@@ -97,13 +97,20 @@ export function AppLayout() {
     } as React.CSSProperties;
 
     return (
-        <div style={customStyle} className="h-screen w-screen bg-background text-text-primary overflow-hidden selection:bg-accent/30 selection:text-white flex flex-row relative">
+        <div style={customStyle} className="h-screen w-screen bg-background text-text-primary overflow-hidden selection:bg-accent/30 selection:text-white flex flex-col relative">
             <GlobalBackground />
-            <Toaster theme="dark" position="bottom-right" />
-            <Sidebar />
-            <Modals />
-            <div className="flex-1 relative z-0 bg-transparent h-screen overflow-hidden">
-                <Outlet />
+            
+            {/* Custom title bar — draggable strip at the top */}
+            <TitleBar />
+
+            {/* Main content area below the title bar */}
+            <div className="flex flex-row flex-1 min-h-0 relative overflow-hidden z-10">
+                <Toaster theme="dark" position="bottom-right" />
+                <Sidebar />
+                <Modals />
+                <div className="flex-1 relative z-0 bg-transparent h-full overflow-hidden">
+                    <Outlet />
+                </div>
             </div>
         </div>
     );

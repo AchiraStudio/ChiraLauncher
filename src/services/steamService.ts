@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { supabase } from "../lib/supabase";
 
+let unlistedTableExists = true;
+
 export interface SteamAppDetails {
     name: string;
     detailed_description: string;
@@ -40,18 +42,22 @@ export async function fetchSteamMetadata(appId: string): Promise<SteamAppDetails
     // Phase 4: Unlisted Game ID Mapper
     // Automatically checks Supabase to see if an Anadius/custom ID maps to a real Steam ID
     let targetAppId = appId;
-    try {
-        const { data: mapping } = await supabase
-            .from("unlisted_games_map")
-            .select("steam_app_id")
-            .eq("unlisted_id", appId)
-            .maybeSingle();
+    if (unlistedTableExists) {
+        try {
+            const { data: mapping, error } = await supabase
+                .from("unlisted_games_map")
+                .select("steam_app_id")
+                .eq("unlisted_id", appId)
+                .maybeSingle();
 
-        if (mapping?.steam_app_id) {
-            targetAppId = mapping.steam_app_id.toString();
+            if (error && (error.code === '404' || error.message?.includes("404") || error.code === '42P01')) {
+                unlistedTableExists = false;
+            } else if (mapping?.steam_app_id) {
+                targetAppId = mapping.steam_app_id.toString();
+            }
+        } catch (e) {
+            unlistedTableExists = false;
         }
-    } catch (e) {
-        console.warn("Could not check Supabase ID mapping:", e);
     }
 
     const res = await invoke<any>("fetch_steam_app_details", { appId: targetAppId });
@@ -63,18 +69,22 @@ export async function fetchSteamMetadata(appId: string): Promise<SteamAppDetails
 
 export async function fetchSteamReviews(appId: string): Promise<SteamReviewsResponse | null> {
     let targetAppId = appId;
-    try {
-        const { data: mapping } = await supabase
-            .from("unlisted_games_map")
-            .select("steam_app_id")
-            .eq("unlisted_id", appId)
-            .maybeSingle();
+    if (unlistedTableExists) {
+        try {
+            const { data: mapping, error } = await supabase
+                .from("unlisted_games_map")
+                .select("steam_app_id")
+                .eq("unlisted_id", appId)
+                .maybeSingle();
 
-        if (mapping?.steam_app_id) {
-            targetAppId = mapping.steam_app_id.toString();
+            if (error && (error.code === '404' || error.message?.includes("404") || error.code === '42P01')) {
+                unlistedTableExists = false;
+            } else if (mapping?.steam_app_id) {
+                targetAppId = mapping.steam_app_id.toString();
+            }
+        } catch (e) {
+            unlistedTableExists = false;
         }
-    } catch (e) {
-        console.warn("Could not check Supabase ID mapping:", e);
     }
 
     try {
@@ -102,18 +112,22 @@ export function parseSteamDate(steamDateStr: string | undefined): string {
 
 export async function fetchSteamAchievementPercentages(appId: string): Promise<Record<string, number>> {
     let targetAppId = appId;
-    try {
-        const { data: mapping } = await supabase
-            .from("unlisted_games_map")
-            .select("steam_app_id")
-            .eq("unlisted_id", appId)
-            .maybeSingle();
+    if (unlistedTableExists) {
+        try {
+            const { data: mapping, error } = await supabase
+                .from("unlisted_games_map")
+                .select("steam_app_id")
+                .eq("unlisted_id", appId)
+                .maybeSingle();
 
-        if (mapping?.steam_app_id) {
-            targetAppId = mapping.steam_app_id.toString();
+            if (error && (error.code === '404' || error.message?.includes("404") || error.code === '42P01')) {
+                unlistedTableExists = false;
+            } else if (mapping?.steam_app_id) {
+                targetAppId = mapping.steam_app_id.toString();
+            }
+        } catch (e) {
+            unlistedTableExists = false;
         }
-    } catch (e) {
-        console.warn("Could not check Supabase ID mapping:", e);
     }
 
     try {

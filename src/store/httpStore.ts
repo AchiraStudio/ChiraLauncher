@@ -16,7 +16,7 @@ export interface HttpDownloadStatus {
 interface HttpDownloadsState {
     downloads: HttpDownloadStatus[];
     fetchDownloads: () => Promise<void>;
-    addDownloads: (links: string[], savePath: string, folderName?: string) => Promise<void>;
+    addDownloads: (urls: string[], savePaths: string[], folderName?: string) => Promise<void>;
     pauseDownload: (id: string) => Promise<void>;
     resumeDownload: (id: string) => Promise<void>;
     cancelDownload: (id: string) => Promise<void>;
@@ -39,8 +39,8 @@ export const useHttpStore = create<HttpDownloadsState>((set, get) => ({
         }
     },
 
-    addDownloads: async (links, savePath, folderName) => {
-        await invoke("add_http_downloads", { links, savePath, folderName: folderName || null });
+    addDownloads: async (urls, savePaths, folderName) => {
+        await invoke("add_http_downloads", { urls, savePaths, folderName: folderName || null });
         get().fetchDownloads();
     },
 

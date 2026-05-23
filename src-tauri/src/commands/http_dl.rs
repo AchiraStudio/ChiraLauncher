@@ -15,6 +15,7 @@ pub struct DownloadItem {
     pub url: String,
     pub save_path: String,
     pub filename: String,
+    pub folder_name: Option<String>,
     pub status: String, // "pending", "downloading", "paused", "completed", "failed", "cancelled"
     pub downloaded_bytes: u64,
     pub total_bytes: u64,
@@ -197,6 +198,7 @@ impl HttpDownloadEngine {
 pub async fn add_http_downloads(
     urls: Vec<String>,
     save_paths: Vec<String>,
+    folder_name: Option<String>,
     engine: State<'_, Arc<HttpDownloadEngine>>,
 ) -> Result<Vec<String>, String> {
     let mut ids = Vec::new();
@@ -213,6 +215,7 @@ pub async fn add_http_downloads(
             url,
             save_path,
             filename,
+            folder_name: folder_name.clone(),
             status: "pending".to_string(),
             downloaded_bytes: 0,
             total_bytes: 0,
@@ -343,4 +346,57 @@ pub async fn retry_http_download(
     });
 
     Ok(())
+}
+
+#[tauri::command]
+pub async fn resolve_premium_link(url: String) -> Result<(String, String), String> {
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let res = client.get(&url).send().await.map_err(|e| e.to_string())?;
+    let html = res.text().await.map_err(|e| e.to_string())?;
+
+    let mut title = String::new();
+    if let Some(start) = html.find("<meta name=\"title\" content=\"") {
+        let content_start = start + 28;
+        if let Some(end) = html[content_start..].find('"') {
+            title = html[content_start..content_start + end].to_string();
+        }
+    } else if let Some(start) = html.find("<meta name='title' content='") {
+        let content_start = start + 28;
+        if let Some(end) = html[content_start..].find('\'') {
+            title = html[content_start..content_start + end].to_string();
+        }
+    }
+    
+    title = title.replace(&['\\', '/', '*', '?', ':', '"', '<', '>', '|'][..], "");
+    if title.is_empty() {
+        if let Some(last_seg) = url.split('/').last() {
+            title = last_seg.to_string();
+        }
+    }
+
+    let mut download_url = String::new();
+    if let Some(func_start) = html.find("function download") {
+        let chunk = &html[func_start..];
+        if let Some(open_start) = chunk.find("window.open(\"") {
+            let url_start = open_start + 13;
+            if let Some(end) = chunk[url_start..].find('"') {
+                download_url = chunk[url_start..url_start + end].to_string();
+            }
+        } else if let Some(open_start) = chunk.find("window.open('") {
+            let url_start = open_start + 13;
+            if let Some(end) = chunk[url_start..].find('\'') {
+                download_url = chunk[url_start..url_start + end].to_string();
+            }
+        }
+    }
+
+    if download_url.is_empty() {
+        return Err("Download URL not found in premium link".to_string());
+    }
+
+    Ok((title, download_url))
 }
