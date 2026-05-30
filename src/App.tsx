@@ -10,7 +10,7 @@ import { useGameStore } from "./store/gameStore";
 import { useSettingsStore } from "./store/settingsStore";
 import { useFolderStore } from "./store/folderStore";
 import { useDownloadsStore } from "./store/downloadsStore";
-import { useProfileStore, initProfileListeners } from "./store/profileStore";
+import { useProfileStore } from "./store/profileStore";
 import { initOsIntegrationListeners } from "./store/osIntegrationStore";
 import { AppLayout } from "./components/layout/AppLayout";
 import { Discover } from "./Discover";
@@ -25,10 +25,7 @@ import { LaunchSplash } from "./LaunchSplash";
 import TrayMenu from "./pages/TrayMenu";
 import { TorrentFileModal } from "./components/modals/TorrentFileModal";
 import { FirstLaunchModal } from "./components/modals/FirstLaunchModal";
-import { ExtensionManager } from "./components/extensions/ExtensionManager";
 import { useUiStore } from "./store/uiStore";
-import { ThemeEngine } from "./services/ThemeEngine";
-import { useExtensionStore, initExtensionListeners } from "./store/extensionStore";
 import { launchGame } from "./services/gameService";
 import { useCloudSyncEngine } from "./lib/syncEngine";
 
@@ -159,9 +156,6 @@ function MainApp() {
         if (url.startsWith("magnet:")) {
           setTorrentModalOpen(true, url);
           toast.success("Magnet link intercepted!", { description: url.slice(0, 50) + "..." });
-        } else if (url.includes("chiralauncher://launch/")) {
-          const id = url.split("chiralauncher://launch/")[1].replace(/\/$/, "");
-          triggerBackgroundLaunch(id);
         }
       }
     });
@@ -172,20 +166,15 @@ function MainApp() {
         if (arg.startsWith("magnet:")) {
           setTorrentModalOpen(true, arg);
           toast.success("Magnet link intercepted!", { description: arg.slice(0, 50) + "..." });
-        } else if (arg.includes("chiralauncher://launch/")) {
-          const id = arg.split("chiralauncher://launch/")[1].replace(/\/$/, "");
-          triggerBackgroundLaunch(id);
         }
       }
     });
 
-    const unlistenLaunchGame = listen<string>("launch-game-requested", (event) => {
-      triggerBackgroundLaunch(event.payload);
-      toast.info("System Initializing...", { description: `Requested via shortcut` });
-    });
-
     const ticker = setInterval(() => {
-      tickElapsed();
+      const { runningGames } = useProcessStore.getState();
+      if (Object.keys(runningGames).length > 0) {
+        tickElapsed();
+      }
     }, 1000);
 
     return () => {
@@ -193,7 +182,6 @@ function MainApp() {
       unlistenStopped.then((f) => f());
       unlistenDeepLink.then((f) => f());
       unlistenSingleInstance.then((f) => f());
-      unlistenLaunchGame.then((f) => f());
       clearInterval(ticker);
     };
   }, [setGameStarted, setGameStopped, tickElapsed, updateGamePlaytime]);
@@ -214,23 +202,13 @@ function MainApp() {
     useProfileStore.getState().initAuthListener();
 
     // Initialize global event listeners here, ensuring they only run in MainApp
-    initProfileListeners();
     initOsIntegrationListeners();
-    initExtensionListeners();
 
     invoke("is_first_launch")
       .then((isFirst) => {
         if (isFirst) setFirstLaunch(true);
       })
       .catch(console.error);
-
-    const extStore = useExtensionStore.getState();
-    extStore.fetchExtensions().then(() => {
-      const activeTheme = extStore.extensions.find(e => e.kind === 'theme' && e.enabled);
-      if (activeTheme) {
-        ThemeEngine.getInstance().applyTheme(activeTheme);
-      }
-    });
   }, []);
 
   useEffect(() => {
@@ -270,7 +248,6 @@ function MainApp() {
             <Route path="/settings" element={<Settings />} />
             <Route path="/user" element={<UserPage />} />
             <Route path="/messages/:targetId" element={<Messages />} />
-            <Route path="/extensions" element={<ExtensionManager />} />
           </Route>
         </Routes>
       </BrowserRouter>

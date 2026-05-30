@@ -3,7 +3,6 @@ pub mod achievements;
 pub mod commands;
 pub mod crypto;
 pub mod db;
-pub mod extensions;
 pub mod metadata;
 pub mod os_integration;
 pub mod patcher;
@@ -59,9 +58,19 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-            let is_background_launch = args
-                .iter()
-                .any(|a| a.contains("chiralauncher://launch/") || a == "--hidden");
+            let mut game_to_launch = None;
+            for arg in &args {
+                if arg.starts_with("chiralauncher://launch/") {
+                    if let Some(id) = arg.strip_prefix("chiralauncher://launch/") {
+                        game_to_launch = Some(id.trim_end_matches('/').to_string());
+                    }
+                }
+            }
+            if let Some(id) = args.iter().skip_while(|a| *a != "--launch-game").nth(1) {
+                game_to_launch = Some(id.to_string());
+            }
+
+            let is_background_launch = args.iter().any(|a| a == "--hidden") || game_to_launch.is_some();
 
             if !is_background_launch {
                 if let Some(window) = app.get_webview_window("main") {
@@ -71,8 +80,13 @@ pub fn run() {
                 }
             }
 
-            if let Some(id) = args.iter().skip_while(|a| *a != "--launch-game").nth(1) {
-                let _ = app.emit("launch-game-requested", id);
+            if let Some(game_id) = game_to_launch {
+                let app_handle = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Some(state) = app_handle.try_state::<crate::state::AppState>() {
+                        let _ = crate::commands::launcher::launch_game_internal(game_id, &state, &app_handle).await;
+                    }
+                });
             }
             let _ = app.emit("single-instance", &args);
         }))
@@ -111,11 +125,24 @@ pub fn run() {
             let app_settings = crate::settings::get_settings(&read_pool).unwrap_or_default();
 
             let args: Vec<String> = std::env::args().collect();
-            let is_hidden_startup = args.iter().any(|a| a == "--hidden");
+            
+            let mut game_to_launch = None;
+            for arg in &args {
+                if arg.starts_with("chiralauncher://launch/") {
+                    if let Some(id) = arg.strip_prefix("chiralauncher://launch/") {
+                        game_to_launch = Some(id.trim_end_matches('/').to_string());
+                    }
+                }
+            }
+            if let Some(id) = args.iter().skip_while(|a| *a != "--launch-game").nth(1) {
+                game_to_launch = Some(id.to_string());
+            }
+
+            let is_hidden_startup = args.iter().any(|a| a == "--hidden") || game_to_launch.is_some();
             if is_hidden_startup {
                 if let Some(window) = app.get_webview_window("main") {
                     window.hide().unwrap_or_default();
-                    log::info!("Started minimized to tray due to --hidden flag");
+                    log::info!("Started minimized to tray due to --hidden flag or shortcut launch");
                 }
             }
 
@@ -137,6 +164,16 @@ pub fn run() {
             app.manage(app_state);
             app.manage(achievement_watcher::ActiveWatchers::default());
             app.manage(http_engine.clone());
+
+            if let Some(game_id) = game_to_launch {
+                let app_handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Some(state) = app_handle.try_state::<crate::state::AppState>() {
+                        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+                        let _ = crate::commands::launcher::launch_game_internal(game_id, &state, &app_handle).await;
+                    }
+                });
+            }
 
             {
                 use crate::achievement_watcher::{start_watching_for_game, ActiveWatchers};
@@ -378,7 +415,6 @@ pub fn run() {
             }
 
             tray::create_tray(app.handle())?;
-            extensions::start_watcher(app.handle().clone())?;
 
             Ok(())
         })
@@ -409,7 +445,7 @@ pub fn run() {
             commands::metadata::download_url_to_cache,
             commands::metadata::read_image_base64,
             commands::metadata::read_audio_base64,
-            commands::metadata::read_local_file_bytes, // <--- NEW RAW BYTE READER REGISTERED HERE
+            commands::metadata::read_local_file_bytes,
             commands::metadata::fetch_steam_app_details,
             commands::metadata::fetch_steam_reviews,
             commands::metadata::fetch_global_achievement_percentages,
@@ -456,10 +492,6 @@ pub fn run() {
             achievement_watcher::debug_fire_custom,
             commands::game::set_manual_achievement_path,
             commands::game::set_manual_save_path,
-            extensions::get_extensions,
-            extensions::install_extension,
-            extensions::toggle_extension,
-            extensions::read_extension_file,
             commands::game::toggle_favorite,
             commands::reset::reset_application,
             commands::http_dl::add_http_downloads,

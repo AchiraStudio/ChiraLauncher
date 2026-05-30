@@ -1,5 +1,5 @@
 use crate::db::queries;
-use crate::state::{DbWrite, ExtensionDbWrite, GameDbWrite, OsDbWrite, ProfileDbWrite, SettingsDbWrite};
+use crate::state::{DbWrite, GameDbWrite, OsDbWrite, ProfileDbWrite, SettingsDbWrite};
 use rusqlite::Connection;
 use std::path::PathBuf;
 use tokio::sync::mpsc;
@@ -112,14 +112,6 @@ pub async fn run_db_writer(db_path: PathBuf, mut rx: mpsc::UnboundedReceiver<DbW
                  has_start_menu_shortcut = excluded.has_start_menu_shortcut, 
                  has_registry_entry = excluded.has_registry_entry",
                 rusqlite::params![integration.game_id, integration.has_desktop_shortcut as i32, integration.has_start_menu_shortcut as i32, integration.has_registry_entry as i32],
-            ),
-            DbWrite::Extensions(ExtensionDbWrite::UpdateExtension(ext)) => conn.execute(
-                "INSERT INTO extensions (id, name, version, kind, checksum, enabled, consent_given, permissions) 
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) 
-                 ON CONFLICT(id) DO UPDATE SET 
-                 name = excluded.name, version = excluded.version, checksum = excluded.checksum, 
-                 enabled = excluded.enabled, consent_given = excluded.consent_given, permissions = excluded.permissions",
-                rusqlite::params![ext.id, ext.name, ext.version, ext.kind, ext.checksum, ext.enabled as i32, ext.consent_given as i32, serde_json::to_string(&ext.permissions).unwrap_or_default()],
             ),
         };
 

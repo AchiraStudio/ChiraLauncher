@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { toast } from "sonner";
 
 export type DownloadStateEnum = "Initializing" | "Downloading" | "Paused" | "Finished" | "Error";
 
@@ -45,6 +46,7 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
             set({ downloads: data, error: null });
         } catch (err: any) {
             console.error("Failed to fetch downloads:", err);
+            toast.error("Failed to fetch downloads", { description: String(err) });
             set({ error: err.toString() });
         }
     },
@@ -54,8 +56,9 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
         try {
             await invoke("pause_download", { id });
             get().fetchDownloads();
-        } catch (err) {
+        } catch (err: any) {
             console.error("Pause failed", err);
+            toast.error("Failed to pause download", { description: String(err) });
         }
     },
 
@@ -64,8 +67,9 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
         try {
             await invoke("resume_download", { id });
             get().fetchDownloads();
-        } catch (err) {
+        } catch (err: any) {
             console.error("Resume failed", err);
+            toast.error("Failed to resume download", { description: String(err) });
         }
     },
 
@@ -74,8 +78,9 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
         try {
             await invoke("cancel_download", { id });
             get().fetchDownloads();
-        } catch (err) {
+        } catch (err: any) {
             console.error("Cancel failed", err);
+            toast.error("Failed to cancel download", { description: String(err) });
         }
     },
 

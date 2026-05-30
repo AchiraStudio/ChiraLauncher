@@ -43,7 +43,9 @@ impl Default for AppSettings {
         Self {
             theme: "dark".to_string(),
             language: "en".to_string(),
-            download_path: "C:\\Downloads\\ChiraLauncher".to_string(),
+            download_path: std::env::var_os("USERPROFILE")
+                .map(|h| std::path::PathBuf::from(h).join("Downloads").join("ChiraLauncher").to_string_lossy().into_owned())
+                .unwrap_or_else(|| "Downloads\\ChiraLauncher".to_string()),
             auto_launch_on_boot: false,
             minimize_to_tray: true,
             enable_notifications: true,
@@ -73,19 +75,19 @@ impl Default for AppSettings {
 }
 
 pub fn default_scan_roots() -> Vec<std::path::PathBuf> {
-    let drive = std::env::var("SYSTEMDRIVE").unwrap_or_else(|_| "C:".into());
-    let drive_root = if drive.ends_with('\\') {
-        drive.clone()
-    } else {
-        format!("{}\\", drive)
-    };
+    let mut roots = Vec::new();
 
-    let appdata = std::env::var("APPDATA")
-        .unwrap_or_else(|_| format!(r"{}Users\Default\AppData\Roaming", drive_root));
+    // Goldberg GSE saves – always under %APPDATA%
+    if let Some(appdata) = std::env::var_os("APPDATA") {
+        roots.push(std::path::PathBuf::from(appdata).join("GSE Saves"));
+    }
 
-    vec![
-        std::path::PathBuf::from(format!(r"{}\GSE Saves", appdata)),
-        std::path::PathBuf::from(format!(r"{}Users\Public\Documents\Steam", drive_root)),
-        std::path::PathBuf::from(format!(r"{}Users\Public\Documents", drive_root)),
-    ]
+    // Public Steam / Documents folders – look up via %PUBLIC% which Windows always sets
+    if let Some(public) = std::env::var_os("PUBLIC") {
+        let public = std::path::PathBuf::from(public);
+        roots.push(public.join("Documents").join("Steam"));
+        roots.push(public.join("Documents"));
+    }
+
+    roots
 }

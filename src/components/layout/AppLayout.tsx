@@ -11,7 +11,7 @@ import { LibrarySettingsModal } from "../modals/LibrarySettingsModal";
 import { AppIdManagerModal } from "../modals/AppIdManagerModal";
 import { AuthModal } from "../modals/AuthModal";
 import { ResetAppModal } from "../modals/ResetAppModal";
-import { DownloadManager } from "../ui/DownloadManager";
+
 import { Sidebar } from "./Sidebar";
 import { TitleBar } from "./TitleBar";
 import { useLocalImage } from "../../hooks/useLocalImage";
@@ -30,7 +30,7 @@ function Modals() {
             <AppIdManagerModal />
             <AuthModal />
             <ResetAppModal />
-            <DownloadManager />
+
         </>
     );
 }

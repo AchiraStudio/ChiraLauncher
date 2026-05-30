@@ -785,6 +785,10 @@ pub fn start_watching_for_game(
         let mut meta_path = PathBuf::new();
         let mut display_map: HashMap<String, String> = HashMap::new();
 
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+        let mut _fs_watcher: Option<notify::RecommendedWatcher> = None;
+        let mut _watched_dir: Option<PathBuf> = None;
+
         while !sf.load(Ordering::Relaxed) {
             if meta.is_empty() {
                 let (m, p) = load_meta(
@@ -847,6 +851,19 @@ pub fn start_watching_for_game(
                             format: format!("{:?}", c.format),
                         },
                     );
+
+                    if let Some(parent) = c.path.parent() {
+                        use notify::Watcher;
+                        let tx_clone = tx.clone();
+                        let mut w = notify::recommended_watcher(move |res| {
+                            if let Ok(_) = res {
+                                let _ = tx_clone.send(());
+                            }
+                        }).unwrap();
+                        let _ = w.watch(parent, notify::RecursiveMode::NonRecursive);
+                        _fs_watcher = Some(w);
+                        _watched_dir = Some(parent.to_path_buf());
+                    }
                 }
             }
 
@@ -920,7 +937,15 @@ pub fn start_watching_for_game(
                 }
             }
 
-            tokio::time::sleep(Duration::from_secs(2)).await;
+            if active_cand.is_some() {
+                // Wait up to 10s or until notify triggers
+                let _ = tokio::time::timeout(Duration::from_secs(10), rx.recv()).await;
+                // debounce
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                while let Ok(_) = rx.try_recv() {}
+            } else {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
         }
 
         log::info!("[Prober] Task stopped for game {}", game_id);
@@ -967,14 +992,14 @@ pub fn watch_game_achievements(
     .ok_or_else(|| "Could not start achievement prober task".to_string())?;
 
     let active: tauri::State<ActiveWatchers> = app.state();
-    active.0.lock().unwrap().insert(watcher_key, watcher);
+    active.0.lock().unwrap_or_else(|p| p.into_inner()).insert(watcher_key, watcher);
     Ok(())
 }
 
 #[tauri::command]
 pub fn stop_game_achievement_watch(app: AppHandle, app_id: String) -> Result<(), String> {
     let state: tauri::State<ActiveWatchers> = app.state();
-    if let Some(flag) = state.0.lock().unwrap().remove(&app_id) {
+    if let Some(flag) = state.0.lock().unwrap_or_else(|p| p.into_inner()).remove(&app_id) {
         flag.store(true, Ordering::Relaxed);
     }
     Ok(())

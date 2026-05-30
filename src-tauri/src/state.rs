@@ -151,23 +151,6 @@ pub enum OsDbWrite {
     UpdateIntegration(OsIntegration),
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
-pub struct ExtensionInfo {
-    pub id: String,
-    pub name: String,
-    pub version: String,
-    pub kind: String,
-    pub checksum: String,
-    pub enabled: bool,
-    pub consent_given: bool,
-    pub permissions: Vec<crate::extensions::PluginPermission>,
-}
-
-#[derive(Debug)]
-pub enum ExtensionDbWrite {
-    UpdateExtension(ExtensionInfo),
-}
-
 #[derive(Debug)]
 #[allow(dead_code)]
 pub enum DbWrite {
@@ -175,7 +158,6 @@ pub enum DbWrite {
     Settings(SettingsDbWrite),
     Profile(ProfileDbWrite),
     Os(OsDbWrite),
-    Extensions(ExtensionDbWrite),
 }
 
 pub type DbWriteSender = tokio::sync::mpsc::UnboundedSender<DbWrite>;

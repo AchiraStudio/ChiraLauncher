@@ -3,9 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, Manager};
-use tokio::process::Command;
-use tokio::sync::Semaphore;
+use tauri::{AppHandle, Emitter};
 use walkdir::WalkDir;
 
 // ── Ignore lists ──────────────────────────────────────────────────────────────
@@ -81,24 +79,7 @@ pub struct EmulatorInfo {
     pub install_dir: String,
 }
 
-#[derive(serde::Deserialize)]
-#[allow(dead_code)]
-struct PythonScannerResult {
-    #[serde(default)]
-    best_exe: Option<String>,
-    #[serde(default)]
-    emulator: String,
-    #[serde(default)]
-    app_id: Option<String>,
-    #[serde(default)]
-    save_folder: Option<String>,
-    #[serde(default)]
-    achievements_ini: Option<String>,
-    #[serde(default)]
-    achievements_json: Option<String>,
-    #[serde(default)]
-    achievements_xml: Option<String>,
-}
+
 
 // ── Crack detection ───────────────────────────────────────────────────────────
 
@@ -405,21 +386,17 @@ pub async fn scan_directory(
         return Ok(Vec::new());
     }
 
-    // Step 2: Spawn python processes using Tokio Semaphore
-    let scanner_script = app.path()
-        .resolve("scanner/scanner.py", tauri::path::BaseDirectory::Resource)
-        .map_err(|e| e.to_string())?;
-
-    let semaphore = Arc::new(Semaphore::new(10)); // max 10 concurrent python processes
     let scanned_count = Arc::new(AtomicUsize::new(0));
     let total_dirs = dirs.len();
     let mut tasks = Vec::new();
 
+    // Use a bounded semaphore to avoid too many concurrent disk walks
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(10));
+
     for dir in dirs {
-        let sem = semaphore.clone();
-        let script = scanner_script.clone();
         let app_handle = app.clone();
         let counter = scanned_count.clone();
+        let sem = semaphore.clone();
 
         let task = tokio::spawn(async move {
             let _permit = sem.acquire().await.unwrap();
@@ -432,75 +409,49 @@ pub async fn scan_directory(
                 percentage: pct,
             });
 
-            log::info!("Running python scanner on {:?}", dir);
-            let mut cmd = Command::new("python");
-            #[cfg(windows)] // Hide command prompt window on Windows
-            {
-                const CREATE_NO_WINDOW: u32 = 0x08000000;
-                cmd.creation_flags(CREATE_NO_WINDOW);
-            }
+            log::info!("Running native scanner on {:?}", dir);
             
-            let output = cmd
-                .arg(&script)
-                .arg(&dir)
-                .output()
-                .await;
-
-            let mut parsed: Option<PythonScannerResult> = None;
-            if let Ok(out) = output {
-                if out.status.success() {
-                    let stdout = String::from_utf8_lossy(&out.stdout);
-                    parsed = serde_json::from_str(&stdout).ok();
+            tokio::task::spawn_blocking(move || {
+                let best_exe = find_best_exe(&dir);
+                let (crack_type, app_id) = detect_crack(&dir);
+                
+                let exe_path = best_exe.map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+            
+                let mut guessed_title = if !exe_path.is_empty() {
+                    let filename = Path::new(&exe_path).file_name().unwrap_or_default().to_string_lossy().to_string();
+                    crate::commands::cleaner::clean_title(&filename)
                 } else {
-                    let stderr = String::from_utf8_lossy(&out.stderr);
-                    log::warn!("Python scanner failed for {:?}: {}", dir, stderr);
-                }
-            }
+                    crate::commands::cleaner::clean_title(&dir.file_name().unwrap_or_default().to_string_lossy())
+                };
 
-            (dir, parsed)
+                if is_generic_title(&guessed_title) {
+                    if let Some(parent) = Path::new(&exe_path).parent() {
+                        if let Some(pn) = parent.file_name() {
+                            guessed_title = crate::commands::cleaner::clean_title(&pn.to_string_lossy().to_string());
+                        }
+                    }
+                }
+
+                if is_generic_title(&guessed_title) {
+                    guessed_title = crate::commands::cleaner::clean_title(&dir.file_name().unwrap_or_default().to_string_lossy());
+                }
+
+                ScannedGame {
+                    executable_path: exe_path,
+                    guessed_title,
+                    install_dir: dir.to_string_lossy().to_string(),
+                    crack_type,
+                    app_id,
+                }
+            }).await.unwrap()
         });
         tasks.push(task);
     }
 
     let mut results = Vec::new();
     for task in tasks {
-        if let Ok((dir, Some(py_res))) = task.await {
-            let crack_type = match py_res.emulator.as_str() {
-                "codex" => CrackType::Codex,
-                "goldberg" => CrackType::Goldberg,
-                "anadius" => CrackType::Anadius,
-                "voices38" => CrackType::Voices38,
-                _ => CrackType::Unknown,
-            };
-
-            let exe_path = py_res.best_exe.unwrap_or_default();
-            
-            let mut guessed_title = if !exe_path.is_empty() {
-                let filename = Path::new(&exe_path).file_name().unwrap_or_default().to_string_lossy().to_string();
-                crate::commands::cleaner::clean_title(&filename)
-            } else {
-                crate::commands::cleaner::clean_title(&dir.file_name().unwrap_or_default().to_string_lossy())
-            };
-
-            if is_generic_title(&guessed_title) {
-                if let Some(parent) = Path::new(&exe_path).parent() {
-                    if let Some(pn) = parent.file_name() {
-                        guessed_title = crate::commands::cleaner::clean_title(&pn.to_string_lossy().to_string());
-                    }
-                }
-            }
-
-            if is_generic_title(&guessed_title) {
-                guessed_title = crate::commands::cleaner::clean_title(&dir.file_name().unwrap_or_default().to_string_lossy());
-            }
-
-            results.push(ScannedGame {
-                executable_path: exe_path,
-                guessed_title,
-                install_dir: dir.to_string_lossy().to_string(),
-                crack_type,
-                app_id: py_res.app_id.unwrap_or_default(),
-            });
+        if let Ok(game) = task.await {
+            results.push(game);
         }
     }
 
@@ -523,7 +474,7 @@ pub struct SingleScanResult {
 #[tauri::command]
 pub async fn scan_single_game(
     path: String,
-    app: AppHandle,
+    _app: AppHandle,
 ) -> Result<SingleScanResult, String> {
     let exe_path = PathBuf::from(&path);
     if !exe_path.exists() || !exe_path.is_file() {
@@ -531,82 +482,41 @@ pub async fn scan_single_game(
     }
 
     let install_dir = infer_install_dir(&exe_path);
-    
-    let scanner_script = app.path()
-        .resolve("scanner/scanner.py", tauri::path::BaseDirectory::Resource)
-        .map_err(|e| e.to_string())?;
+    log::info!("Running single native scanner on {:?}", install_dir);
 
-    log::info!("Running single python scanner on {:?}", install_dir);
-    let mut cmd = Command::new("python");
-    #[cfg(windows)]
-    {
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
-    
-    let output = cmd
-        .arg(&scanner_script)
-        .arg(&install_dir)
-        .output()
-        .await
-        .map_err(|e| e.to_string())?;
+    let (crack_type, app_id) = detect_crack(&install_dir);
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Python scanner failed: {}", stderr));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let py_res: PythonScannerResult = serde_json::from_str(&stdout)
-        .map_err(|e| format!("Failed to parse scanner output: {}", e))?;
-
-    let crack_type = match py_res.emulator.as_str() {
-        "codex" => CrackType::Codex,
-        "goldberg" => CrackType::Goldberg,
-        "anadius" => CrackType::Anadius,
-        "voices38" => CrackType::Voices38,
-        _ => CrackType::Unknown,
-    };
-
-    let exe_str = py_res.best_exe.unwrap_or_else(|| path.clone());
-    let filename = Path::new(&exe_str).file_name().unwrap_or_default().to_string_lossy().to_string();
+    let filename = exe_path.file_name().unwrap_or_default().to_string_lossy().to_string();
     let guessed_title = crate::commands::cleaner::clean_title(&filename);
 
-    let app_id = py_res.app_id.unwrap_or_default();
+    let app_id_ref = if app_id.is_empty() { None } else { Some(app_id.as_str()) };
+    let default_roots = crate::settings::default_scan_roots();
+    let opts = crate::achievements::SyncOptions {
+        crack_type: Some(crack_type.clone()),
+        known_app_id: app_id_ref,
+        manual_metadata_path: None,
+        manual_save_path: None,
+        scan_roots: &default_roots,
+        ..Default::default()
+    };
 
-    // Collect achievement paths from Python
-    let mut achievements_ini  = py_res.achievements_ini;
-    let mut achievements_json = py_res.achievements_json;
-    let mut achievements_xml  = py_res.achievements_xml;
+    let mut achievements_ini = None;
+    let mut achievements_json = None;
+    let mut achievements_xml = None;
 
-    // ── Rust-native fallback ─────────────────────────────────────────────────
-    // If Python found nothing (common when save dir doesn't exist yet, or paths
-    // differ from Python's limited set), run Rust's comprehensive discovery.
-    if achievements_ini.is_none() && achievements_json.is_none() && achievements_xml.is_none() {
-        let app_id_ref = if app_id.is_empty() { None } else { Some(app_id.as_str()) };
-        let default_roots = crate::settings::default_scan_roots();
-        let opts = crate::achievements::SyncOptions {
-            crack_type: Some(crack_type.clone()),
-            known_app_id: app_id_ref,
-            manual_metadata_path: None,
-            manual_save_path: None,
-            scan_roots: &default_roots,
-            ..Default::default()
-        };
-        let discovery = crate::achievements::discover_achievements(&install_dir, app_id_ref, &opts);
-        if let Some(save_path) = discovery.save_path {
-            log::info!("[Scanner] Rust fallback found save: {}", save_path.display());
-            match save_path.extension().and_then(|e| e.to_str()) {
-                Some("ini") => achievements_ini  = Some(save_path.to_string_lossy().to_string()),
-                Some("json") => achievements_json = Some(save_path.to_string_lossy().to_string()),
-                Some("xml")  => achievements_xml  = Some(save_path.to_string_lossy().to_string()),
-                _ => {}
-            }
+    let discovery = crate::achievements::discover_achievements(&install_dir, app_id_ref, &opts);
+    if let Some(save_path) = discovery.save_path {
+        log::info!("[Scanner] Rust found save: {}", save_path.display());
+        match save_path.extension().and_then(|e| e.to_str()) {
+            Some("ini") => achievements_ini = Some(save_path.to_string_lossy().to_string()),
+            Some("json") => achievements_json = Some(save_path.to_string_lossy().to_string()),
+            Some("xml")  => achievements_xml = Some(save_path.to_string_lossy().to_string()),
+            _ => {}
         }
     }
 
     Ok(SingleScanResult {
-        executable_path: exe_str,
+        executable_path: exe_path.to_string_lossy().to_string(),
         guessed_title,
         install_dir: install_dir.to_string_lossy().to_string(),
         crack_type,
@@ -615,7 +525,6 @@ pub async fn scan_single_game(
         achievements_json,
         achievements_xml,
     })
-
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -683,6 +592,23 @@ fn is_candidate_executable(path: &Path) -> bool {
     fs::metadata(path)
         .map(|m| m.len() >= 1024 * 1024)
         .unwrap_or(false)
+}
+
+pub fn find_best_exe(dir: &Path) -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+    let root_name_lower = dir.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
+    for entry in WalkDir::new(dir).into_iter().filter_entry(|e| !is_ignored_dir(e)).filter_map(|e| e.ok()) {
+        if entry.file_type().is_file() {
+            let pth = entry.into_path();
+            if is_candidate_executable(&pth) {
+                let path_lower = pth.to_string_lossy().to_lowercase();
+                let score = score_executable(&path_lower, &root_name_lower);
+                candidates.push((score, pth));
+            }
+        }
+    }
+    candidates.sort_by(|a, b| b.0.cmp(&a.0));
+    candidates.into_iter().next().map(|(_, p)| p)
 }
 
 // #[tauri::command]

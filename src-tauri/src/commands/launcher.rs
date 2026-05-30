@@ -280,6 +280,14 @@ pub async fn launch_game(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<(), String> {
+    launch_game_internal(id, &state, &app).await
+}
+
+pub async fn launch_game_internal(
+    id: String,
+    state: &AppState,
+    app: &AppHandle,
+) -> Result<(), String> {
     let game = get_game_by_id(&state.read_pool, &id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Game not found: {}", id))?;
@@ -287,7 +295,7 @@ pub async fn launch_game(
     log::info!("Launching game '{}' ({})", game.title, id);
 
     // Apply patches if needed
-    if let Ok(Some(profile)) = crate::profile::get_profile(state.clone()).await {
+    if let Ok(Some(profile)) = crate::profile::get_profile(app.state::<AppState>()).await {
         if let Some(install_dir) = game.install_dir.as_ref() {
             let path = Path::new(install_dir);
             match crate::patcher::patch_game(path, &profile.username, &profile.steam_id) {
@@ -472,11 +480,11 @@ pub async fn launch_game(
             &working_dir,
             game.steam_app_id,
             game.run_as_admin,
-            &state,
+            &app.state::<AppState>(),
         );
 
         {
-            let mut running = state.running_games.lock().unwrap();
+            let mut running = state.running_games.lock().unwrap_or_else(|p| p.into_inner());
             running.insert(
                 id.clone(),
                 ProcessIdentity {
@@ -516,7 +524,7 @@ pub async fn launch_game(
                     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                     if running_games_arc
                         .lock()
-                        .unwrap()
+                        .unwrap_or_else(|p| p.into_inner())
                         .contains_key(&game_id_clone)
                     {
                         found = true;
@@ -545,7 +553,7 @@ pub async fn launch_game(
 #[tauri::command]
 pub async fn force_stop_game(id: String, state: State<'_, AppState>) -> Result<(), String> {
     let identity = {
-        let running = state.running_games.lock().unwrap();
+        let running = state.running_games.lock().unwrap_or_else(|p| p.into_inner());
         running.get(&id).cloned()
     };
 
@@ -760,10 +768,10 @@ fn show_overlay_and_start_watcher(
             }
         }
 
-        let cover_base64 = cover_path.and_then(|p| std::fs::read(p).ok()).map(|bytes| {
+        let cover_base64 = cover_path.as_ref().and_then(|p| std::fs::read(p).ok().map(|bytes| (p, bytes))).map(|(p, bytes)| {
             use base64::Engine;
             let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
-            let ext = std::path::Path::new(cover_path.unwrap())
+            let ext = std::path::Path::new(p)
                 .extension()
                 .and_then(|s| s.to_str())
                 .unwrap_or("jpg")

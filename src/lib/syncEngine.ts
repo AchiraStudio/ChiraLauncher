@@ -86,6 +86,24 @@ export function useCloudSyncEngine() {
         syncPlaytime();
     }, [profile?.is_cloud_synced, profile?.supabase_user_id, gameCount]);
 
+    // ── LOCAL XP UPDATE (always-on, no cloud dependency) ──
+    // This runs regardless of cloud sync status so XP always reflects unlocks locally.
+    useEffect(() => {
+        if (!window.__TAURI_INTERNALS__) return;
+
+        const unlistenLocalXp = listen<AchievementPayload>("achievement-unlocked", (event) => {
+            // STRICT GUARD: never credit XP from debug/test unlocks
+            if (event.payload.is_debug === true || !event.payload.xp || event.payload.xp === 0) return;
+
+            useProfileStore.setState((state) => {
+                if (!state.profile) return state;
+                return { profile: { ...state.profile, xp: state.profile.xp + event.payload.xp } };
+            });
+        });
+
+        return () => { unlistenLocalXp.then(f => f()); };
+    }, []);
+
     useEffect(() => {
         if (!profile?.is_cloud_synced || !profile?.supabase_user_id) return;
 
