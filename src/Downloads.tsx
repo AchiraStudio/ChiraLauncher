@@ -80,12 +80,14 @@ function UnifiedDownloadCard({
     const statusText = isFolder ? item.state : getStatus(item);
     const progress = getProgress(item);
 
+    const getTorrentId = () => parseInt((item.id as string).replace('t_', ''));
+
     const handlePause = (e: React.MouseEvent) => {
         e.stopPropagation();
         if (isFolder) {
             item.files.forEach((f: any) => invoke("pause_http_download", { id: f.id }));
         } else {
-            type === "torrent" ? torrentStore.pauseDownload(item.id) : invoke("pause_http_download", { id: item.id });
+            type === "torrent" ? torrentStore.pauseDownload(getTorrentId()) : invoke("pause_http_download", { id: item.id });
         }
     };
 
@@ -94,7 +96,7 @@ function UnifiedDownloadCard({
         if (isFolder) {
             item.files.forEach((f: any) => invoke("resume_http_download", { id: f.id }));
         } else {
-            type === "torrent" ? torrentStore.resumeDownload(item.id) : invoke("resume_http_download", { id: item.id });
+            type === "torrent" ? torrentStore.resumeDownload(getTorrentId()) : invoke("resume_http_download", { id: item.id });
         }
     };
 
@@ -103,7 +105,7 @@ function UnifiedDownloadCard({
         if (isFolder) {
             item.files.forEach((f: any) => invoke("cancel_http_download", { id: f.id }));
         } else {
-            type === "torrent" ? torrentStore.cancelDownload(item.id) : invoke("cancel_http_download", { id: item.id });
+            type === "torrent" ? torrentStore.cancelDownload(getTorrentId()) : invoke("cancel_http_download", { id: item.id });
         }
     };
 
@@ -115,7 +117,7 @@ function UnifiedDownloadCard({
             }
         } else {
             if (type === "torrent") {
-                torrentStore.cancelDownload(item.id);
+                torrentStore.cancelDownload(getTorrentId());
             } else {
                 await invoke("delete_http_download", { id: item.id, deleteFile: true });
             }
@@ -502,6 +504,7 @@ export function Downloads() {
 
     const handleContextMenu = (e: React.MouseEvent, item: any, type: "torrent" | "http" | "folder") => {
         e.preventDefault();
+        e.stopPropagation();
         setContextMenu({ x: e.clientX, y: e.clientY, item, type });
     };
 

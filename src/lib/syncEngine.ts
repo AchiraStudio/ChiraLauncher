@@ -71,8 +71,8 @@ export function useCloudSyncEngine() {
                         .upsert(statsToUpload, { onConflict: 'user_id,game_title' });
 
                     if (bulkErr) {
-                        if (bulkErr.code?.includes("PGRST301") || bulkErr.message?.includes("JWSError")) {
-                            // Suppress unauthorized errors silently
+                        if (bulkErr.code?.includes("PGRST301") || bulkErr.message?.includes("JWSError") || bulkErr.code === "42501") {
+                            // Suppress unauthorized / RLS errors silently
                         } else {
                             console.error("Cloud Sync: Failed bulk upload:", bulkErr);
                         }

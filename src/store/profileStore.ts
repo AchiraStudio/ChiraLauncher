@@ -96,16 +96,18 @@ export const useProfileStore = create<ProfileState>((set) => ({
     }
 }));
 
-if (window.__TAURI_INTERNALS__) {
-    listen<AchievementPayload>('achievement-unlocked', (event) => {
-        // EXTREME STRICT MODE: Nullify any XP gained from tests or bugged payloads
-        if (event.payload.is_debug === true || event.payload.xp === 0) return;
+export function initProfileListeners() {
+    if (window.__TAURI_INTERNALS__) {
+        listen<AchievementPayload>('achievement-unlocked', (event) => {
+            // EXTREME STRICT MODE: Nullify any XP gained from tests or bugged payloads
+            if (event.payload.is_debug === true || event.payload.xp === 0) return;
 
-        useProfileStore.setState((state) => {
-            if (state.profile) {
-                return { profile: { ...state.profile, xp: state.profile.xp + (event.payload.xp || 0) } };
-            }
-            return state;
-        });
-    });
+            useProfileStore.setState((state) => {
+                if (state.profile) {
+                    return { profile: { ...state.profile, xp: state.profile.xp + (event.payload.xp || 0) } };
+                }
+                return state;
+            });
+        }).catch(console.error);
+    }
 }

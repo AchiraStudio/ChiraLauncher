@@ -2,10 +2,10 @@ use crate::settings::AppSettings;
 use crate::state::AppState;
 use tauri::State;
 
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", not(debug_assertions)))]
 use winreg::{enums::*, RegKey};
 
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", not(debug_assertions)))]
 fn apply_windows_autostart(enable: bool) {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     if let Ok(key) = hkcu.open_subkey_with_flags(
@@ -25,6 +25,11 @@ fn apply_windows_autostart(enable: bool) {
             log::info!("Removed ChiraLauncher from Windows Startup");
         }
     }
+}
+
+#[cfg(all(target_os = "windows", debug_assertions))]
+fn apply_windows_autostart(_enable: bool) {
+    log::info!("Skipping Windows Startup registry modification in development mode");
 }
 
 #[tauri::command]

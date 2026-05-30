@@ -72,7 +72,11 @@ export const useOsIntegrationStore = create<OsIntegrationState>((set) => ({
 }));
 
 // Listen for backend-initiated removal (triggered by --remove-game CLI / uninstall)
-listen<string>('os-integration-removed', (event) => {
-    useOsIntegrationStore.getState().removeIntegration(event.payload);
-    console.log(`OS integration removed for game: ${event.payload}`);
-}).catch(console.error);
+export function initOsIntegrationListeners() {
+    if (window.__TAURI_INTERNALS__) {
+        listen<string>('os-integration-removed', (event) => {
+            useOsIntegrationStore.getState().removeIntegration(event.payload);
+            console.log(`OS integration removed for game: ${event.payload}`);
+        }).catch(console.error);
+    }
+}

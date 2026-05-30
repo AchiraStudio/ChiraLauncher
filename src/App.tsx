@@ -3,14 +3,15 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { listen } from "@tauri-apps/api/event";
 import { onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { toast } from "sonner";
 import { useProcessStore } from "./store/processStore";
 import { useGameStore } from "./store/gameStore";
 import { useSettingsStore } from "./store/settingsStore";
 import { useFolderStore } from "./store/folderStore";
 import { useDownloadsStore } from "./store/downloadsStore";
-import { useProfileStore } from "./store/profileStore";
-
+import { useProfileStore, initProfileListeners } from "./store/profileStore";
+import { initOsIntegrationListeners } from "./store/osIntegrationStore";
 import { AppLayout } from "./components/layout/AppLayout";
 import { Discover } from "./Discover";
 import { Browse } from "./Browse";
@@ -27,13 +28,15 @@ import { FirstLaunchModal } from "./components/modals/FirstLaunchModal";
 import { ExtensionManager } from "./components/extensions/ExtensionManager";
 import { useUiStore } from "./store/uiStore";
 import { ThemeEngine } from "./services/ThemeEngine";
-import { useExtensionStore } from "./store/extensionStore";
+import { useExtensionStore, initExtensionListeners } from "./store/extensionStore";
 import { launchGame } from "./services/gameService";
 import { useCloudSyncEngine } from "./lib/syncEngine";
 
 import { invoke } from "@tauri-apps/api/core";
 import { smartAudio } from "./services/SmartAudio";
+import { GlobalContextMenu } from "./components/ui/GlobalContextMenu";
 
+// ── Tray title sync hook (only runs in main window) ──
 function useTraySync() {
   const runningGames = useProcessStore((s: any) => s.running);
   const gamesById = useGameStore((s: any) => s.gamesById);
@@ -48,7 +51,8 @@ function useTraySync() {
   }, [runningGames, gamesById]);
 }
 
-export default function App() {
+// ── Main window app — ALL hooks live here ──
+function MainApp() {
   const setGameStarted = useProcessStore((s: any) => s.setGameStarted);
   const setGameStopped = useProcessStore((s: any) => s.setGameStopped);
   const tickElapsed = useProcessStore((s: any) => s.tickElapsed);
@@ -61,7 +65,6 @@ export default function App() {
   const prevGamesRef = useRef<any[]>(Object.values(gamesById));
 
   // Auto-sync process state to the Smart Audio engine
-  // This will cleanly pause BGM whenever a game is playing
   const runningGames = useProcessStore((s: any) => s.running);
   useEffect(() => {
     const isPlaying = Object.keys(runningGames).length > 0;
@@ -104,7 +107,6 @@ export default function App() {
     }
 
     if (!game) {
-      // Fallback if still not found
       launchGame(gameId).catch(console.error);
       return;
     }
@@ -211,6 +213,11 @@ export default function App() {
     useProfileStore.getState().fetchProfile();
     useProfileStore.getState().initAuthListener();
 
+    // Initialize global event listeners here, ensuring they only run in MainApp
+    initProfileListeners();
+    initOsIntegrationListeners();
+    initExtensionListeners();
+
     invoke("is_first_launch")
       .then((isFirst) => {
         if (isFirst) setFirstLaunch(true);
@@ -231,12 +238,12 @@ export default function App() {
       const target = e.target as HTMLElement;
       const isClickable = target.closest('button') || target.closest('[role="button"]') || target.closest('a');
       const shouldSkip = target.closest('[data-no-press-sound]');
-      
+
       if (isClickable && !shouldSkip) {
         smartAudio.playUI('press-sound.mp3');
       }
     };
-    
+
     document.addEventListener('click', handleGlobalClick, { capture: true });
     return () => document.removeEventListener('click', handleGlobalClick, { capture: true });
   }, []);
@@ -249,8 +256,9 @@ export default function App() {
 
   return (
     <>
-      <TorrentFileModal />
       <BrowserRouter>
+        <GlobalContextMenu />
+        <TorrentFileModal />
         <Routes>
           <Route element={<AppLayout />}>
             <Route path="/" element={<Navigate to="/discover" replace />} />
@@ -264,11 +272,26 @@ export default function App() {
             <Route path="/messages/:targetId" element={<Messages />} />
             <Route path="/extensions" element={<ExtensionManager />} />
           </Route>
-
-          <Route path="/splash" element={<LaunchSplash />} />
-          <Route path="/tray" element={<TrayMenu />} />
         </Routes>
       </BrowserRouter>
     </>
   );
+}
+
+// ── Root entry — reads window label BEFORE any hooks ──
+export default function App() {
+  // Read synchronously so the correct component renders on the very first paint.
+  // This MUST stay outside MainApp so tray/splash windows never execute
+  // main-app hooks (listen, startPolling, useCloudSyncEngine, etc.)
+  const label = window.__TAURI_INTERNALS__ ? getCurrentWindow().label : 'main';
+
+  if (label === 'tray') {
+    return <TrayMenu />;
+  }
+
+  if (label.startsWith('splash')) {
+    return <LaunchSplash />;
+  }
+
+  return <MainApp />;
 }

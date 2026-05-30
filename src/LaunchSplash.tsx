@@ -24,7 +24,7 @@ export function LaunchSplash() {
     }, []);
 
     return (
-        <div className="w-screen h-screen bg-[#0a0f18]/95 backdrop-blur-xl border border-white/10 rounded-2xl flex items-center p-6 gap-6 overflow-hidden relative shadow-2xl">
+        <div className="w-screen h-screen bg-[#0a0f18] border border-white/10 rounded-2xl flex items-center p-6 gap-6 overflow-hidden relative shadow-2xl">
             {/* Ambient Glow */}
             <div className="absolute top-0 left-1/4 w-1/2 h-1 bg-blue-500/50 blur-xl" />
             <div className="absolute bottom-0 right-0 w-32 h-32 bg-blue-500/20 blur-[60px] rounded-full" />

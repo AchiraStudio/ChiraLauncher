@@ -50,7 +50,7 @@ export default function TrayMenu() {
 
     return (
         <div className="h-screen w-screen p-3 flex flex-col bg-transparent select-none font-outfit text-white overflow-hidden">
-            <div className="flex-1 bg-[#08090f]/90 backdrop-blur-2xl border border-white/10 rounded-[1.5rem] shadow-none flex flex-col overflow-hidden">
+            <div className="flex-1 bg-[#0b0c13] border border-white/10 rounded-[1.5rem] shadow-[0_0_20px_rgba(0,0,0,0.5)] flex flex-col overflow-hidden">
 
                 <div className="p-4 border-b border-white/5 flex items-center gap-3 bg-white/[0.02] shrink-0">
                     <div className="w-8 h-8 rounded-xl bg-cyan-400/10 flex items-center justify-center text-cyan-400 shadow-inner">

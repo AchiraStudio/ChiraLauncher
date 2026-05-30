@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef, memo, type MouseEvent } from "react";
 import { useLocation } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -55,8 +55,8 @@ const reqHtml = [
     "[&_ul>li>strong]:text-white/75 [&_ul>li>strong]:font-semibold [&_ul>li>strong]:mr-1.5",
 ].join(" ");
 
-function SidebarRow({ game, isActive, onClick, onContextMenu, onAction }: {
-    game: Game; isActive: boolean; onClick: () => void; onContextMenu?: (e: React.MouseEvent) => void; onAction: () => void;
+const SidebarRow = memo(function SidebarRow({ game, isActive, onClick, onContextMenu, onAction }: {
+    game: Game; isActive: boolean; onClick: () => void; onContextMenu?: (e: MouseEvent) => void; onAction: () => void;
 }) {
     const isRunning = !!useProcessStore((s: any) => s.running[game.id]);
     const { src: cover } = useLocalImage(game.cover_image_path || (game as any).cover_path);
@@ -110,7 +110,7 @@ function SidebarRow({ game, isActive, onClick, onContextMenu, onAction }: {
             </div>
         </div>
     );
-}
+});
 
 function GameTitle({ game }: { game: Game }) {
     const { src: logoSrc, error: logoErr } = useLocalImage(game.logo_path);
@@ -359,6 +359,7 @@ export default function Library() {
 
     const handleContextMenu = useCallback((e: React.MouseEvent, game: Game) => {
         e.preventDefault();
+        e.stopPropagation();
         setContextMenu({
             x: e.clientX, y: e.clientY,
             items: [

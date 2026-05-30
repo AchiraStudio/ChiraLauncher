@@ -70,16 +70,18 @@ export const useExtensionStore = create<ExtensionState>((set) => ({
 }));
 
 // Only attach native listeners if running in the Tauri window
-if (window.__TAURI_INTERNALS__) {
-    listen<string>('theme-changed', (event) => {
-        const styleTag = document.getElementById('chira-dynamic-theme');
-        if (styleTag) {
-            styleTag.innerHTML = event.payload;
-            toast.info('Theme hot-reloaded');
-        }
-    }).catch(console.error);
+export function initExtensionListeners() {
+    if (window.__TAURI_INTERNALS__) {
+        listen<string>('theme-changed', (event) => {
+            const styleTag = document.getElementById('chira-dynamic-theme');
+            if (styleTag) {
+                styleTag.innerHTML = event.payload;
+                toast.info('Theme hot-reloaded');
+            }
+        }).catch(console.error);
 
-    listen<string>('theme-error', (event) => {
-        toast.error(`Theme Error: ${event.payload}`);
-    }).catch(console.error);
+        listen<string>('theme-error', (event) => {
+            toast.error(`Theme Error: ${event.payload}`);
+        }).catch(console.error);
+    }
 }
