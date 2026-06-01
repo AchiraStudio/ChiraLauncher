@@ -254,3 +254,67 @@ pub async fn update_game_orders(
         .send(DbWrite::Game(GameDbWrite::UpdateGameOrders { orders }))
         .map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub async fn sync_steam_achievements(
+    id: String,
+    steam_app_id: String,
+    install_dir: String,
+    state: tauri::State<'_, std::sync::Arc<AppState>>,
+) -> Result<(), String> {
+    use crate::steamworks_sync::SteamworksClient;
+    use crate::state::{DbWrite, ProfileDbWrite, AchSync};
+    use crate::achievements::cache;
+    use walkdir::WalkDir;
+
+    let mut dll_path = None;
+    for entry in WalkDir::new(&install_dir).max_depth(6).into_iter().filter_map(|e| e.ok()) {
+        if entry.file_type().is_file() {
+            let name = entry.file_name().to_string_lossy().to_lowercase();
+            if name == "steam_api64.dll" || name == "steam_api.dll" {
+                dll_path = Some(entry.into_path());
+                break;
+            }
+        }
+    }
+
+    let path = dll_path.ok_or_else(|| format!("Could not find steam_api64.dll in {}", install_dir))?;
+
+    // Load cached achievements as the baseline
+    let cached = cache::load_cache(&id).ok_or_else(|| "No achievements metadata found".to_string())?;
+
+    // Connect to Steam
+    let client = SteamworksClient::init(path, &steam_app_id)?;
+    client.fetch_stats().await?;
+
+    let mut earned = Vec::new();
+    let current_time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    for mut ach in cached.into_iter() {
+        if client.is_achievement_unlocked(&ach.api_name) {
+            if !ach.earned {
+                ach.earned = true;
+                ach.earned_time = Some(current_time);
+            }
+            earned.push(AchSync {
+                api_name: ach.api_name.clone(),
+                title: ach.display_name.clone(),
+                description: ach.description.clone(),
+                earned_time: ach.earned_time.unwrap_or(current_time),
+                xp: ach.xp,
+            });
+        }
+    }
+
+    if !earned.is_empty() {
+        let _ = state.db_tx.send(DbWrite::Profile(ProfileDbWrite::SyncEarnedAchievements {
+            game_id: id,
+            earned,
+        }));
+    }
+
+    Ok(())
+}

@@ -11,6 +11,7 @@ pub mod profile;
 pub mod settings;
 mod state;
 pub mod stats;
+pub mod steamworks_sync;
 pub mod torrent;
 mod tray;
 
@@ -496,6 +497,7 @@ pub fn run() {
             commands::game::set_manual_save_path,
             commands::game::toggle_favorite,
             commands::game::update_game_orders,
+            commands::game::sync_steam_achievements,
             commands::reset::reset_application,
             commands::http_dl::add_http_downloads,
             commands::http_dl::get_http_downloads,

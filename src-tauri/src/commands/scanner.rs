@@ -54,6 +54,8 @@ pub enum CrackType {
     Anadius,
     Voices38,
     Unknown,
+    Rune,
+    Official,
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -144,15 +146,11 @@ pub fn detect_crack(dir: &Path) -> (CrackType, String) {
             .or_else(|| read_plain_app_id(dir))
             .unwrap_or_default();
         log::info!("[Crack] Goldberg at {} (app_id={})", dir.display(), id);
-        return (CrackType::Goldberg, id);
     }
-
-    // Goldberg fallback: any steam_api.dll or steam_api64.dll without an ini
-    // might be a Goldberg wrapper or an emu with missing configs.
-    if dir.join("steam_api64.dll").exists() || dir.join("steam_api.dll").exists() {
-        let id = read_plain_app_id(dir).unwrap_or_default();
-        log::info!("[Crack] Likely Goldberg fallback at {} (app_id={})", dir.display(), id);
-        return (CrackType::Goldberg, id);
+    // Deep search for Steamworks / steam_api64.dll
+    if let Some((ct, id)) = find_deep_crack(dir) {
+        log::info!("[Crack] Deep scan found {:?} at {} (app_id={})", ct, dir.display(), id);
+        return (ct, id);
     }
 
     // steam_appid.txt with no other marker
@@ -164,6 +162,61 @@ pub fn detect_crack(dir: &Path) -> (CrackType, String) {
     (CrackType::Unknown, String::new())
 }
 
+fn find_deep_crack(root: &Path) -> Option<(CrackType, String)> {
+    for entry in WalkDir::new(root).max_depth(6).into_iter().filter_map(|e| e.ok()) {
+        let path = entry.path();
+        if !path.is_file() { continue; }
+        
+        let name = path.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
+        
+        // Trigger analysis if we see a signature file of ANY known crack, or steam_api
+        if name == "steam_api64.dll" || name == "steam_api.dll" || name == "steam_emu.ini" || name == "anadius.cfg" || name.ends_with(".cdx") || name.ends_with(".v38") {
+            let parent = path.parent().unwrap_or(path);
+            
+            if parent.join("anadius.cfg").exists() {
+                let id = read_plain_app_id(parent).unwrap_or_default();
+                return Some((CrackType::Anadius, id));
+            }
+            if parent.join("steam_api64.rne").exists() {
+                let id = read_goldberg_app_id(&parent.join("steam_settings")).or_else(|| read_plain_app_id(parent)).unwrap_or_default();
+                let id = if id.is_empty() {
+                    parse_steam_emu_app_id(&parent.join("steam_emu.ini")).unwrap_or_default()
+                } else { id };
+                return Some((CrackType::Rune, id));
+            }
+            if has_v38_file(parent) {
+                let id = read_plain_app_id(parent).unwrap_or_default();
+                return Some((CrackType::Voices38, id));
+            }
+            let steam_emu = parent.join("steam_emu.ini");
+            if steam_emu.exists() {
+                let id = parse_steam_emu_app_id(&steam_emu).unwrap_or_default();
+                let content = fs::read_to_string(&steam_emu).unwrap_or_default();
+                if content.contains("-RUNE-") || content.contains("RUNE") {
+                    return Some((CrackType::Rune, id));
+                }
+                return Some((CrackType::Codex, id));
+            }
+            if has_cdx_file(parent) {
+                let id = parse_steam_emu_app_id(&steam_emu).or_else(|| read_plain_app_id(parent)).unwrap_or_default();
+                return Some((CrackType::Codex, id));
+            }
+            let steam_settings = parent.join("steam_settings");
+            if steam_settings.exists() && steam_settings.is_dir() {
+                let id = read_goldberg_app_id(&steam_settings).or_else(|| read_plain_app_id(parent)).unwrap_or_default();
+                return Some((CrackType::Goldberg, id));
+            }
+            
+            // If it's just the steam_api DLLs with no crack config files, assume Official.
+            if name == "steam_api64.dll" || name == "steam_api.dll" {
+                let id = read_plain_app_id(parent).unwrap_or_default();
+                return Some((CrackType::Official, id));
+            }
+        }
+    }
+    None
+}
+
 /// Walk UP from the exe to find the real game root (the folder containing
 /// crack markers). Handles games whose exe lives in bin/win64 subfolders.
 pub fn infer_install_dir(exe_path: &Path) -> PathBuf {
@@ -171,11 +224,11 @@ pub fn infer_install_dir(exe_path: &Path) -> PathBuf {
 
     const BIN_DIRS: &[&str] = &[
         "bin", "binaries", "win64", "win32", "x64", "x86",
-        "game", "shipping", "retail",
+        "game", "shipping", "retail", "engine",
     ];
 
     let mut current = immediate;
-    for _ in 0..3 {
+    for _ in 0..5 {
         if has_crack_marker(current) {
             return current.to_path_buf();
         }
@@ -188,8 +241,8 @@ pub fn infer_install_dir(exe_path: &Path) -> PathBuf {
                 if has_crack_marker(parent) {
                     return parent.to_path_buf();
                 }
-                // Even if no marker, if we're clearly in a bin dir go up one
-                return parent.to_path_buf();
+                current = parent;
+                continue;
             }
         }
         match current.parent() {
@@ -279,6 +332,30 @@ pub fn parse_steam_emu_app_id(path: &Path) -> Option<String> {
                 && val.chars().all(|c| c.is_ascii_digit())
             {
                 return Some(val.to_string());
+            }
+        }
+    }
+    None
+}
+
+pub fn parse_steam_emu_save_path(path: &Path) -> Option<PathBuf> {
+    let content = fs::read_to_string(path).ok()?;
+    for line in content.lines() {
+        if line.contains("Game data is stored at") || line.contains("Game data stored at") {
+            let mut parts = line.split("at ");
+            if let Some(path_str) = parts.nth(1) {
+                let path_str = path_str.trim();
+                let sys_drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".to_string());
+                let public = std::env::var("PUBLIC").unwrap_or_else(|_| format!("{}\\Users\\Public", sys_drive));
+                let localappdata = std::env::var("LOCALAPPDATA").unwrap_or_else(|_| format!("{}\\Users\\Default\\AppData\\Local", sys_drive));
+                let appdata = std::env::var("APPDATA").unwrap_or_else(|_| format!("{}\\Users\\Default\\AppData\\Roaming", sys_drive));
+
+                let resolved = path_str.replace("%SystemDrive%", &sys_drive)
+                    .replace("%Public%", &public)
+                    .replace("%LOCALAPPDATA%", &localappdata)
+                    .replace("%APPDATA%", &appdata);
+
+                return Some(PathBuf::from(resolved));
             }
         }
     }

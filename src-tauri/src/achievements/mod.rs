@@ -279,16 +279,24 @@ fn find_metadata_path(
         }
     }
 
+    let mut steam_settings_dirs = vec![base.join("steam_settings")];
+    for entry in walkdir::WalkDir::new(base).max_depth(6).into_iter().filter_map(|e| e.ok()) {
+        if entry.file_type().is_dir() && entry.file_name() == "steam_settings" {
+            steam_settings_dirs.push(entry.into_path());
+        }
+    }
+
+    for ss in &steam_settings_dirs {
+        candidates.push(ss.join("achievements.json"));
+        candidates.push(ss.join("user_stats").join("achievements.json"));
+    }
+
     candidates.extend(vec![
-        base.join("steam_settings").join("achievements.json"),
         base.join("OfflineStorage")
             .join("User")
             .join("remote")
             .join("achievements.json"),
         base.join("achievements.json"),
-        base.join("steam_settings")
-            .join("user_stats")
-            .join("achievements.json"),
     ]);
 
     if let Some(id) = app_id {
@@ -383,6 +391,7 @@ fn find_save_path(
     let is_anadius = matches!(crack_type, Some(CrackType::Anadius));
     let is_goldberg = matches!(crack_type, Some(CrackType::Goldberg));
     let is_codex = matches!(crack_type, Some(CrackType::Codex));
+    let is_rune = matches!(crack_type, Some(CrackType::Rune));
     let is_voices38 = matches!(crack_type, Some(CrackType::Voices38));
     let try_all = crack_type.is_none() || matches!(crack_type, Some(CrackType::Unknown));
 
@@ -392,7 +401,16 @@ fn find_save_path(
                 let emu_base = PathBuf::from(&local).join("anadius").join("LSX emu");
                 let search_dirs = [emu_base.clone(), emu_base.join(id)];
                 
-                let (_, ach_set, _) = parse_anadius_cfg(&game_dir.join("anadius.cfg"));
+                let mut anadius_cfg = game_dir.join("anadius.cfg");
+                if !anadius_cfg.exists() {
+                    for entry in walkdir::WalkDir::new(game_dir).max_depth(6).into_iter().filter_map(|e| e.ok()) {
+                        if entry.file_name() == "anadius.cfg" {
+                            anadius_cfg = entry.into_path();
+                            break;
+                        }
+                    }
+                }
+                let (_, ach_set, _) = parse_anadius_cfg(&anadius_cfg);
                 
                 for dir in search_dirs {
                     if let Ok(entries) = fs::read_dir(&dir) {
@@ -421,7 +439,23 @@ fn find_save_path(
             }
         }
 
-        if is_codex || try_all {
+        if is_codex || is_rune || try_all {
+            let mut emu_inis = vec![game_dir.join("steam_emu.ini")];
+            if is_codex || is_rune {
+                for entry in walkdir::WalkDir::new(game_dir).max_depth(6).into_iter().filter_map(|e| e.ok()) {
+                    if entry.file_name() == "steam_emu.ini" {
+                        emu_inis.push(entry.into_path());
+                    }
+                }
+            }
+            for ini in emu_inis {
+                if let Some(parsed) = crate::commands::scanner::parse_steam_emu_save_path(&ini) {
+                    candidates.push(parsed.join("achievements.ini"));
+                    candidates.push(parsed.join("achievements.json"));
+                    candidates.push(parsed.join("achievement.ini"));
+                }
+            }
+
             if let Some(sys_drive) = std::env::var_os("SystemDrive") {
                 let drive_root = PathBuf::from(&sys_drive);
                 let drive_root = if drive_root.to_string_lossy().ends_with('\\') {
@@ -432,6 +466,7 @@ fn find_save_path(
                 let public_paths = [
                     drive_root.join("Users\\Public\\Documents\\Steam"),
                     drive_root.join("Users\\Public\\Documents\\Steam\\CODEX"),
+                    drive_root.join("Users\\Public\\Documents\\Steam\\RUNE"),
                 ];
                 for public in public_paths {
                     for sub in PUBLIC_EMU_DIRS {
@@ -480,14 +515,19 @@ fn find_save_path(
         }
     }
 
-    candidates.push(
-        game_dir
-            .join("steam_settings")
-            .join("user_stats")
-            .join("achievements.json"),
-    );
-    candidates.push(game_dir.join("steam_settings").join("achievements.ini"));
-    candidates.push(game_dir.join("steam_settings").join("achievements.json"));
+    let mut steam_settings_dirs = vec![game_dir.join("steam_settings")];
+    for entry in walkdir::WalkDir::new(game_dir).max_depth(6).into_iter().filter_map(|e| e.ok()) {
+        if entry.file_type().is_dir() && entry.file_name() == "steam_settings" {
+            steam_settings_dirs.push(entry.into_path());
+        }
+    }
+
+    for ss in steam_settings_dirs {
+        candidates.push(ss.join("user_stats").join("achievements.json"));
+        candidates.push(ss.join("achievements.ini"));
+        candidates.push(ss.join("achievements.json"));
+    }
+
     candidates.push(game_dir.join("achievements.ini"));
     candidates.push(game_dir.join("achievements.json"));
     candidates.push(game_dir.join("achievement.ini"));
@@ -559,7 +599,16 @@ pub fn load_earned_map(save_path: &Path, game_dir: &Path) -> HashMap<String, u64
         Some("ini") => crate::achievement_watcher::read_codex_earned(save_path),
         Some("json") => crate::achievement_watcher::read_goldberg_earned(save_path),
         Some("xml") => {
-            let (_, _, map) = parse_anadius_cfg(&game_dir.join("anadius.cfg"));
+            let mut anadius_cfg = game_dir.join("anadius.cfg");
+            if !anadius_cfg.exists() {
+                for entry in walkdir::WalkDir::new(game_dir).max_depth(6).into_iter().filter_map(|e| e.ok()) {
+                    if entry.file_name() == "anadius.cfg" {
+                        anadius_cfg = entry.into_path();
+                        break;
+                    }
+                }
+            }
+            let (_, _, map) = parse_anadius_cfg(&anadius_cfg);
             crate::achievement_watcher::read_earned_anadius(save_path, &map)
         },
         _ => HashMap::new(),
@@ -572,10 +621,24 @@ fn resolve_icon(base: &Path, relative: &str) -> Option<String> {
     }
     let mut full = base.join(relative);
     if !full.exists() {
-        let alt = base.join("steam_settings").join(relative);
-        if alt.exists() {
-            full = alt;
-        } else {
+        let mut steam_settings_dirs = vec![base.join("steam_settings")];
+        for entry in walkdir::WalkDir::new(base).max_depth(6).into_iter().filter_map(|e| e.ok()) {
+            if entry.file_type().is_dir() && entry.file_name() == "steam_settings" {
+                steam_settings_dirs.push(entry.into_path());
+            }
+        }
+        
+        let mut found = false;
+        for ss in steam_settings_dirs {
+            let alt = ss.join(relative);
+            if alt.exists() {
+                full = alt;
+                found = true;
+                break;
+            }
+        }
+        
+        if !found {
             return None;
         }
     }

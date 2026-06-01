@@ -98,6 +98,7 @@ aes-gcm = "0.10.3"
 rand_core = "0.10.0"
 x25519-dalek = { version = "2.0", features = ["static_secrets"] }
 futures-util = "0.3.32"
+libloading = "0.9.0"
 
 # Cross-platform process start time (for PID reuse hardening)
 # Windows: uses GetProcessTimes via windows-sys

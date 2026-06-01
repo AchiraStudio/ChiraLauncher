@@ -138,6 +138,7 @@ export function EditGameModal() {
     const [isSaving, setIsSaving] = useState(false);
     const [isFetching, setIsFetching] = useState(false);
     const [isGeneratingAch, setIsGeneratingAch] = useState(false);
+    const [isSyncingSteam, setIsSyncingSteam] = useState(false);
 
     useEffect(() => {
         if (gameToEdit) {
@@ -862,46 +863,76 @@ export function EditGameModal() {
                                                         <p className="text-white/60 truncate">{gameToEdit.install_dir || "Not set"}</p>
                                                     </div>
                                                 </div>
-                                                <button
-                                                    onClick={async () => {
-                                                        const apiKey = useSettingsStore.getState().settings?.steam_api_key;
-                                                        if (!apiKey) {
-                                                            toast.warning("No Steam API Key", { description: "Configure one in Settings → Integrations." });
-                                                            return;
-                                                        }
-                                                        if (!appIdInput) {
-                                                            toast.error("No App ID set", { description: "Enter a Steam App ID in the General tab first." });
-                                                            return;
-                                                        }
-                                                        if (!gameToEdit.install_dir) {
-                                                            toast.error("No install directory", { description: "The game must have a valid install directory." });
-                                                            return;
-                                                        }
-                                                        setIsGeneratingAch(true);
-                                                        try {
-                                                            const result = await invoke<{ count: number; has_global_pcts: boolean }>("fetch_and_write_achievements", {
-                                                                appId: appIdInput,
-                                                                gameDir: gameToEdit.install_dir,
-                                                                apiKey
-                                                            });
-                                                            toast.success(`Generated ${result.count} achievements`, {
-                                                                description: `Written to steam_settings/achievements.json${result.has_global_pcts ? ' with global rarity data.' : '.'}`
-                                                            });
-                                                        } catch (e: any) {
-                                                            toast.error("Generation failed", { description: String(e) });
-                                                        } finally {
-                                                            setIsGeneratingAch(false);
-                                                        }
-                                                    }}
-                                                    disabled={isGeneratingAch || !appIdInput}
-                                                    className="w-full py-3 bg-yellow-500/10 hover:bg-yellow-500/20 disabled:opacity-40 border border-yellow-500/20 text-yellow-400 rounded-xl font-black text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2"
-                                                >
-                                                    {isGeneratingAch ? (
-                                                        <><div className="w-4 h-4 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin" /> Generating...</>
-                                                    ) : (
-                                                        <><Trophy size={14} /> Generate steam_settings/achievements.json</>
-                                                    )}
-                                                </button>
+
+                                                <div className="flex flex-col gap-2 w-full">
+                                                    <button
+                                                        onClick={async () => {
+                                                            const apiKey = useSettingsStore.getState().settings?.steam_api_key;
+                                                            if (!apiKey) {
+                                                                toast.warning("Cannot generate achievements: No Steam API Key configured.");
+                                                                return;
+                                                            }
+                                                            if (!gameToEdit.install_dir) {
+                                                                toast.error("No install directory", { description: "The game must have a valid install directory." });
+                                                                return;
+                                                            }
+                                                            setIsGeneratingAch(true);
+                                                            try {
+                                                                const result = await invoke<{ count: number; has_global_pcts: boolean }>("fetch_and_write_achievements", {
+                                                                    appId: appIdInput,
+                                                                    gameDir: gameToEdit.install_dir,
+                                                                    apiKey
+                                                                });
+                                                                toast.success(`Generated ${result.count} achievements`, {
+                                                                    description: `Written to steam_settings/achievements.json${result.has_global_pcts ? ' with global rarity data.' : '.'}`
+                                                                });
+                                                            } catch (e: any) {
+                                                                toast.error("Generation failed", { description: String(e) });
+                                                            } finally {
+                                                                setIsGeneratingAch(false);
+                                                            }
+                                                        }}
+                                                        disabled={isGeneratingAch || !appIdInput || isSyncingSteam}
+                                                        className="w-full py-3 bg-yellow-500/10 hover:bg-yellow-500/20 disabled:opacity-40 border border-yellow-500/20 text-yellow-400 rounded-xl font-black text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2"
+                                                    >
+                                                        {isGeneratingAch ? (
+                                                            <><div className="w-4 h-4 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin" /> Generating...</>
+                                                        ) : (
+                                                            <><Trophy size={14} /> Generate steam_settings/achievements.json</>
+                                                        )}
+                                                    </button>
+                                                    <button
+                                                        onClick={async () => {
+                                                            if (!gameToEdit.install_dir) {
+                                                                toast.error("No install directory", { description: "The game must have a valid install directory." });
+                                                                return;
+                                                            }
+                                                            setIsSyncingSteam(true);
+                                                            try {
+                                                                await invoke("sync_steam_achievements", {
+                                                                    id: gameToEdit.id,
+                                                                    steamAppId: appIdInput,
+                                                                    installDir: gameToEdit.install_dir
+                                                                });
+                                                                toast.success("Synced from Steam", {
+                                                                    description: "Achievements updated directly from the Steam Client."
+                                                                });
+                                                            } catch (e: any) {
+                                                                toast.error("Sync failed", { description: String(e) });
+                                                            } finally {
+                                                                setIsSyncingSteam(false);
+                                                            }
+                                                        }}
+                                                        disabled={isGeneratingAch || !appIdInput || isSyncingSteam}
+                                                        className="w-full py-3 bg-blue-500/10 hover:bg-blue-500/20 disabled:opacity-40 border border-blue-500/20 text-blue-400 rounded-xl font-black text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2"
+                                                    >
+                                                        {isSyncingSteam ? (
+                                                            <><div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" /> Syncing...</>
+                                                        ) : (
+                                                            <><Trophy size={14} /> Sync Steam Achievements (SAM)</>
+                                                        )}
+                                                    </button>
+                                                </div>
                                             </div>
 
                                             {/* ── Manual Override Paths ─────────────────────────── */}
