@@ -172,7 +172,7 @@ function UnifiedDownloadCard({
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.35, delay: index * 0.05 }}
             onContextMenu={(e) => onContextMenu && onContextMenu(e, item, type)}
-            className="group relative glass-panel rounded-3xl p-8 hover:border-accent/40 transition-all duration-500 hover:shadow-3xl bg-surface/30 backdrop-blur-3xl overflow-hidden border border-white/5 flex flex-col"
+            className="group relative hover:border-accent/40 transition-all duration-500 hover:shadow-3xl overflow-hidden flex flex-col tech-card-sm p-8"
         >
             <div className={cn(
                 "absolute -right-20 -top-20 w-64 h-64 blur-[100px] opacity-0 group-hover:opacity-10 transition-opacity duration-700 pointer-events-none",
@@ -231,12 +231,12 @@ function UnifiedDownloadCard({
                     </div>
                 </div>
 
-                <div className="flex gap-3 opacity-0 group-hover:opacity-100 transition-all duration-300">
+                <div className="flex gap-3 opacity-0 group-hover:opacity-100 transition-all duration-300 relative z-10">
                     {/* Open folder — for completed items */}
                     {isCompleted && (
                         <button
                             onClick={handleOpenFolder}
-                            className="w-12 h-12 rounded-2xl bg-white/[0.03] hover:bg-green-500/20 text-white/40 hover:text-green-400 transition-all active:scale-90 border border-white/5 flex items-center justify-center shadow-xl"
+                            className="w-12 h-12 rounded-lg bg-white/[0.03] hover:bg-green-500/20 text-white/40 hover:text-green-400 transition-all active:scale-90 border border-white/5 flex items-center justify-center shadow-xl"
                             title="Open Download Folder"
                         >
                             <FolderOpen size={20} />
@@ -246,7 +246,7 @@ function UnifiedDownloadCard({
                     {isError && (type === "http" || isFolder) && (
                         <button
                             onClick={handleRetry}
-                            className="w-12 h-12 rounded-2xl bg-cyan-400/20 hover:bg-cyan-400 hover:text-black text-cyan-400 transition-all active:scale-90 border border-cyan-400/20 flex items-center justify-center shadow-xl"
+                            className="w-12 h-12 rounded-lg bg-cyan-400/20 hover:bg-cyan-400 hover:text-black text-cyan-400 transition-all active:scale-90 border border-cyan-400/20 flex items-center justify-center shadow-xl"
                             title="Retry Download"
                         >
                             <RotateCcw size={20} />
@@ -256,7 +256,7 @@ function UnifiedDownloadCard({
                     {!isCompleted && !isError && (
                         <button
                             onClick={isPaused ? handleResume : handlePause}
-                            className="w-12 h-12 rounded-2xl bg-white/[0.03] hover:bg-white/[0.08] text-white transition-all active:scale-90 border border-white/5 flex items-center justify-center shadow-xl"
+                            className="w-12 h-12 rounded-lg bg-white/[0.03] hover:bg-white/[0.08] text-white transition-all active:scale-90 border border-white/5 flex items-center justify-center shadow-xl"
                             title={isPaused ? "Resume" : "Pause"}
                         >
                             {isPaused ? <Play size={20} fill="currentColor" className="ml-1" /> : <Pause size={20} fill="currentColor" />}
@@ -266,7 +266,7 @@ function UnifiedDownloadCard({
                     <button
                         onClick={isError || isCompleted ? handleDelete : handleCancel}
                         className={cn(
-                            "w-12 h-12 rounded-2xl transition-all active:scale-90 border flex items-center justify-center shadow-xl",
+                            "w-12 h-12 rounded-lg transition-all active:scale-90 border flex items-center justify-center shadow-xl",
                             isError || isCompleted
                                 ? "bg-red-500/10 border-red-500/20 text-red-400 hover:bg-red-500 hover:text-white"
                                 : "bg-white/[0.03] hover:bg-red-500/20 border-white/5 text-white/40 hover:text-red-500"
@@ -279,23 +279,21 @@ function UnifiedDownloadCard({
             </div>
 
             {/* Progress bar */}
-            <div className="relative mb-6 z-10 mt-auto">
-                <div className="h-2.5 bg-black/40 rounded-full overflow-hidden border border-white/5 shadow-inner">
-                    <motion.div
-                        initial={{ width: 0 }}
-                        animate={{ width: `${Math.max(0, Math.min(100, progress))}%` }}
-                        transition={{ duration: 1.2, ease: "linear" }}
-                        className={cn("h-full rounded-full transition-colors duration-700 relative", progressColor)}
-                    >
-                        {!isCompleted && !isPaused && !isError && (
-                            <div className="absolute inset-0 bg-white/20 animate-pulse" />
-                        )}
-                    </motion.div>
-                </div>
+            <div className="h-2.5 bg-black/40 rounded-full overflow-hidden border border-white/5 shadow-inner relative z-10">
+                <motion.div
+                    initial={{ width: 0 }}
+                    animate={{ width: `${Math.max(0, Math.min(100, progress))}%` }}
+                    transition={{ duration: 1.2, ease: "linear" }}
+                    className={cn("h-full rounded-full transition-colors duration-700 relative diagonal-progress", progressColor)}
+                >
+                    {!isCompleted && !isPaused && !isError && (
+                        <div className="absolute inset-0 bg-white/20 animate-pulse" />
+                    )}
+                </motion.div>
             </div>
 
             {/* Footer stats */}
-            <div className="flex items-center justify-between mt-auto">
+            <div className="flex items-center justify-between mt-auto pt-6">
                 {!isCompleted && !isError && (
                     <div className="flex items-center justify-between text-xs font-medium text-white/50 relative z-10 w-full">
                         <div className="flex items-center gap-10">
@@ -805,9 +803,9 @@ export function Downloads() {
                                         <span className="text-xs font-bold text-white">{globalProgress.toFixed(1)}%</span>
                                     </div>
                                 </div>
-                                <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+                                <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden relative z-10">
                                     <motion.div
-                                        className="h-full bg-gradient-to-r from-accent to-blue-400 rounded-full"
+                                        className="h-full bg-gradient-to-r from-accent to-blue-400 rounded-full diagonal-progress"
                                         animate={{ width: `${globalProgress}%` }}
                                         transition={{ duration: 0.8, ease: "easeOut" }}
                                     />
@@ -823,13 +821,13 @@ export function Downloads() {
                                     initial={{ opacity: 0, scale: 0.95 }}
                                     animate={{ opacity: 1, scale: 1 }}
                                     exit={{ opacity: 0, scale: 0.95 }}
-                                    className="flex flex-col items-center justify-center py-40 text-center glass-panel border-2 border-dashed border-white/5 rounded-[3rem] bg-surface/20"
+                                    className="flex flex-col items-center justify-center py-40 text-center radar-grid rounded-xl border border-white/5"
                                 >
-                                    <div className="w-28 h-28 glass-panel rounded-[2rem] flex items-center justify-center mb-10 shadow-3xl border border-white/5 group">
-                                        <Activity size={48} className="text-white/5 group-hover:text-white/20 transition-all duration-700" />
+                                    <div className="w-28 h-28 flex items-center justify-center mb-10 shadow-3xl group tech-card-sm">
+                                        <Activity size={48} className="text-white/5 group-hover:text-accent group-hover:scale-110 transition-all duration-500 relative z-10" />
                                     </div>
-                                    <h3 className="text-2xl font-bold text-white mb-4">No Downloads</h3>
-                                    <p className="text-white/50 text-sm max-w-sm leading-relaxed">
+                                    <h3 className="text-2xl font-bold text-white mb-4 relative z-10">No Downloads</h3>
+                                    <p className="text-white/50 text-sm max-w-sm leading-relaxed relative z-10">
                                         {filter === 'all' ? "Your queue is empty." : `No ${filter} downloads found.`}
                                     </p>
                                 </motion.div>

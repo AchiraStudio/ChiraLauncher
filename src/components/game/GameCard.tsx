@@ -57,10 +57,10 @@ export function GameCard({ game, onClick, onHoverStart, onHoverEnd, badge }: Gam
             }}
             transition={{ type: "spring", stiffness: 350, damping: 30, mass: 0.8 }}
             className={cn(
-                "relative w-full rounded-xl overflow-hidden cursor-pointer group",
-                "aspect-[2/3] bg-surface",
+                "relative w-full overflow-hidden cursor-pointer group",
+                "aspect-[2/3] tech-card-sm",
                 "shadow-[0_4px_16px_rgba(0,0,0,0.5)] hover:shadow-[0_20px_50px_rgba(0,0,0,0.7),0_0_30px_rgba(var(--color-accent),0.3)]",
-                "ring-0 hover:ring-2 hover:ring-accent/70 transition-shadow duration-300"
+                "transition-shadow duration-300"
             )}
         >
             {coverUrl && !coverError ? (
@@ -84,7 +84,7 @@ export function GameCard({ game, onClick, onHoverStart, onHoverEnd, badge }: Gam
 
             {/* Running badge */}
             {isRunning && elapsed !== undefined && (
-                <div className="absolute top-2 right-2 flex items-center gap-1.5 bg-black/70 backdrop-blur rounded-md px-2 py-0.5 z-10 pointer-events-none">
+                <div className="absolute top-2 right-2 flex items-center gap-1.5 bg-black/70 backdrop-blur rounded-sm px-2 py-0.5 z-10 pointer-events-none">
                     <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
                     <span className="text-xs text-green-400 font-bold">{formatElapsedSeconds(elapsed)}</span>
                 </div>
@@ -98,7 +98,7 @@ export function GameCard({ game, onClick, onHoverStart, onHoverEnd, badge }: Gam
                             e.stopPropagation();
                             setEditGameModalOpen(true, game);
                         }}
-                        className="w-8 h-8 rounded-xl bg-black/60 text-white/50 hover:text-white hover:bg-black flex items-center justify-center pointer-events-auto backdrop-blur-md transition-all shadow-lg border border-white/10 hover:border-white/30 hover:scale-110 active:scale-95"
+                        className="w-8 h-8 rounded-lg bg-black/60 text-white/50 hover:text-white hover:bg-black flex items-center justify-center pointer-events-auto backdrop-blur-md transition-all shadow-lg border border-white/10 hover:border-white/30 hover:scale-110 active:scale-95"
                         title="Edit Metadata"
                     >
                         <Settings size={15} />
@@ -108,7 +108,7 @@ export function GameCard({ game, onClick, onHoverStart, onHoverEnd, badge }: Gam
 
             {/* AutoAttach indicator */}
             {isRunning && runningInfo.source === "AutoAttach" && (
-                <div className="absolute top-2 left-2 text-[10px] bg-black/70 backdrop-blur rounded px-1.5 py-0.5 text-white/60 font-bold tracking-wide uppercase">
+                <div className="absolute top-2 left-2 text-[10px] bg-black/70 backdrop-blur rounded-sm px-1.5 py-0.5 text-white/60 font-bold tracking-wide uppercase">
                     Detected
                 </div>
             )}
@@ -116,7 +116,7 @@ export function GameCard({ game, onClick, onHoverStart, onHoverEnd, badge }: Gam
             {/* Custom badge (NEW/TRENDING/etc.) */}
             {badge && !isRunning && (
                 <div className={cn(
-                    "absolute top-2 left-2 text-[9px] font-black tracking-widest rounded px-2 py-1 flex items-center gap-1",
+                    "absolute top-2 left-2 text-[9px] font-black tracking-widest rounded-sm px-2 py-1 flex items-center gap-1",
                     badgeConfig[badge].bg,
                     badgeConfig[badge].text
                 )}>
@@ -183,7 +183,7 @@ export function GameCard({ game, onClick, onHoverStart, onHoverEnd, badge }: Gam
                     ) : <div />}
 
                     {game.crack_type && game.crack_type !== "unknown" && (
-                        <div className="flex items-center gap-1 bg-white/10 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest text-white/60 border border-white/10">
+                        <div className="flex items-center gap-1 bg-white/10 px-1.5 py-0.5 rounded-sm text-[8px] font-black uppercase tracking-widest text-white/60 border border-white/10">
                             <KeyRound size={8} /> {game.crack_type}
                         </div>
                     )}

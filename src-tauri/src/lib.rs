@@ -140,9 +140,11 @@ pub fn run() {
 
             let is_hidden_startup = args.iter().any(|a| a == "--hidden") || game_to_launch.is_some();
             if is_hidden_startup {
+                log::info!("Started minimized to tray due to --hidden flag or shortcut launch");
+            } else {
                 if let Some(window) = app.get_webview_window("main") {
-                    window.hide().unwrap_or_default();
-                    log::info!("Started minimized to tray due to --hidden flag or shortcut launch");
+                    let _ = window.show();
+                    let _ = window.set_focus();
                 }
             }
 
@@ -391,7 +393,7 @@ pub fn run() {
                 let tray_window = tauri::WebviewWindowBuilder::new(
                     app,
                     "tray",
-                    tauri::WebviewUrl::App("/tray".into()),
+                    tauri::WebviewUrl::App("index.html".into()),
                 )
                 .title("Chira Tray")
                 .inner_size(320.0, 460.0)

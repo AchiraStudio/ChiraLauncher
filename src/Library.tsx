@@ -68,15 +68,15 @@ const SidebarRow = memo(function SidebarRow({ game, isActive, onClick, onContext
             onClick={onClick}
             onContextMenu={onContextMenu}
             className={cn(
-                "w-full flex items-center gap-4 px-3 py-2.5 rounded-2xl transition-all text-left outline-none group relative overflow-hidden cursor-pointer my-0.5",
+                "w-full flex items-center gap-4 px-3 py-2.5 rounded-xl transition-all text-left outline-none group relative overflow-hidden cursor-pointer my-0.5",
                 isActive ? "bg-white/10 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.1)]" : "hover:bg-white/[0.04]"
             )}
         >
             {isActive && (
-                <motion.div layoutId="activeGameIndicator" className="absolute left-0 top-1/4 bottom-1/4 w-1 bg-cyan-400 rounded-r-full shadow-[0_0_10px_rgba(34,211,238,0.8)]" />
+                <motion.div layoutId="activeGameIndicator" className="absolute left-0 top-1/4 bottom-1/4 w-1 bg-accent rounded-r-full shadow-[0_0_10px_var(--color-accent)]" />
             )}
 
-            <div className="w-11 h-[60px] rounded-xl overflow-hidden shrink-0 bg-black/60 relative border border-white/5 shadow-md">
+            <div className="w-11 h-[60px] rounded-lg overflow-hidden shrink-0 bg-black/60 relative border border-white/5 shadow-md">
                 {cover
                     ? <img src={cover} alt={game.title} className="w-full h-full object-cover" />
                     : <div className="w-full h-full flex items-center justify-center text-white/20"><Gamepad2 size={16} /></div>
@@ -101,7 +101,7 @@ const SidebarRow = memo(function SidebarRow({ game, isActive, onClick, onContext
                     data-no-press-sound="true"
                     className={cn(
                         "w-8 h-8 rounded-full flex items-center justify-center transition-all shadow-md active:scale-90",
-                        isRunning ? "bg-red-500/20 text-red-400 hover:bg-red-500 hover:text-white" : "bg-white/10 text-white hover:bg-cyan-400 hover:text-black"
+                        isRunning ? "bg-red-500/20 text-red-400 hover:bg-red-500 hover:text-white" : "bg-white/10 text-white hover:bg-accent hover:text-black"
                     )}
                     title={isRunning ? "Stop Game" : "Quick Launch"}
                 >
@@ -398,20 +398,20 @@ export default function Library() {
 
     if (allGames.length === 0) {
         return (
-            <div className="absolute inset-0 flex items-center justify-center bg-[#08090f]">
-                <div className="text-center space-y-6 p-16 relative z-10">
-                    <div className="w-24 h-24 rounded-full bg-cyan-400/10 border border-cyan-400/20 flex items-center justify-center mx-auto text-cyan-400 shadow-[0_0_40px_rgba(34,211,238,0.15)]">
-                        <Gamepad2 size={40} strokeWidth={1.5} />
+            <div className="absolute inset-0 flex items-center justify-center bg-[#08090f] radar-grid">
+                <div className="text-center space-y-6 p-16 relative z-10 tech-card max-w-md w-full">
+                    <div className="w-24 h-24 flex items-center justify-center mx-auto text-accent shadow-[0_0_40px_rgba(var(--color-accent),0.15)] tech-card-sm relative z-10">
+                        <Gamepad2 size={40} strokeWidth={1.5} className="relative z-10" />
                     </div>
-                    <div>
+                    <div className="relative z-10">
                         <h2 className="text-4xl font-black text-white uppercase tracking-tight drop-shadow-md">Library Empty</h2>
                         <p className="text-white/40 text-sm mt-3 font-medium uppercase tracking-widest">Connect your first title to begin.</p>
                     </div>
-                    <div className="flex gap-4 justify-center pt-6">
-                        <button onClick={() => setAddGameModalOpen(true)} className="flex items-center gap-3 bg-gradient-to-r from-cyan-400 to-cyan-300 text-black px-10 py-4 rounded-2xl font-black text-xs tracking-widest uppercase transition-all shadow-[0_0_20px_rgba(34,211,238,0.3)] hover:brightness-110 active:scale-95">
+                    <div className="flex gap-4 justify-center pt-6 relative z-10">
+                        <button onClick={() => setAddGameModalOpen(true)} className="flex items-center gap-3 bg-gradient-to-r from-accent to-accent/80 text-black px-10 py-4 rounded-xl font-black text-xs tracking-widest uppercase transition-all shadow-[0_0_20px_rgba(var(--color-accent),0.3)] hover:brightness-110 active:scale-95">
                             <Plus size={18} strokeWidth={3} /> Add Game
                         </button>
-                        <button onClick={() => setScannerModalOpen(true)} className="flex items-center gap-3 bg-white/5 hover:bg-white/10 text-white px-10 py-4 rounded-2xl font-bold text-xs tracking-widest uppercase transition-all border border-white/10 active:scale-95">
+                        <button onClick={() => setScannerModalOpen(true)} className="flex items-center gap-3 bg-white/5 hover:bg-white/10 text-white px-10 py-4 rounded-xl font-bold text-xs tracking-widest uppercase transition-all border border-white/5 active:scale-95">
                             <FolderOpen size={18} /> Scan PC
                         </button>
                     </div>
@@ -465,23 +465,23 @@ export default function Library() {
             <div className="relative z-10 flex w-full h-full">
 
                 <div className="w-[320px] lg:w-[380px] shrink-0 h-full p-6 pr-3 flex flex-col">
-                    <aside className="w-full flex-1 flex flex-col bg-black/40 backdrop-blur-3xl border border-white/10 rounded-[2.5rem] shadow-[0_32px_128px_rgba(0,0,0,0.8)] overflow-hidden">
+                    <div className="w-full flex-1 flex flex-col overflow-hidden">
                         <div className="px-6 pt-8 pb-5 shrink-0">
                             <div className="flex items-center justify-between mb-6">
                                 <h2 className="text-sm font-black text-white tracking-widest uppercase drop-shadow-md">Collection</h2>
-                                <span className="text-[11px] font-black text-cyan-400 bg-cyan-400/10 px-3 py-1 rounded-lg border border-cyan-400/20">
+                                <span className="text-[11px] font-black text-accent bg-accent/10 px-3 py-1 rounded-lg border border-accent/20">
                                     {allGames.length}
                                 </span>
                             </div>
 
                             <div className="relative group">
-                                <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-white/30 group-focus-within:text-cyan-400 transition-colors" />
+                                <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-white/30 group-focus-within:text-accent transition-colors" />
                                 <input
                                     type="text"
                                     value={search}
                                     onChange={e => setSearch(e.target.value)}
                                     placeholder="Find a game..."
-                                    className="w-full bg-white/[0.03] hover:bg-white/[0.05] border border-white/10 rounded-2xl pl-12 pr-10 py-4 text-white text-sm font-bold outline-none focus:border-cyan-400/40 focus:bg-white/[0.06] placeholder:text-white/20 transition-all shadow-inner backdrop-blur-md"
+                                    className="w-full bg-white/[0.01] hover:bg-white/[0.04] border border-white/5 rounded-xl pl-12 pr-10 py-4 text-white text-sm font-bold outline-none focus:border-accent/40 focus:bg-white/[0.05] placeholder:text-white/20 transition-all backdrop-blur-md"
                                 />
                                 {search && (
                                     <button onClick={() => setSearch("")} className="absolute right-4 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/70 transition-colors">
@@ -511,12 +511,12 @@ export default function Library() {
                         <div className="shrink-0 p-5 pt-4">
                             <button
                                 onClick={() => setAddGameModalOpen(true)}
-                                className="w-full flex items-center justify-center gap-3 py-4 rounded-2xl bg-white/[0.03] hover:bg-white/[0.08] border border-white/10 text-white font-black transition-all uppercase tracking-widest text-[11px] backdrop-blur-md"
+                                className="w-full flex items-center justify-center gap-3 py-4 rounded-xl bg-white/[0.02] hover:bg-white/[0.06] border border-white/5 text-white font-black transition-all uppercase tracking-widest text-[11px] backdrop-blur-md"
                             >
                                 <Plus size={16} strokeWidth={2.5} /> Link New Game
                             </button>
                         </div>
-                    </aside>
+                    </div>
                 </div>
 
                 <main
@@ -538,13 +538,13 @@ export default function Library() {
 
                                 <div className="flex flex-col xl:flex-row items-start gap-12 mb-16">
                                     <div className="w-[260px] shrink-0 flex flex-col gap-5">
-                                        <div className="w-full aspect-[2/3] rounded-[2rem] overflow-hidden shadow-[0_30px_80px_rgba(0,0,0,0.9)] border border-white/10 bg-black/60 relative group">
+                                        <div className="w-full aspect-[2/3] overflow-hidden shadow-[0_30px_80px_rgba(0,0,0,0.9)] bg-black/60 relative group tech-card">
                                             {coverUrl
-                                                ? <img src={coverUrl} alt={activeGame.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" />
-                                                : <div className="w-full h-full flex items-center justify-center text-white/10"><Gamepad2 size={48} strokeWidth={1} /></div>
+                                                ? <img src={coverUrl} alt={activeGame.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 relative z-10" />
+                                                : <div className="w-full h-full flex items-center justify-center text-white/10 relative z-10"><Gamepad2 size={48} strokeWidth={1} /></div>
                                             }
                                             {isRunning && (
-                                                <div className="absolute top-4 left-4 flex items-center gap-2 bg-green-500/90 backdrop-blur-md px-3.5 py-2 rounded-xl border border-green-400/30 shadow-lg">
+                                                <div className="absolute top-4 left-4 flex items-center gap-2 bg-green-500/90 backdrop-blur-md px-3.5 py-2 rounded-lg border border-green-400/30 shadow-lg z-20">
                                                     <div className="w-2.5 h-2.5 rounded-full bg-white animate-pulse" />
                                                     <span className="text-[10px] font-black text-white uppercase tracking-widest">Running</span>
                                                 </div>
@@ -555,10 +555,10 @@ export default function Library() {
                                             onClick={() => handleLaunch(activeGame)}
                                             data-no-press-sound="true"
                                             className={cn(
-                                                "w-full py-4 rounded-[1.25rem] font-black text-[13px] tracking-widest uppercase transition-all shadow-xl flex items-center justify-center gap-2.5",
+                                                "w-full py-4 rounded-xl font-black text-[13px] tracking-widest uppercase transition-all shadow-xl flex items-center justify-center gap-2.5 relative z-10",
                                                 isRunning
                                                     ? "bg-red-500/90 hover:bg-red-500 text-white shadow-[0_0_20px_rgba(239,68,68,0.4)] active:scale-95"
-                                                    : "bg-gradient-to-r from-cyan-400 to-cyan-300 hover:brightness-110 text-black shadow-[0_0_30px_rgba(34,211,238,0.35)] active:scale-95"
+                                                    : "bg-gradient-to-r from-accent to-accent/80 hover:brightness-110 text-black shadow-[0_0_30px_rgba(var(--color-accent),0.35)] active:scale-95"
                                             )}
                                         >
                                             {isRunning
@@ -568,14 +568,14 @@ export default function Library() {
                                         </button>
 
                                         <div className="grid grid-cols-3 gap-3">
-                                            <button onClick={() => setEditGameModalOpen(true, activeGame)} title="Edit metadata" className="h-14 rounded-2xl bg-black/40 hover:bg-black/60 border border-white/10 flex items-center justify-center text-white/60 hover:text-white transition-all backdrop-blur-3xl shadow-xl">
-                                                <Settings size={20} />
+                                            <button onClick={() => setEditGameModalOpen(true, activeGame)} title="Edit metadata" className="h-14 flex items-center justify-center text-white/60 hover:text-white transition-all shadow-xl tech-card-sm">
+                                                <Settings size={20} className="relative z-10" />
                                             </button>
-                                            <button onClick={() => useGameStore.getState().toggleFavorite(activeGame.id)} title="Favorite" className="h-14 rounded-2xl bg-black/40 hover:bg-black/60 border border-white/10 flex items-center justify-center text-white/60 hover:text-white transition-all backdrop-blur-3xl shadow-xl">
-                                                <Heart size={20} fill={activeGame.is_favorite ? "currentColor" : "none"} className={activeGame.is_favorite ? "text-pink-500" : ""} />
+                                            <button onClick={() => useGameStore.getState().toggleFavorite(activeGame.id)} title="Favorite" className="h-14 flex items-center justify-center text-white/60 hover:text-white transition-all shadow-xl tech-card-sm">
+                                                <Heart size={20} fill={activeGame.is_favorite ? "currentColor" : "none"} className={cn("relative z-10", activeGame.is_favorite ? "text-pink-500" : "")} />
                                             </button>
-                                            <button onClick={() => refreshMetadata(activeGame.id)} disabled={useGameStore.getState().isRefreshing[activeGame.id]} title="Refresh metadata" className="h-14 rounded-2xl bg-black/40 hover:bg-black/60 border border-white/10 flex items-center justify-center text-white/60 hover:text-white transition-all backdrop-blur-3xl shadow-xl disabled:opacity-50">
-                                                <RefreshCcw size={20} className={cn(useGameStore.getState().isRefreshing[activeGame.id] && "animate-spin")} />
+                                            <button onClick={() => refreshMetadata(activeGame.id)} disabled={useGameStore.getState().isRefreshing[activeGame.id]} title="Refresh metadata" className="h-14 flex items-center justify-center text-white/60 hover:text-white transition-all shadow-xl disabled:opacity-50 tech-card-sm">
+                                                <RefreshCcw size={20} className={cn("relative z-10", useGameStore.getState().isRefreshing[activeGame.id] && "animate-spin")} />
                                             </button>
                                         </div>
                                     </div>
@@ -585,52 +585,52 @@ export default function Library() {
 
                                         <div className="flex flex-wrap items-center gap-3 mb-10">
                                             {activeGame.developer && (
-                                                <span className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-[11px] font-black uppercase tracking-widest text-white/80 flex items-center gap-2 backdrop-blur-md">
-                                                    <User2 size={14} className="text-cyan-400" /> {activeGame.developer}
+                                                <span className="px-4 py-2 rounded-lg bg-white/5 border border-white/5 text-[11px] font-black uppercase tracking-widest text-white/80 flex items-center gap-2 backdrop-blur-md">
+                                                    <User2 size={14} className="text-accent" /> {activeGame.developer}
                                                 </span>
                                             )}
                                             {activeGame.publisher && activeGame.publisher !== activeGame.developer && (
-                                                <span className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-[11px] font-black uppercase tracking-widest text-white/80 flex items-center gap-2 backdrop-blur-md">
-                                                    <Building2 size={14} className="text-cyan-400" /> {activeGame.publisher}
+                                                <span className="px-4 py-2 rounded-lg bg-white/5 border border-white/5 text-[11px] font-black uppercase tracking-widest text-white/80 flex items-center gap-2 backdrop-blur-md">
+                                                    <Building2 size={14} className="text-accent" /> {activeGame.publisher}
                                                 </span>
                                             )}
                                             {activeGame.crack_type && activeGame.crack_type !== "unknown" && (
-                                                <span className="px-4 py-2 rounded-xl bg-red-500/10 border border-red-500/20 text-[11px] font-black uppercase tracking-widest text-red-400 flex items-center gap-2 backdrop-blur-md">
+                                                <span className="px-4 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-[11px] font-black uppercase tracking-widest text-red-400 flex items-center gap-2 backdrop-blur-md">
                                                     <ShieldAlert size={14} /> {activeGame.crack_type}
                                                 </span>
                                             )}
                                             {activeGame.steam_app_id && (
-                                                <span className="px-4 py-2 rounded-xl bg-purple-500/10 border border-purple-500/20 text-[11px] font-black uppercase tracking-widest text-purple-400 flex items-center gap-2 backdrop-blur-md">
+                                                <span className="px-4 py-2 rounded-lg bg-purple-500/10 border border-purple-500/20 text-[11px] font-black uppercase tracking-widest text-purple-400 flex items-center gap-2 backdrop-blur-md">
                                                     <Hash size={14} /> AppID: {activeGame.steam_app_id}
                                                 </span>
                                             )}
                                             {activeGame.genre && (
-                                                <span className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-[11px] font-black uppercase tracking-widest text-white/80 flex items-center gap-2 backdrop-blur-md">
+                                                <span className="px-4 py-2 rounded-lg bg-white/5 border border-white/5 text-[11px] font-black uppercase tracking-widest text-white/80 flex items-center gap-2 backdrop-blur-md">
                                                     <Star size={14} className="text-yellow-400" /> {activeGame.genre}
                                                 </span>
                                             )}
                                             {activeGame.id && (
-                                                <span className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-[11px] font-mono uppercase tracking-widest text-white/40 flex items-center gap-2 backdrop-blur-md" title="Internal Game ID">
+                                                <span className="px-4 py-2 rounded-lg bg-white/5 border border-white/5 text-[11px] font-mono uppercase tracking-widest text-white/40 flex items-center gap-2 backdrop-blur-md" title="Internal Game ID">
                                                     <Fingerprint size={14} className="text-white/20" /> {activeGame.id}
                                                 </span>
                                             )}
                                         </div>
 
-                                        <div className="inline-flex items-center flex-wrap gap-6 px-6 py-4 rounded-[1.25rem] bg-black/50 border border-white/10 backdrop-blur-2xl text-xs font-bold text-white/50 mb-12 shadow-2xl">
-                                            <span className="flex items-center gap-2.5 text-cyan-400">
+                                        <div className="inline-flex items-center flex-wrap gap-6 px-6 py-4 text-xs font-bold text-white/50 mb-12 shadow-2xl tech-card-sm">
+                                            <span className="flex items-center gap-2.5 text-accent relative z-10">
                                                 <Clock size={16} />
                                                 {formatPlaytime(activeGame.playtime_seconds || 0)}
                                             </span>
                                             {activeGame.last_played && (
                                                 <>
-                                                    <span className="w-1 h-1 rounded-full bg-white/20" />
-                                                    <span>Last played: <span className="text-white/90">{new Date(activeGame.last_played).toLocaleDateString()}</span></span>
+                                                    <span className="w-1 h-1 rounded-full bg-white/20 relative z-10" />
+                                                    <span className="relative z-10">Last played: <span className="text-white/90">{new Date(activeGame.last_played).toLocaleDateString()}</span></span>
                                                 </>
                                             )}
                                             {activeGame.release_date && (
                                                 <>
-                                                    <span className="w-1 h-1 rounded-full bg-white/20" />
-                                                    <span>Released: <span className="text-white/90">{new Date(activeGame.release_date).getFullYear()}</span></span>
+                                                    <span className="w-1 h-1 rounded-full bg-white/20 relative z-10" />
+                                                    <span className="relative z-10">Released: <span className="text-white/90">{new Date(activeGame.release_date).getFullYear()}</span></span>
                                                 </>
                                             )}
                                         </div>
@@ -638,13 +638,13 @@ export default function Library() {
                                         <div
                                             onClick={() => achievements.length > 0 && setShowAchievements(true)}
                                             className={cn(
-                                                "bg-black/50 backdrop-blur-3xl rounded-[2rem] p-8 border border-white/10 shadow-2xl flex flex-col justify-between transition-all",
+                                                "p-8 shadow-2xl flex flex-col justify-between transition-all tech-card",
                                                 achievements.length > 0
-                                                    ? "cursor-pointer hover:border-yellow-500/40 hover:bg-black/70 group"
+                                                    ? "cursor-pointer group"
                                                     : "opacity-60"
                                             )}
                                         >
-                                            <div className="flex justify-between items-start mb-6">
+                                            <div className="flex justify-between items-start mb-6 relative z-10">
                                                 <div>
                                                     <h3 className="text-[10px] font-black text-white/40 uppercase tracking-widest mb-3 flex items-center gap-2.5">
                                                         <Trophy size={14} className="text-yellow-400" /> Progress
@@ -654,15 +654,15 @@ export default function Library() {
                                                     </div>
                                                 </div>
                                                 {achievements.length > 0 && (
-                                                    <button className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center text-white/30 group-hover:text-yellow-400 group-hover:bg-yellow-500/10 transition-colors border border-white/5 group-hover:border-yellow-500/20">
+                                                    <button className="w-10 h-10 rounded-lg bg-white/5 flex items-center justify-center text-white/30 group-hover:text-yellow-400 group-hover:bg-yellow-500/10 transition-colors border border-white/5 group-hover:border-yellow-500/20">
                                                         <ExternalLink size={16} />
                                                     </button>
                                                 )}
                                             </div>
-                                            <div>
+                                            <div className="relative z-10">
                                                 <div className="h-2 w-full bg-white/10 rounded-full mb-4 overflow-hidden shadow-inner border border-white/[0.02]">
                                                     <motion.div
-                                                        className="h-full bg-yellow-400 rounded-full shadow-[0_0_12px_rgba(250,204,21,0.5)]"
+                                                        className="h-full bg-yellow-400 rounded-full shadow-[0_0_12px_rgba(250,204,21,0.5)] diagonal-progress"
                                                         initial={{ width: 0 }}
                                                         animate={{ width: `${achievePct}%` }}
                                                         transition={{ duration: 0.9, ease: "easeOut", delay: 0.15 }}
@@ -679,24 +679,24 @@ export default function Library() {
                                 )}
 
                                 {steamDetails?.pc_requirements && (steamDetails.pc_requirements.minimum || steamDetails.pc_requirements.recommended) && (
-                                    <div className="mt-16 border-t border-white/10 pt-16">
-                                        <h2 className="text-[11px] font-black text-white/30 uppercase tracking-[0.2em] mb-10">System Requirements</h2>
-                                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                                            {steamDetails.pc_requirements.minimum && (
-                                                <div
-                                                    className={cn("bg-black/40 backdrop-blur-3xl border border-white/10 rounded-[2rem] p-10 shadow-2xl", reqHtml)}
-                                                    dangerouslySetInnerHTML={{ __html: steamDetails.pc_requirements.minimum }}
-                                                />
-                                            )}
-                                            {steamDetails.pc_requirements.recommended && (
-                                                <div
-                                                    className={cn("bg-black/40 backdrop-blur-3xl border border-white/10 rounded-[2rem] p-10 shadow-2xl", reqHtml)}
-                                                    dangerouslySetInnerHTML={{ __html: steamDetails.pc_requirements.recommended }}
-                                                />
-                                            )}
-                                        </div>
-                                    </div>
-                                )}
+                                     <div className="mt-16 border-t border-white/10 pt-16">
+                                         <h2 className="text-[11px] font-black text-white/30 uppercase tracking-[0.2em] mb-10">System Requirements</h2>
+                                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                                             {steamDetails.pc_requirements.minimum && (
+                                                 <div
+                                                     className={cn("p-10 shadow-2xl tech-card min-h-[300px]", reqHtml)}
+                                                     dangerouslySetInnerHTML={{ __html: steamDetails.pc_requirements.minimum }}
+                                                 />
+                                             )}
+                                             {steamDetails.pc_requirements.recommended && (
+                                                 <div
+                                                     className={cn("p-10 shadow-2xl tech-card min-h-[300px]", reqHtml)}
+                                                     dangerouslySetInnerHTML={{ __html: steamDetails.pc_requirements.recommended }}
+                                                 />
+                                             )}
+                                         </div>
+                                     </div>
+                                 )}
 
                                 {steamDetails && (steamDetails.metacritic || steamDetails.genres?.length || steamDetails.categories?.length) && (
                                     <div className="mt-16 border-t border-white/10 pt-16 flex flex-wrap gap-16">

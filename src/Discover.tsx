@@ -368,8 +368,8 @@ export function Discover() {
                     </div>
 
                     {localProfile?.is_cloud_synced ? (
-                        <div className="bg-[#0f1423]/80 backdrop-blur-3xl border border-white/[0.08] rounded-[2rem] p-6 shadow-2xl flex flex-col relative overflow-hidden">
-                            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-accent to-purple-500" />
+                        <div className="shadow-2xl flex flex-col relative overflow-hidden tech-card p-6">
+                            <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-accent to-purple-500 z-10" />
 
                             <div className="flex items-center gap-1 mb-4 pb-3 border-b border-white/[0.05] ml-14">
                                 <button onClick={() => insertFormat("<b>", "</b>")} className="p-1.5 text-white/40 hover:text-white hover:bg-white/10 rounded transition-colors" title="Bold"><Bold size={16} /></button>
@@ -490,8 +490,8 @@ export function Discover() {
                                             animate={{ opacity: 1, y: 0 }}
                                             exit={{ opacity: 0, scale: 0.9 }}
                                             className={cn(
-                                                "backdrop-blur-3xl rounded-[2rem] p-6 shadow-2xl flex flex-col border transition-all hover:bg-white/[0.02]",
-                                                item.is_pinned ? "bg-red-500/5 border-red-500/30 shadow-[0_0_40px_rgba(239,68,68,0.15)]" : "bg-[#0a0f18]/80 border-white/[0.08]"
+                                                "shadow-2xl flex flex-col border transition-all hover:bg-white/[0.01] rounded-xl p-6 relative z-10",
+                                                item.is_pinned ? "bg-red-500/5 border-red-500/20 shadow-[0_0_40px_rgba(239,68,68,0.15)]" : "bg-[#0a0f18]/45 border-white/5"
                                             )}
                                         >
                                             <div className="flex items-center justify-between mb-4">
@@ -676,14 +676,14 @@ export function Discover() {
                                     <Lock className="text-green-400" size={18} />
                                     <h2 className="text-xl font-black text-white uppercase tracking-tighter">Active Comms</h2>
                                 </div>
-                                <div className="bg-[#0a0f18]/90 backdrop-blur-3xl border border-white/[0.08] rounded-[2rem] p-3 shadow-2xl flex flex-col gap-1">
+                                <div className="flex flex-col gap-1">
                                     {recentChats.map(chat => (
                                         <button
                                             key={chat.contact_id}
                                             onClick={() => navigate(`/messages/${chat.contact_id}`)}
-                                            className="w-full flex items-center gap-3 p-3 rounded-2xl hover:bg-white/5 transition-all text-left group"
+                                            className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-white/[0.02] border border-transparent hover:border-white/5 transition-all text-left group relative"
                                         >
-                                            <div className="w-10 h-10 rounded-xl bg-black/50 overflow-hidden border border-white/10 relative shrink-0">
+                                            <div className="w-10 h-10 rounded-lg bg-black/50 overflow-hidden border border-white/5 relative shrink-0">
                                                 {chat.profile?.avatar_url ? <img src={chat.profile.avatar_url} className="w-full h-full object-cover" /> : <User className="w-full h-full p-2 text-white/20" />}
                                             </div>
                                             <div className="flex-1 min-w-0">
@@ -708,17 +708,17 @@ export function Discover() {
                                 <Trophy className="text-yellow-400" size={20} />
                                 <h2 className="text-xl font-black text-white uppercase tracking-tighter">Global Ranks</h2>
                             </div>
-                            <div className="bg-[#0a0f18]/90 backdrop-blur-3xl border border-white/[0.08] rounded-[2rem] p-5 shadow-2xl space-y-1">
+                            <div className="space-y-1">
                                 {isFetching ? (
                                     <div className="flex justify-center py-10"><Loader2 className="animate-spin text-accent" /></div>
                                 ) : leaderboard.length === 0 ? (
                                     <div className="text-center text-white/30 py-10 font-bold uppercase tracking-widest text-xs">No Data Available</div>
                                 ) : leaderboard.map((user, idx) => (
-                                    <div key={user.id} className="flex items-center gap-4 p-3 rounded-2xl hover:bg-white/5 transition-colors group border border-transparent hover:border-white/10">
+                                    <div key={user.id} className="flex items-center gap-4 p-3 rounded-xl hover:bg-white/[0.02] transition-colors group border border-transparent hover:border-white/5">
                                         <div className="w-6 text-center font-black text-lg text-white/20 group-hover:text-accent transition-colors">
                                             {idx + 1}
                                         </div>
-                                        <div className="w-10 h-10 rounded-xl bg-black/50 overflow-hidden border border-white/10 relative shrink-0">
+                                        <div className="w-10 h-10 rounded-lg bg-black/50 overflow-hidden border border-white/5 relative shrink-0">
                                             {user.avatar_url ? <img src={user.avatar_url} className="w-full h-full object-cover" /> : <User className="w-full h-full p-2 text-white/20" />}
                                             {user.role === 'admin' && (
                                                 <div className="absolute -bottom-1 -right-1 bg-red-500 text-white rounded-full p-0.5 shadow-lg">

@@ -8,7 +8,8 @@ import { formatPlaytime } from "./lib/format";
 import { useLocalImage } from "./hooks/useLocalImage";
 import {
     Edit2, Check, Shield, Copy, Trophy, Gamepad2, Clock,
-    LogOut, Sparkles, User, Target, Zap, Fingerprint, Hexagon, TrendingUp, BarChart3, Lock, Upload
+    LogOut, Sparkles, User, Target, Zap, Fingerprint, Hexagon, TrendingUp, BarChart3, Lock, Upload,
+    BookOpen, Database, Crown, Rocket, Flame, Award
 } from "lucide-react";
 import { supabase } from "./lib/supabase";
 import { toast } from "sonner";
@@ -44,9 +45,15 @@ const ALL_MILESTONES = [
     { id: "first_game", icon: <Gamepad2 size={18} />, label: "Core Initialized", desc: "Added your first game", check: (g: number, _: number) => g >= 1 },
     { id: "collector", icon: <Target size={18} />, label: "Collector", desc: "5+ games in your library", check: (g: number, _: number) => g >= 5 },
     { id: "hoarder", icon: <Shield size={18} />, label: "Archivist", desc: "10+ games in your library", check: (g: number, _: number) => g >= 10 },
+    { id: "librarian", icon: <BookOpen size={18} />, label: "Librarian", desc: "25+ games in your library", check: (g: number, _: number) => g >= 25 },
+    { id: "vault_keeper", icon: <Database size={18} />, label: "Vault Keeper", desc: "50+ games in your library", check: (g: number, _: number) => g >= 50 },
+    { id: "nexus_prime", icon: <Crown size={18} />, label: "Nexus Prime", desc: "100+ games in your library", check: (g: number, _: number) => g >= 100 },
     { id: "hour_one", icon: <Clock size={18} />, label: "Cycle One", desc: "1+ hour of playtime", check: (_: number, s: number) => s >= 3600 },
     { id: "time_lord", icon: <Sparkles size={18} />, label: "Time Lord", desc: "10+ hours of total playtime", check: (_: number, s: number) => s >= 36000 },
     { id: "marathon", icon: <TrendingUp size={18} />, label: "Marathon", desc: "100+ hours of playtime", check: (_: number, s: number) => s >= 360000 },
+    { id: "ascendant", icon: <Rocket size={18} />, label: "Ascendant", desc: "500+ hours of playtime", check: (_: number, s: number) => s >= 1800000 },
+    { id: "immortal", icon: <Flame size={18} />, label: "Immortal", desc: "1,000+ hours of playtime", check: (_: number, s: number) => s >= 3600000 },
+    { id: "legend", icon: <Award size={18} />, label: "Legend", desc: "2,500+ hours of playtime", check: (_: number, s: number) => s >= 9000000 },
 ];
 
 export function UserPage() {
@@ -198,7 +205,7 @@ export function UserPage() {
                     <div className="col-span-1 lg:col-span-4 flex flex-col gap-8">
                         <motion.div
                             layout
-                            className="bg-[#0f1423]/90 backdrop-blur-3xl border border-white/[0.08] rounded-[2.5rem] p-8 shadow-2xl relative overflow-hidden group"
+                            className="shadow-2xl relative overflow-hidden group tech-card p-8"
                         >
                             <div className="absolute inset-0 bg-gradient-to-b from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
 
@@ -247,7 +254,7 @@ export function UserPage() {
                                             />
                                             <button
                                                 onClick={() => profile?.supabase_user_id && fileInputRef.current?.click()}
-                                                className="w-32 h-32 rounded-[2.5rem] bg-black/50 border border-white/10 shadow-2xl overflow-hidden mb-6 relative group/avatar cursor-pointer"
+                                                className="w-32 h-32 rounded-xl bg-black/50 border border-white/5 shadow-2xl overflow-hidden mb-6 relative group/avatar cursor-pointer"
                                                 title={profile?.supabase_user_id ? "Change Profile Picture" : "Must connect to Cloud to upload picture"}
                                             >
                                                 {profile?.avatar_url ? (
@@ -303,9 +310,9 @@ export function UserPage() {
                                                     {profile?.xp || 0} <span className="text-white/20">/ {stats.xpForNextLevel}</span>
                                                 </span>
                                             </div>
-                                            <div className="h-2 w-full bg-white/[0.05] rounded-full overflow-hidden shadow-inner border border-white/[0.02]">
+                                            <div className="h-2 w-full bg-white/[0.05] rounded-full overflow-hidden shadow-inner border border-white/[0.02] relative z-10">
                                                 <motion.div
-                                                    className="h-full bg-gradient-to-r from-accent to-blue-400"
+                                                    className="h-full bg-gradient-to-r from-accent to-blue-400 diagonal-progress"
                                                     initial={{ width: 0 }}
                                                     animate={{ width: `${stats.xpProgress}%` }}
                                                     transition={{ duration: 1, ease: "easeOut", delay: 0.2 }}
@@ -318,24 +325,24 @@ export function UserPage() {
                         </motion.div>
 
                         <div className="grid grid-cols-2 gap-4">
-                            <div className="bg-[#0f1423]/90 backdrop-blur-3xl rounded-[2rem] p-6 border border-white/[0.08] flex flex-col items-center text-center group hover:border-white/[0.15] transition-colors shadow-2xl">
-                                <Gamepad2 className="text-accent mb-4 group-hover:scale-110 transition-transform" size={28} />
-                                <span className="text-4xl font-black text-white mb-2 tabular-nums tracking-tighter">{stats.totalGames}</span>
-                                <span className="text-[9px] font-black text-white/30 uppercase tracking-widest">Total Cores</span>
+                            <div className="p-6 flex flex-col items-center text-center group transition-colors shadow-2xl tech-card-sm">
+                                <Gamepad2 className="text-accent mb-4 group-hover:scale-110 transition-transform relative z-10" size={28} />
+                                <span className="text-4xl font-black text-white mb-2 tabular-nums tracking-tighter relative z-10">{stats.totalGames}</span>
+                                <span className="text-[9px] font-black text-white/30 uppercase tracking-widest relative z-10">Total Cores</span>
                             </div>
-                            <div className="bg-[#0f1423]/90 backdrop-blur-3xl rounded-[2rem] p-6 border border-white/[0.08] flex flex-col items-center text-center group hover:border-white/[0.15] transition-colors shadow-2xl">
-                                <Clock className="text-purple-400 mb-4 group-hover:scale-110 transition-transform" size={28} />
-                                <span className="text-2xl font-black text-white mb-2 tabular-nums leading-[1.65] tracking-tight">
+                            <div className="p-6 flex flex-col items-center text-center group transition-colors shadow-2xl tech-card-sm">
+                                <Clock className="text-purple-400 mb-4 group-hover:scale-110 transition-transform relative z-10" size={28} />
+                                <span className="text-2xl font-black text-white mb-2 tabular-nums leading-[1.65] tracking-tight relative z-10">
                                     {formatPlaytime(stats.totalPlaytime).replace(' played', '')}
                                 </span>
-                                <span className="text-[9px] font-black text-white/30 uppercase tracking-widest">Time Logged</span>
+                                <span className="text-[9px] font-black text-white/30 uppercase tracking-widest relative z-10">Time Logged</span>
                             </div>
                         </div>
                     </div>
 
                     <div className="xl:col-span-8 flex flex-col gap-6">
-                        <div className="bg-[#0f1423]/90 backdrop-blur-3xl rounded-[2.5rem] p-8 border border-white/[0.08] shadow-2xl">
-                            <div className="flex items-center justify-between mb-8">
+                        <div className="flex flex-col">
+                            <div className="flex items-center justify-between mb-6">
                                 <h3 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-3">
                                     <Trophy className="text-yellow-400" size={18} /> Service Honors
                                 </h3>
@@ -355,14 +362,14 @@ export function UserPage() {
                                             transition={{ delay: i * 0.05 }}
                                             title={badge.desc}
                                             className={cn(
-                                                "relative overflow-hidden p-5 rounded-2xl border flex items-center gap-4 transition-all duration-500",
+                                                "relative overflow-hidden p-5 border flex items-center gap-4 transition-all duration-500 rounded-xl",
                                                 unlocked
                                                     ? "bg-yellow-500/10 border-yellow-500/20 shadow-[0_0_20px_rgba(234,179,8,0.1)] hover:bg-yellow-500/15"
                                                     : "bg-black/40 border-white/5 opacity-50 grayscale"
                                             )}
                                         >
                                             <div className={cn(
-                                                "w-12 h-12 rounded-xl flex items-center justify-center shrink-0 shadow-inner",
+                                                "w-12 h-12 rounded-lg flex items-center justify-center shrink-0 shadow-inner",
                                                 unlocked ? "bg-yellow-500/20 text-yellow-400 border border-yellow-500/30" : "bg-white/5 text-white/20 border border-white/10"
                                             )}>
                                                 {unlocked ? badge.icon : <Lock size={16} />}
@@ -378,11 +385,11 @@ export function UserPage() {
                         </div>
 
                         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 flex-1">
-                            <div className="bg-[#0f1423]/90 backdrop-blur-3xl rounded-[2.5rem] p-8 border border-white/[0.08] shadow-2xl flex flex-col">
-                                <h3 className="text-sm font-black text-white uppercase tracking-widest mb-6 flex items-center gap-3">
+                            <div className="p-8 shadow-2xl flex flex-col tech-card">
+                                <h3 className="text-sm font-black text-white uppercase tracking-widest mb-6 flex items-center gap-3 relative z-10">
                                     <Zap className="text-blue-400" size={18} /> Most Played
                                 </h3>
-                                <div className="space-y-3 flex-1 overflow-y-auto pr-2 custom-scrollbar">
+                                <div className="space-y-3 flex-1 overflow-y-auto pr-2 custom-scrollbar relative z-10">
                                     {stats.topGames.length === 0 ? (
                                         <div className="h-full flex flex-col items-center justify-center text-white/20 pb-10">
                                             <Gamepad2 size={32} className="mb-3 opacity-50" />
@@ -390,8 +397,8 @@ export function UserPage() {
                                         </div>
                                     ) : (
                                         stats.topGames.map((g) => (
-                                            <div key={g.id} onClick={() => navigate('/library', { state: { gameId: g.id } })} className="flex items-center gap-4 bg-black/40 p-3 rounded-2xl border border-white/5 hover:bg-white/[0.08] hover:border-white/15 cursor-pointer transition-all group shadow-inner">
-                                                <div className="w-11 h-14 bg-black/50 rounded-xl overflow-hidden border border-white/10 shrink-0 shadow-md group-hover:shadow-accent/20 transition-all">
+                                            <div key={g.id} onClick={() => navigate('/library', { state: { gameId: g.id } })} className="flex items-center gap-4 bg-black/40 p-3 rounded-xl border border-white/5 hover:bg-white/[0.08] hover:border-white/15 cursor-pointer transition-all group shadow-inner relative z-10">
+                                                <div className="w-11 h-14 bg-black/50 rounded-lg overflow-hidden border border-white/5 shrink-0 shadow-md group-hover:shadow-accent/20 transition-all">
                                                     <TopGameCover path={g.cover_image_path || (g as any).cover_path} />
                                                 </div>
                                                 <div className="flex-1 min-w-0">
@@ -404,11 +411,11 @@ export function UserPage() {
                                 </div>
                             </div>
 
-                            <div className="bg-[#0f1423]/90 backdrop-blur-3xl rounded-[2.5rem] p-8 border border-white/[0.08] shadow-2xl flex flex-col">
-                                <h3 className="text-sm font-black text-white uppercase tracking-widest mb-8 flex items-center gap-3">
+                            <div className="p-8 shadow-2xl flex flex-col tech-card">
+                                <h3 className="text-sm font-black text-white uppercase tracking-widest mb-8 flex items-center gap-3 relative z-10">
                                     <Hexagon className="text-green-400" size={18} /> Top Genres
                                 </h3>
-                                <div className="space-y-6 flex-1 flex flex-col justify-center pb-4">
+                                <div className="space-y-6 flex-1 flex flex-col justify-center pb-4 relative z-10">
                                     {stats.topGenres.length === 0 ? (
                                         <div className="flex flex-col items-center justify-center text-white/20 pb-6">
                                             <BarChart3 size={32} className="mb-3 opacity-50" />
@@ -424,9 +431,9 @@ export function UserPage() {
                                                         <span className="text-white/60 truncate pr-4">{genre}</span>
                                                         <span className="text-white/80">{count}</span>
                                                     </div>
-                                                    <div className="h-1.5 w-full bg-black/50 rounded-full overflow-hidden shadow-inner border border-white/[0.02]">
+                                                    <div className="h-1.5 w-full bg-black/50 rounded-full overflow-hidden shadow-inner border border-white/[0.02] relative z-10">
                                                         <motion.div
-                                                            className={cn("h-full rounded-full shadow-[0_0_10px_rgba(255,255,255,0.2)]", colors[i] || "bg-white/20")}
+                                                            className={cn("h-full rounded-full shadow-[0_0_10px_rgba(255,255,255,0.2)] diagonal-progress", colors[i] || "bg-white/20")}
                                                             initial={{ width: 0 }}
                                                             animate={{ width: `${(count / max) * 100}%` }}
                                                             transition={{ duration: 1.2, delay: i * 0.15, ease: "easeOut" }}

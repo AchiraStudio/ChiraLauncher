@@ -92,13 +92,13 @@ export function Browse() {
                 <div className="sticky top-0 z-50 px-8 py-6 flex flex-col md:flex-row items-center justify-between gap-6 pointer-events-none">
                     <div className="flex-1 w-full max-w-xl pointer-events-auto">
                         <div className="relative group">
-                            <Search size={18} className="absolute left-5 top-1/2 -translate-y-1/2 text-white/30 group-focus-within:text-cyan-400 transition-colors" />
+                            <Search size={18} className="absolute left-5 top-1/2 -translate-y-1/2 text-white/30 group-focus-within:text-accent transition-colors" />
                             <input
                                 type="text"
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
                                 placeholder="Search the catalog..."
-                                className="w-full bg-black/40 backdrop-blur-2xl border border-white/10 rounded-[1.5rem] py-4 pl-14 pr-6 text-sm font-bold text-white placeholder:text-white/30 focus:outline-none focus:border-cyan-400/50 shadow-2xl transition-all"
+                                className="w-full bg-black/40 backdrop-blur-2xl border border-white/5 rounded-xl py-4 pl-14 pr-6 text-sm font-bold text-white placeholder:text-white/30 focus:outline-none focus:border-accent/40 shadow-2xl transition-all"
                             />
                         </div>
                     </div>
@@ -109,10 +109,10 @@ export function Browse() {
                                 key={cat}
                                 onClick={() => setActiveCategory(cat)}
                                 className={cn(
-                                    "px-5 py-3 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all whitespace-nowrap backdrop-blur-md shadow-lg",
+                                    "px-5 py-3 rounded-lg text-[11px] font-black uppercase tracking-widest transition-all whitespace-nowrap backdrop-blur-md shadow-lg",
                                     activeCategory === cat
-                                        ? "bg-cyan-400 text-black shadow-[0_0_20px_rgba(34,211,238,0.4)]"
-                                        : "bg-black/40 border border-white/10 text-white/60 hover:text-white hover:bg-white/10"
+                                        ? "bg-accent text-black shadow-[0_0_20px_rgba(var(--color-accent),0.4)]"
+                                        : "bg-black/40 border border-white/5 text-white/60 hover:text-white hover:bg-white/10"
                                 )}
                             >
                                 {cat}
@@ -125,7 +125,7 @@ export function Browse() {
 
                     {/* ── DYNAMIC HERO CAROUSEL ── */}
                     <section className="mb-20">
-                        <div className="relative w-full aspect-[21/9] max-h-[600px] rounded-[2.5rem] overflow-hidden border border-white/10 shadow-[0_40px_100px_rgba(0,0,0,0.8)] bg-black">
+                        <div className="relative w-full aspect-[21/9] max-h-[600px] overflow-hidden shadow-[0_40px_100px_rgba(0,0,0,0.8)] bg-black tech-card">
                             <AnimatePresence mode="wait">
                                 <motion.img
                                     key={currentHero.id}
@@ -135,14 +135,14 @@ export function Browse() {
                                     animate={{ opacity: 1, scale: 1 }}
                                     exit={{ opacity: 0 }}
                                     transition={{ duration: 0.8, ease: "easeOut" }}
-                                    className="absolute inset-0 w-full h-full object-cover brightness-[0.6]"
+                                    className="absolute inset-0 w-full h-full object-cover brightness-[0.6] relative z-10"
                                 />
                             </AnimatePresence>
-                            <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent" />
-                            <div className="absolute inset-0 bg-gradient-to-r from-black/90 via-black/40 to-transparent w-[70%]" />
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent z-10" />
+                            <div className="absolute inset-0 bg-gradient-to-r from-black/90 via-black/40 to-transparent w-[70%] z-10" />
 
                             {/* Hero Content */}
-                            <div className="absolute inset-0 p-12 lg:p-20 flex flex-col justify-end pointer-events-none">
+                            <div className="absolute inset-0 p-12 lg:p-20 flex flex-col justify-end pointer-events-none z-20">
                                 <AnimatePresence mode="wait">
                                     <motion.div
                                         key={currentHero.id}
@@ -153,7 +153,7 @@ export function Browse() {
                                         className="max-w-2xl pointer-events-auto"
                                     >
                                         <div className="flex items-center gap-3 mb-4">
-                                            <span className="px-3 py-1 rounded-lg bg-cyan-400/20 border border-cyan-400/30 text-cyan-400 text-[10px] font-black uppercase tracking-widest backdrop-blur-md">Featured</span>
+                                            <span className="px-3 py-1 rounded-lg bg-accent/20 border border-accent/30 text-accent text-[10px] font-black uppercase tracking-widest backdrop-blur-md">Featured</span>
                                             <span className="text-white/50 text-[10px] font-bold uppercase tracking-widest">{currentHero.developer}</span>
                                         </div>
                                         <h1 className="text-5xl lg:text-7xl font-black tracking-tighter text-white drop-shadow-lg mb-6 leading-tight">
@@ -162,17 +162,17 @@ export function Browse() {
 
                                         <div className="flex items-center gap-3 mb-8">
                                             {currentHero.tags.map(tag => (
-                                                <span key={tag} className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-white/70 text-[10px] font-bold uppercase tracking-widest backdrop-blur-md flex items-center gap-1.5">
+                                                <span key={tag} className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/5 text-white/70 text-[10px] font-bold uppercase tracking-widest backdrop-blur-md flex items-center gap-1.5">
                                                     <Tag size={10} /> {tag}
                                                 </span>
                                             ))}
                                         </div>
 
                                         <div className="flex items-center gap-6">
-                                            <button className="px-10 py-4 rounded-2xl bg-gradient-to-r from-cyan-400 to-cyan-300 text-black font-black text-xs uppercase tracking-widest shadow-[0_0_30px_rgba(34,211,238,0.3)] hover:brightness-110 transition-all active:scale-95 flex items-center gap-3">
+                                            <button className="px-10 py-4 rounded-xl bg-gradient-to-r from-accent to-accent/80 text-black font-black text-xs uppercase tracking-widest shadow-[0_0_30px_rgba(var(--color-accent),0.3)] hover:brightness-110 transition-all active:scale-95 flex items-center gap-3">
                                                 <Download size={16} strokeWidth={3} /> Get - {currentHero.price}
                                             </button>
-                                            <button className="w-14 h-14 rounded-2xl bg-white/10 hover:bg-white/20 border border-white/10 flex items-center justify-center text-white backdrop-blur-md transition-all active:scale-95">
+                                            <button className="w-14 h-14 rounded-xl bg-white/10 hover:bg-white/20 border border-white/5 flex items-center justify-center text-white backdrop-blur-md transition-all active:scale-95">
                                                 <Star size={20} />
                                             </button>
                                         </div>
@@ -213,26 +213,26 @@ export function Browse() {
                                 <motion.div
                                     key={game.id}
                                     whileHover={{ y: -8 }}
-                                    className="group cursor-pointer rounded-[2rem] bg-black/40 backdrop-blur-xl border border-white/5 p-4 transition-all hover:bg-white/[0.04] hover:border-white/15 shadow-xl hover:shadow-2xl"
+                                    className="group cursor-pointer transition-all shadow-xl hover:shadow-2xl tech-card-sm p-4"
                                 >
-                                    <div className="w-full aspect-[16/9] rounded-[1.25rem] overflow-hidden mb-4 relative bg-black/50 border border-white/5 shadow-inner">
+                                    <div className="w-full aspect-[16/9] rounded-lg overflow-hidden mb-4 relative bg-black/50 border border-white/5 shadow-inner z-10">
                                         <img src={game.image} alt={game.title} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" />
-                                        <div className="absolute top-3 right-3 bg-black/60 backdrop-blur-md px-2 py-1 rounded-lg border border-white/10 flex items-center gap-1.5 shadow-md">
+                                        <div className="absolute top-3 right-3 bg-black/60 backdrop-blur-md px-2 py-1 rounded-lg border border-white/5 flex items-center gap-1.5 shadow-md">
                                             <Star size={10} className="text-yellow-400" fill="currentColor" />
                                             <span className="text-[10px] font-black text-white">{game.rating}</span>
                                         </div>
                                         {/* Overlay Hover Play Button */}
                                         <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                                            <div className="w-12 h-12 rounded-full bg-cyan-400 text-black flex items-center justify-center shadow-[0_0_20px_rgba(34,211,238,0.5)] transform scale-75 group-hover:scale-100 transition-transform duration-300 delay-75">
+                                            <div className="w-12 h-12 rounded-full bg-accent text-black flex items-center justify-center shadow-[0_0_20px_rgba(var(--color-accent),0.5)] transform scale-75 group-hover:scale-100 transition-transform duration-300 delay-75">
                                                 <Search size={20} strokeWidth={3} />
                                             </div>
                                         </div>
                                     </div>
-                                    <div className="px-2">
-                                        <h3 className="text-sm font-bold text-white truncate mb-2 group-hover:text-cyan-400 transition-colors">{game.title}</h3>
+                                    <div className="px-2 relative z-10">
+                                        <h3 className="text-sm font-bold text-white truncate mb-2 group-hover:text-accent transition-colors">{game.title}</h3>
                                         <div className="flex items-center justify-between">
                                             <span className="text-[11px] font-black text-white/50 uppercase tracking-widest">{game.price}</span>
-                                            <button className="w-8 h-8 rounded-xl bg-white/5 group-hover:bg-cyan-400/10 flex items-center justify-center text-white/40 group-hover:text-cyan-400 transition-colors">
+                                            <button className="w-8 h-8 rounded-lg bg-white/5 group-hover:bg-accent/10 flex items-center justify-center text-white/40 group-hover:text-accent transition-colors">
                                                 <Download size={14} />
                                             </button>
                                         </div>

@@ -23,7 +23,7 @@ export function Favorites() {
                         transition={{ duration: 0.35 }}
                         className="flex items-center gap-6"
                     >
-                        <div className="w-16 h-16 rounded-3xl bg-accent/10 border border-accent/20 flex items-center justify-center text-accent shadow-[0_0_25px_rgba(192,38,211,0.2)]">
+                        <div className="w-16 h-16 rounded-xl bg-accent/10 border border-accent/20 flex items-center justify-center text-accent shadow-[0_0_25px_rgba(var(--color-accent),0.2)]">
                             <Star size={32} fill="currentColor" />
                         </div>
                         <div>
@@ -39,19 +39,18 @@ export function Favorites() {
                     <motion.div
                         initial={{ opacity: 0, scale: 0.95 }}
                         animate={{ opacity: 1, scale: 1 }}
-                        className="flex-1 flex flex-col items-center justify-center py-40 text-center"
+                        className="flex-1 flex flex-col items-center justify-center py-40 text-center radar-grid rounded-xl border border-white/5"
                     >
-                        <div className="w-32 h-32 glass-panel rounded-[2.5rem] flex items-center justify-center mb-10 shadow-3xl border border-white/5 relative group">
-                            <div className="absolute inset-0 bg-accent/5 rounded-[2.5rem] blur-2xl group-hover:bg-accent/10 transition-all" />
-                            <Star size={56} className="text-white/5 group-hover:text-accent group-hover:scale-110 transition-all duration-500" />
+                        <div className="w-32 h-32 flex items-center justify-center mb-10 shadow-3xl relative group tech-card-sm">
+                            <Star size={56} className="text-white/5 group-hover:text-accent group-hover:scale-110 transition-all duration-500 relative z-10" />
                         </div>
-                        <h3 className="text-3xl font-bold text-white mb-4 tracking-tight">Empty Favorites</h3>
-                        <p className="text-white/50 text-sm max-w-sm leading-relaxed">
+                        <h3 className="text-3xl font-bold text-white mb-4 tracking-tight relative z-10">Empty Favorites</h3>
+                        <p className="text-white/50 text-sm max-w-sm leading-relaxed relative z-10">
                             Star games in your library to access them quickly here.
                         </p>
                         <button
                             onClick={() => navigate('/library')}
-                            className="mt-10 px-8 py-3 bg-white/5 hover:bg-white/10 text-white rounded-xl font-semibold text-sm transition-all shadow-lg flex items-center gap-2"
+                            className="mt-10 px-8 py-3 bg-white/5 hover:bg-white/10 text-white rounded-xl font-semibold text-sm transition-all shadow-lg flex items-center gap-2 relative z-10 border border-white/5"
                         >
                             <LibraryIcon size={14} /> ACCESS LIBRARY
                         </button>

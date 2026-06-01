@@ -48,15 +48,15 @@ export function Sidebar() {
         <motion.div
             initial={false}
             animate={{ width: isOpen ? 260 : 88 }}
-            className="flex-shrink-0 h-full bg-surface/40 backdrop-blur-3xl border-r border-white/5 relative flex flex-col z-50 transition-all duration-500 ease-[0.22,1,0.36,1]"
+            className="flex-shrink-0 h-full bg-surface/10 backdrop-blur-md border-r border-white/5 relative flex flex-col z-50 transition-all duration-500 ease-[0.22,1,0.36,1] noise-bg"
             onMouseEnter={() => setIsHovered(true)}
             onMouseLeave={() => setIsHovered(false)}
         >
-            <div className="p-6 flex items-center justify-between mb-8 overflow-hidden">
+            <div className="p-6 flex items-center justify-between mb-8 overflow-hidden relative z-10">
                 <div className="flex items-center gap-5 translate-x-1">
-                    <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-accent/20 to-accent/5 flex items-center justify-center shrink-0 shadow-2xl shadow-accent/10 border border-accent/20 relative group/logo overflow-hidden">
-                        <div className="absolute inset-0 bg-accent/10 rounded-2xl opacity-0 group-hover/logo:opacity-100 transition-opacity" />
-                        <img src="/cl_logo.png" alt="Chira" className="w-8 h-8 object-contain drop-shadow-[0_0_8px_rgba(34,211,238,0.4)]" />
+                    <div className="w-11 h-11 flex items-center justify-center shrink-0 shadow-2xl relative group/logo overflow-hidden tech-card-sm">
+                        <div className="absolute inset-0 bg-accent/10 opacity-0 group-hover/logo:opacity-100 transition-opacity" />
+                        <img src="/cl_logo.png" alt="Chira" className="w-8 h-8 object-contain drop-shadow-[0_0_8px_rgba(34,211,238,0.4)] relative z-10" />
                     </div>
                     <AnimatePresence>
                         {isOpen && (
@@ -76,14 +76,14 @@ export function Sidebar() {
                 {isOpen && (
                     <button
                         onClick={() => setIsPinned(!isPinned)}
-                        className="text-white/10 hover:text-accent transition-all p-2 rounded-xl hover:bg-white/5"
+                        className="text-white/10 hover:text-accent transition-all p-2 rounded-lg hover:bg-white/5"
                     >
                         {isPinned ? <Pin size={16} fill="currentColor" /> : <PinOff size={16} />}
                     </button>
                 )}
             </div>
 
-            <nav className="flex flex-col gap-3 px-4 flex-1">
+            <nav className="flex flex-col gap-3 px-4 flex-1 relative z-10">
                 {NAV_ITEMS.map((item) => {
                     const isActive = location.pathname.startsWith(item.path);
                     return (
@@ -91,7 +91,7 @@ export function Sidebar() {
                             key={item.path}
                             to={item.path}
                             className={cn(
-                                "flex items-center gap-5 px-4 py-4 rounded-2xl transition-all duration-300 relative group overflow-hidden border border-transparent",
+                                "flex items-center gap-5 px-4 py-4 rounded-xl transition-all duration-300 relative group overflow-hidden border border-transparent",
                                 isActive ? "bg-accent/[0.08] border-accent/20 shadow-[0_0_25px_rgba(102,192,244,0.1)]" : "hover:bg-white/[0.02]"
                             )}
                         >
@@ -138,12 +138,12 @@ export function Sidebar() {
                 })}
             </nav>
 
-            <div className="p-4 mt-auto flex flex-col gap-2">
+            <div className="p-4 mt-auto flex flex-col gap-2 relative z-10">
                 {!profile?.is_cloud_synced && (
                     <button
                         onClick={() => setAuthModalOpen(true)}
                         className={cn(
-                            "flex items-center gap-4 w-full p-4 rounded-2xl transition-all duration-300 overflow-hidden whitespace-nowrap border group relative",
+                            "flex items-center gap-4 w-full p-4 rounded-xl transition-all duration-300 overflow-hidden whitespace-nowrap border group relative",
                             "bg-blue-500/10 border-blue-500/20 hover:bg-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_20px_rgba(59,130,246,0.15)]"
                         )}
                         title="Connect Identity"
@@ -169,7 +169,7 @@ export function Sidebar() {
                 <button
                     onClick={() => setAddGameModalOpen(true)}
                     className={cn(
-                        "flex items-center gap-4 w-full p-4 rounded-2xl transition-all duration-300 overflow-hidden whitespace-nowrap border group relative",
+                        "flex items-center gap-4 w-full p-4 rounded-xl transition-all duration-300 overflow-hidden whitespace-nowrap border group relative",
                         "bg-accent/10 border-accent/20 hover:bg-accent/20 hover:border-accent/40 hover:shadow-[0_0_20px_rgba(102,192,244,0.15)]"
                     )}
                 >
@@ -190,9 +190,9 @@ export function Sidebar() {
                     </AnimatePresence>
                 </button>
 
-                <Link to="/user" className="flex items-center gap-4 w-full p-4 rounded-3xl transition-all hover:bg-white/[0.03] overflow-hidden whitespace-nowrap border border-transparent hover:border-white/5 cursor-pointer group shadow-2xl relative">
+                <Link to="/user" className="flex items-center gap-4 w-full p-4 transition-all overflow-hidden whitespace-nowrap cursor-pointer group shadow-2xl relative tech-card-sm">
                     <div className="absolute inset-0 bg-accent/5 opacity-0 group-hover:opacity-100 transition-opacity" />
-                    <div className="w-12 h-12 rounded-[1.2rem] border border-white/5 group-hover:border-accent/40 overflow-hidden shrink-0 shadow-2xl transition-all duration-500 relative z-10">
+                    <div className="w-12 h-12 rounded-lg border border-white/5 group-hover:border-accent/40 overflow-hidden shrink-0 shadow-2xl transition-all duration-500 relative z-10">
                         {profile?.avatar_url ? (
                             <img src={profile.avatar_url} alt="Profile" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
                         ) : (

@@ -34,6 +34,7 @@ class SmartAudioEngine {
 
     // Track the absolute newest intent. If this changes while parsing a file, we abort.
     private playbackIntentToken: number = 0;
+    private lastAchievementSoundTime: number = 0;
 
     constructor() {
         this.evaluateContextState = this.evaluateContextState.bind(this);
@@ -503,7 +504,11 @@ class SmartAudioEngine {
         const path = gameSpecificPath || settings.globalAchSoundPath;
 
         if (!path) {
-            this.playFallbackSynthSound(settings.sfx);
+            const playNow = Date.now();
+            if (playNow - this.lastAchievementSoundTime > 500) {
+                this.playFallbackSynthSound(settings.sfx);
+                this.lastAchievementSoundTime = playNow;
+            }
             return 5000;
         }
 
@@ -511,21 +516,29 @@ class SmartAudioEngine {
             const buffer = await this.loadSFX(path);
             const { startTime, duration } = this.analyzeSilence(buffer);
 
-            const source = this.ctx.createBufferSource();
-            source.buffer = buffer;
+            const playNow = Date.now();
+            if (playNow - this.lastAchievementSoundTime > 500) {
+                const source = this.ctx.createBufferSource();
+                source.buffer = buffer;
 
-            const sfxGain = this.ctx.createGain();
-            sfxGain.gain.value = settings.sfx;
+                const sfxGain = this.ctx.createGain();
+                sfxGain.gain.value = settings.sfx;
 
-            source.connect(sfxGain);
-            sfxGain.connect(this.ctx.destination);
+                source.connect(sfxGain);
+                sfxGain.connect(this.ctx.destination);
 
-            source.start(0, startTime, duration);
+                source.start(0, startTime, duration);
+                this.lastAchievementSoundTime = playNow;
+            }
 
             return Math.max(3000, (duration * 1000) + 1500);
         } catch (e) {
             console.error("Failed to play custom achievement sound", e);
-            this.playFallbackSynthSound(settings.sfx);
+            const playNow = Date.now();
+            if (playNow - this.lastAchievementSoundTime > 500) {
+                this.playFallbackSynthSound(settings.sfx);
+                this.lastAchievementSoundTime = playNow;
+            }
             return 5000;
         }
     }

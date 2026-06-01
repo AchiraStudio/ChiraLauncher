@@ -171,8 +171,8 @@ function MainApp() {
     });
 
     const ticker = setInterval(() => {
-      const { runningGames } = useProcessStore.getState();
-      if (Object.keys(runningGames).length > 0) {
+      const { running } = useProcessStore.getState();
+      if (Object.keys(running).length > 0) {
         tickElapsed();
       }
     }, 1000);
