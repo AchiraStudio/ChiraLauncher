@@ -12,6 +12,7 @@ interface GameState {
     updateGamePlaytime: (gameId: string, elapsedDelta: number) => void;
     refreshMetadata: (gameId: string) => Promise<void>;
     toggleFavorite: (gameId: string) => Promise<void>;
+    reorderGames: (orderedGames: Game[]) => Promise<void>;
 }
 
 export const useGameStore = create<GameState>((set, get) => ({
@@ -89,6 +90,31 @@ export const useGameStore = create<GameState>((set, get) => ({
                     [gameId]: game
                 }
             }));
+        }
+    },
+
+    reorderGames: async (orderedGames: Game[]) => {
+        // Create order tuples [id, sort_order]
+        const orders = orderedGames.map((g, index) => [g.id, index] as [string, number]);
+        
+        // Optimistic update
+        set((state) => {
+            const newGamesById = { ...state.gamesById };
+            orders.forEach(([id, order]) => {
+                if (newGamesById[id]) {
+                    newGamesById[id] = { ...newGamesById[id], sort_order: order };
+                }
+            });
+            return { gamesById: newGamesById };
+        });
+
+        // Backend sync
+        try {
+            await invoke("update_game_orders", { orders });
+        } catch (e) {
+            console.error("Failed to update game orders:", e);
+            // Rollback on error
+            await get().fetchGames();
         }
     }
 }));

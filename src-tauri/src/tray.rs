@@ -71,7 +71,7 @@ pub async fn show_main_window(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn quit_app(app: tauri::AppHandle) -> Result<(), String> {
-    app.exit(0);
-    Ok(())
+pub async fn quit_app(_app: tauri::AppHandle) -> Result<(), String> {
+    // Avoids tao 'cannot move state from Destroyed' panics by exiting instantly
+    std::process::exit(0);
 }

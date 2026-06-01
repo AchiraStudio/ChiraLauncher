@@ -67,7 +67,7 @@ export function Sidebar() {
                                 className="flex flex-col"
                             >
                                 <span className="font-bold text-white text-lg leading-none">Chira</span>
-                                <span className="text-xs text-accent mt-1 opacity-80">v0.1.3</span>
+                                <span className="text-xs text-accent mt-1 opacity-80">v0.1.7</span>
                             </motion.div>
                         )}
                     </AnimatePresence>

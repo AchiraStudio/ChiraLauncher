@@ -415,6 +415,32 @@ pub async fn launch_game_internal(
     let exe_path = Path::new(&clean_exe_path);
     let launch_args = game.launch_args.clone().unwrap_or_default();
 
+    if exec_method == "official_steam" {
+        let app_id = game.steam_app_id.unwrap_or(0);
+        if app_id == 0 {
+            return Err("Steam App ID is required for Official Steam execution.".to_string());
+        }
+
+        let mut steam_url = format!("steam://run/{}//", app_id);
+        if !launch_args.is_empty() {
+            steam_url.push_str(&launch_args);
+            steam_url.push('/');
+        }
+
+        log::info!("Launching Official Steam Game via URL: {}", steam_url);
+        
+        #[cfg(target_os = "windows")]
+        {
+            let _ = std::process::Command::new("cmd")
+                .args(["/C", "start", "", &steam_url])
+                .spawn()
+                .map_err(|e| format!("Failed to open steam URL: {}", e))?;
+        }
+
+        log::info!("Steam URL launched. Exiting early to let AutoAttach catch the process.");
+        return Ok(());
+    }
+
     if exec_method != "manual_launcher" {
         if !exe_path.exists() {
             return Err(format!("Executable not found: {}", clean_exe_path));

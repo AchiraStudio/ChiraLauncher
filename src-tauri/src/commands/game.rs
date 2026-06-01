@@ -28,37 +28,6 @@ pub async fn add_game(state: State<'_, AppState>, game: NewGame) -> Result<(), S
         .send(DbWrite::Game(GameDbWrite::InsertGame(game.clone())))
         .map_err(|e| e.to_string())?;
 
-    // Trigger achievement discovery for the new game
-    {
-        let db_tx = state.db_tx.clone();
-        let game_id_clone = game_id.clone();
-        let install_dir = game.install_dir.clone().unwrap_or_default();
-        let db_app_id = game.steam_app_id.map(|id| id.to_string());
-
-        tauri::async_runtime::spawn(async move {
-            let crack_type: Option<crate::achievements::CrackType> = game
-                .crack_type
-                .as_deref()
-                .and_then(|s| serde_json::from_str(&format!("\"{}\"", s)).ok());
-
-            let opts = crate::achievements::SyncOptions {
-                crack_type,
-                known_app_id: db_app_id.as_deref(),
-                manual_metadata_path: game.manual_achievement_path.as_deref(),
-                manual_save_path: game.manual_save_path.as_deref(),
-                scan_roots: &crate::settings::default_scan_roots(),
-                steam_api_key: None,
-                db_tx: Some(&db_tx),
-            };
-
-            crate::achievements::sync_achievements(
-                &game_id_clone,
-                &install_dir,
-                db_app_id.as_deref(),
-                &opts,
-            );
-        });
-    }
 
     // Restore the found playtime into the database
     if let Some(saved) = saved_stats {
@@ -272,5 +241,16 @@ pub async fn toggle_favorite(state: State<'_, AppState>, id: String) -> Result<(
     state
         .db_tx
         .send(DbWrite::Game(GameDbWrite::ToggleFavorite { game_id: id }))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn update_game_orders(
+    state: State<'_, AppState>,
+    orders: Vec<(String, i32)>,
+) -> Result<(), String> {
+    state
+        .db_tx
+        .send(DbWrite::Game(GameDbWrite::UpdateGameOrders { orders }))
         .map_err(|e| e.to_string())
 }

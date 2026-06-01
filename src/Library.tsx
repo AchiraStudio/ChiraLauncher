@@ -21,7 +21,7 @@ import {
     User2, Building2, X, ExternalLink, ThumbsUp, ThumbsDown, Star, Info, Link2, Unlink, ShieldAlert, Hash, Fingerprint, ChevronDown, ChevronUp
 } from "lucide-react";
 import { ContextMenu, type ContextMenuItem } from "./components/ui/ContextMenu";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, Reorder } from "framer-motion";
 import { AchievementGrid } from "./components/game/AchievementGrid";
 import { RemoveGameModal } from "./components/modals/RemoveGameModal";
 import type { Game } from "./types/game";
@@ -198,8 +198,14 @@ function AboutSection({ description }: { description: string }) {
 export default function Library() {
     const location = useLocation();
     const gamesById = useGameStore((s: any) => s.gamesById);
+    const reorderGames = useGameStore((s: any) => s.reorderGames);
     const allGames: Game[] = useMemo(
-        () => Object.values(gamesById as Record<string, Game>).sort((a, b) => a.title.localeCompare(b.title)),
+        () => Object.values(gamesById as Record<string, Game>).sort((a, b) => {
+            if (a.sort_order !== b.sort_order) {
+                return (a.sort_order || 0) - (b.sort_order || 0);
+            }
+            return a.title.localeCompare(b.title);
+        }),
         [gamesById]
     );
 
@@ -216,6 +222,7 @@ export default function Library() {
     const [reviews, setReviews] = useState<SteamReviewsResponse | null>(null);
     const [steamDetails, setSteamDetails] = useState<SteamAppDetails | null>(null);
     const [search, setSearch] = useState("");
+    const [orderedGames, setOrderedGames] = useState<Game[]>([]);
     const [showAchievements, setShowAchievements] = useState(false);
     const [contextMenu, setContextMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
 
@@ -382,6 +389,10 @@ export default function Library() {
         [allGames, search]
     );
 
+    useEffect(() => {
+        setOrderedGames(filteredGames);
+    }, [filteredGames]);
+
     const isRunning = activeGame ? !!runningGames[activeGame.id] : false;
     const earned = achievements.filter(a => a.earned).length;
     const achievePct = achievements.length > 0 ? Math.round((earned / achievements.length) * 100) : 0;
@@ -496,16 +507,38 @@ export default function Library() {
                                 <div className="flex flex-col items-center justify-center h-48 text-white/20 text-xs font-bold gap-3 uppercase tracking-widest">
                                     <Search size={28} strokeWidth={2} className="opacity-40" /> No matches
                                 </div>
-                            ) : filteredGames.map(game => (
-                                <SidebarRow
-                                    key={game.id}
-                                    game={game}
-                                    isActive={activeGameId === game.id}
-                                    onClick={() => { setActiveGameId(game.id); }}
-                                    onContextMenu={e => handleContextMenu(e, game)}
-                                    onAction={() => handleLaunch(game)}
-                                />
-                            ))}
+                            ) : !search ? (
+                                <Reorder.Group
+                                    axis="y"
+                                    values={orderedGames}
+                                    onReorder={setOrderedGames}
+                                    onPointerUp={() => reorderGames(orderedGames)}
+                                    className="space-y-1"
+                                >
+                                    {orderedGames.map(game => (
+                                        <Reorder.Item key={game.id} value={game}>
+                                            <SidebarRow
+                                                game={game}
+                                                isActive={activeGameId === game.id}
+                                                onClick={() => { setActiveGameId(game.id); }}
+                                                onContextMenu={e => handleContextMenu(e, game)}
+                                                onAction={() => handleLaunch(game)}
+                                            />
+                                        </Reorder.Item>
+                                    ))}
+                                </Reorder.Group>
+                            ) : (
+                                filteredGames.map(game => (
+                                    <SidebarRow
+                                        key={game.id}
+                                        game={game}
+                                        isActive={activeGameId === game.id}
+                                        onClick={() => { setActiveGameId(game.id); }}
+                                        onContextMenu={e => handleContextMenu(e, game)}
+                                        onAction={() => handleLaunch(game)}
+                                    />
+                                ))
+                            )}
                         </div>
 
                         <div className="shrink-0 p-5 pt-4">

@@ -454,5 +454,15 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         tx.commit()?;
     }
 
+    if current_version < 34 {
+        let tx = conn.unchecked_transaction()?;
+        let _ = tx.execute(
+            "ALTER TABLE games ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
+        tx.execute("INSERT INTO schema_migrations (version) VALUES (34)", [])?;
+        tx.commit()?;
+    }
+
     Ok(())
 }

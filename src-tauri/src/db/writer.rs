@@ -50,6 +50,7 @@ pub async fn run_db_writer(db_path: PathBuf, mut rx: mpsc::UnboundedReceiver<DbW
             DbWrite::Game(GameDbWrite::UpdateDetectedAchievementPaths { game_id, metadata, earned_state }) => 
                 queries::update_detected_achievement_paths_conn(&conn, &game_id, metadata, earned_state),
             DbWrite::Game(GameDbWrite::ToggleFavorite { game_id }) => queries::toggle_favorite_conn(&conn, &game_id),
+            DbWrite::Game(GameDbWrite::UpdateGameOrders { orders }) => queries::update_game_orders_conn(&conn, orders).map(|_| 0),
             DbWrite::Profile(ProfileDbWrite::UnlockAchievement { game_id, api_name, title, desc, unlock_time }) => conn.execute(
                 "INSERT INTO achievements (game_id, api_name, title, description, unlocked, unlock_time) 
                  VALUES (?1, ?2, ?3, ?4, 1, ?5) 

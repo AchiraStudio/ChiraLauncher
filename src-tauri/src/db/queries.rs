@@ -51,6 +51,7 @@ pub struct Game {
     pub custom_bgm_paths: Vec<String>,
     pub custom_cover: bool,          // FIXED
     pub launch_args: Option<String>, // FIXED
+    pub sort_order: i32,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -185,6 +186,7 @@ fn map_game_row(row: &rusqlite::Row) -> rusqlite::Result<Game> {
             .get::<_, Option<String>>("launcher_path")
             .unwrap_or(None),
         custom_bgm_paths: serde_json::from_str(&custom_bgm_paths_json).unwrap_or_default(),
+        sort_order: row.get::<_, Option<i32>>("sort_order").unwrap_or(Some(0)).unwrap_or(0),
     })
 }
 
@@ -192,7 +194,7 @@ pub fn get_all_games(pool: &Pool<SqliteConnectionManager>) -> anyhow::Result<Vec
     let conn = pool
         .get()
         .map_err(|e| anyhow::anyhow!("Pool error: {}", e))?;
-    let mut stmt = conn.prepare("SELECT * FROM games")?;
+    let mut stmt = conn.prepare("SELECT * FROM games ORDER BY sort_order ASC, title ASC")?;
     let iter = stmt.query_map([], map_game_row)?;
     let mut games = Vec::new();
     for g in iter {
@@ -276,10 +278,10 @@ pub fn insert_game_conn(conn: &Connection, game: NewGame) -> rusqlite::Result<us
             repack_info, run_as_admin, manual_achievement_path, manual_save_path, steam_app_id,
             crack_type, app_id, playtime_seconds, session_count, first_played, last_played,
             achievements_unlocked, achievements_total, detected_metadata_path, detected_earned_state_path, logo_path,
-            is_favorite, custom_ach_sound_path, custom_bgm_path, execution_method, launcher_path, custom_bgm_paths, launch_args, custom_cover
+            is_favorite, custom_ach_sound_path, custom_bgm_path, execution_method, launcher_path, custom_bgm_paths, launch_args, custom_cover, sort_order
          ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
-            ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42
+            ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, 0
          )",
         params![
             game.id, game.title, game.exe_path, game.cover_path, game.background_path, game.description,
@@ -381,4 +383,12 @@ pub fn toggle_favorite_conn(conn: &Connection, id: &str) -> rusqlite::Result<usi
         "UPDATE games SET is_favorite = 1 - is_favorite WHERE id = ?1",
         params![id],
     )
+}
+
+pub fn update_game_orders_conn(conn: &Connection, orders: Vec<(String, i32)>) -> rusqlite::Result<()> {
+    let mut stmt = conn.prepare("UPDATE games SET sort_order = ?1 WHERE id = ?2")?;
+    for (id, order) in orders {
+        stmt.execute(params![order, id])?;
+    }
+    Ok(())
 }

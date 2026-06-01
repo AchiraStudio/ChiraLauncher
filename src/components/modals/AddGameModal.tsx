@@ -41,7 +41,7 @@ export function AddGameModal() {
     const [launchArgs, setLaunchArgs] = useState("");
 
     // Launcher config
-    const [executionMethod, setExecutionMethod] = useState<"direct" | "auto_launcher" | "manual_launcher" | "unreal_engine">("direct");
+    const [executionMethod, setExecutionMethod] = useState<"direct" | "auto_launcher" | "manual_launcher" | "unreal_engine" | "official_steam">("direct");
     const [launcherPath, setLauncherPath] = useState("");
 
     const [description, setDescription] = useState("");
@@ -462,6 +462,7 @@ export function AddGameModal() {
                                             className="w-full bg-white/[0.03] border-2 border-white/5 focus:border-accent/40 rounded-2xl px-6 py-5 text-white font-black text-sm outline-none transition-all appearance-none cursor-pointer [&>option]:bg-[#0f1423] [&>option]:text-white"
                                         >
                                             <option value="direct">Standard Direct Launch (Default)</option>
+                                            <option value="official_steam">Official Steam Game (via steam://)</option>
                                             <option value="unreal_engine">Unreal Engine (Bypass Bootstrap)</option>
                                             <option value="auto_launcher">Auto-Launcher (Launcher → Wait 5s → Game)</option>
                                             <option value="manual_launcher">Manual Launcher (Wait for user to click Play)</option>
@@ -505,6 +506,7 @@ export function AddGameModal() {
                                         <h4 className="text-[10px] font-black text-white/40 uppercase tracking-widest mb-3">How it works</h4>
                                         <ul className="text-xs text-white/50 space-y-3 list-disc pl-4 marker:text-white/20">
                                             {executionMethod === "direct" && <li>Spawns the <span className="text-white/80 font-mono">Executable Path</span> directly and tracks its PID.</li>}
+                                            {executionMethod === "official_steam" && <li>Launches via the <span className="text-white/80 font-mono">steam://</span> protocol so Steam can apply DRM and custom arguments correctly. AutoAttach catches the game once it loads.</li>}
                                             {executionMethod === "unreal_engine" && <li>Spawns the executable, but ignores it when it immediately dies. AutoAttach will intercept the real <span className="text-white/80 font-mono">Win64-Shipping.exe</span> automatically.</li>}
                                             {executionMethod === "auto_launcher" && <li>Spawns the <span className="text-white/80 font-mono">Launcher Executable</span>, waits 5 seconds, then spawns the <span className="text-white/80 font-mono">Main Game Executable</span> automatically.</li>}
                                             {executionMethod === "manual_launcher" && <li>Spawns the <span className="text-white/80 font-mono">Launcher Executable</span> and leaves it up to you to click "Play". AutoAttach intercepts the main game when it appears.</li>}

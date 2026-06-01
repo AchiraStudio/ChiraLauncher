@@ -84,6 +84,9 @@ pub enum GameDbWrite {
     ToggleFavorite {
         game_id: String,
     },
+    UpdateGameOrders {
+        orders: Vec<(String, i32)>,
+    },
 }
 
 #[derive(Debug)]

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Minus, Square, X } from "lucide-react";
 import { motion } from "framer-motion";
@@ -7,11 +7,15 @@ export function TitleBar() {
     const [isMaximized, setIsMaximized] = useState(false);
     const appWindow = getCurrentWindow();
 
+    // Used to detect double-click vs single-click on the drag region
+    const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const DBLCLICK_THRESHOLD = 250; // ms
+
     useEffect(() => {
         // Sync maximized state on mount
         appWindow.isMaximized().then(setIsMaximized).catch(() => {});
 
-        // Listen for window resize events to update maximize button icon
+        // Always keep state in sync with OS window events
         const unlisten = appWindow.onResized(() => {
             appWindow.isMaximized().then(setIsMaximized).catch(() => {});
         });
@@ -23,14 +27,17 @@ export function TitleBar() {
         try { await appWindow.minimize(); } catch (e) { console.error(e); }
     };
 
-    const handleMaximize = async () => {
+    const handleToggleMaximize = async () => {
         try {
-            if (isMaximized) {
+            // Always read the real state from the OS before toggling
+            const maximized = await appWindow.isMaximized();
+            if (maximized) {
                 await appWindow.unmaximize();
+                setIsMaximized(false);
             } else {
                 await appWindow.maximize();
+                setIsMaximized(true);
             }
-            setIsMaximized(!isMaximized);
         } catch (e) { console.error(e); }
     };
 
@@ -38,24 +45,33 @@ export function TitleBar() {
         try { await appWindow.close(); } catch (e) { console.error(e); }
     };
 
-    const handleDblClick = () => handleMaximize();
+    // On mousedown: wait DBLCLICK_THRESHOLD ms. If no second click comes,
+    // start dragging. If a second click fires within that window, cancel
+    // dragging and toggle maximize instead.
+    const handleDragRegionMouseDown = (e: React.MouseEvent) => {
+        if (e.button !== 0) return; // left button only
 
-    const handleMouseDown = (e: React.MouseEvent) => {
-        if (e.buttons === 1) {
-            appWindow.startDragging().catch(console.error);
+        if (clickTimer.current !== null) {
+            // Second click within threshold → it's a double-click → toggle maximize
+            clearTimeout(clickTimer.current);
+            clickTimer.current = null;
+            handleToggleMaximize();
+        } else {
+            // First click — wait to see if a second comes
+            clickTimer.current = setTimeout(() => {
+                clickTimer.current = null;
+                // No second click came → start dragging
+                appWindow.startDragging().catch(console.error);
+            }, DBLCLICK_THRESHOLD);
         }
     };
 
     return (
-        <div
-            className="flex-shrink-0 w-full h-9 flex items-center relative select-none z-[200] bg-transparent"
-        >
+        <div className="flex-shrink-0 w-full h-9 flex items-center relative select-none z-[200] bg-transparent">
             {/* Drag region — full bar except the control buttons */}
             <div
-                data-tauri-drag-region="true"
                 className="flex-1 h-full flex items-center pl-4 gap-3 overflow-hidden cursor-default"
-                onDoubleClick={handleDblClick}
-                onMouseDown={handleMouseDown}
+                onMouseDown={handleDragRegionMouseDown}
             >
                 {/* App logo + name */}
                 <div className="flex items-center gap-2.5 pointer-events-none select-none">
@@ -98,7 +114,7 @@ export function TitleBar() {
 
                 {/* Maximize / Restore */}
                 <button
-                    onClick={handleMaximize}
+                    onClick={handleToggleMaximize}
                     className="group w-11 h-full flex items-center justify-center text-white/30 hover:text-white hover:bg-white/[0.07] transition-all duration-150 focus:outline-none"
                     aria-label={isMaximized ? "Restore" : "Maximize"}
                     title={isMaximized ? "Restore" : "Maximize"}

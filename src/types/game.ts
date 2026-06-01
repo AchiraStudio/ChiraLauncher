@@ -1,4 +1,4 @@
-export type ExecutionMethod = "direct" | "auto_launcher" | "manual_launcher" | "unreal_engine";
+export type ExecutionMethod = "direct" | "auto_launcher" | "manual_launcher" | "unreal_engine" | "official_steam";
 
 export interface GameMetadata {
     id: string;

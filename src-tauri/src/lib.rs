@@ -495,6 +495,7 @@ pub fn run() {
             commands::game::set_manual_achievement_path,
             commands::game::set_manual_save_path,
             commands::game::toggle_favorite,
+            commands::game::update_game_orders,
             commands::reset::reset_application,
             commands::http_dl::add_http_downloads,
             commands::http_dl::get_http_downloads,

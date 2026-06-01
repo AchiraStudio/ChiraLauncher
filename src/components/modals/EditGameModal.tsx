@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import {
     X, FolderOpen, Image, Monitor, User2, Calendar,
     Save, Gamepad2, FileText, StickyNote, Pencil, Globe, Hash, Link2,
-    Trophy, Activity, Terminal, RefreshCcw, Play, Zap, Rocket, Music, ArrowUp, ArrowDown, Plus
+    Trophy, Activity, Terminal, RefreshCcw, Play, Zap, Rocket, Music, ArrowUp, ArrowDown, Plus, ChevronDown
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { useLocalImage } from "../../hooks/useLocalImage";
@@ -92,6 +92,14 @@ function DiagPath({ label, path }: { label: string; path: string | null }) {
 
 const inputCls = "w-full bg-black/30 border border-white/10 focus:border-accent/60 rounded-xl px-4 py-3 text-white text-sm font-medium outline-none transition-all placeholder:text-white/15";
 
+const EXEC_OPTIONS: { value: string; label: string; desc: string }[] = [
+    { value: "direct", label: "Standard Direct Launch", desc: "Spawns the executable directly and tracks its PID." },
+    { value: "official_steam", label: "Official Steam Game (via steam://)", desc: "Launches via steam:// so Steam applies DRM and args correctly. AutoAttach catches the process." },
+    { value: "unreal_engine", label: "Unreal Engine (Bypass Bootstrap)", desc: "Ignores the bootstrap when it dies. AutoAttach catches Win64-Shipping.exe." },
+    { value: "auto_launcher", label: "Auto-Launcher (Launcher → Wait 5s → Game)", desc: "Spawns the Launcher, waits 5s, then spawns the game automatically." },
+    { value: "manual_launcher", label: "Manual Launcher (Wait for Play click)", desc: "Spawns the Launcher and waits for you to click Play. AutoAttach intercepts the game." },
+];
+
 export function EditGameModal() {
     const isOpen = useUiStore((s: any) => s.isEditGameModalOpen);
     const gameToEdit = useUiStore((s: any) => s.gameToEdit);
@@ -103,7 +111,7 @@ export function EditGameModal() {
     const [exePath, setExePath] = useState("");
     const [launchArgs, setLaunchArgs] = useState("");
 
-    const [executionMethod, setExecutionMethod] = useState<"direct" | "auto_launcher" | "manual_launcher" | "unreal_engine">("direct");
+    const [executionMethod, setExecutionMethod] = useState<"direct" | "auto_launcher" | "manual_launcher" | "unreal_engine" | "official_steam">("direct");
     const [launcherPath, setLauncherPath] = useState("");
 
     const [coverPath, setCoverPath] = useState("");
@@ -606,16 +614,22 @@ export function EditGameModal() {
                                             <div className="space-y-4">
                                                 <div>
                                                     <Label>Execution Method</Label>
-                                                    <select
-                                                        value={executionMethod}
-                                                        onChange={(e) => setExecutionMethod(e.target.value as any)}
-                                                        className={cn(inputCls, "appearance-none cursor-pointer [&>option]:bg-[#0f1423] [&>option]:text-white")}
-                                                    >
-                                                        <option value="direct">Standard Direct Launch (Default)</option>
-                                                        <option value="unreal_engine">Unreal Engine (Bypass Bootstrap)</option>
-                                                        <option value="auto_launcher">Auto-Launcher (Launcher → Wait 5s → Game)</option>
-                                                        <option value="manual_launcher">Manual Launcher (Wait for user to click Play)</option>
-                                                    </select>
+                                                    <div className="relative">
+                                                        <select
+                                                            value={executionMethod}
+                                                            onChange={(e) => setExecutionMethod(e.target.value as any)}
+                                                            className={cn(inputCls, "appearance-none cursor-pointer pr-10")}
+                                                        >
+                                                            {EXEC_OPTIONS.map(o => (
+                                                                <option key={o.value} value={o.value}>{o.label}</option>
+                                                            ))}
+                                                        </select>
+                                                        <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 pointer-events-none" />
+                                                    </div>
+                                                    {/* Description badge for selected method */}
+                                                    <p className="text-white/30 text-[10px] mt-1.5 ml-1">
+                                                        {EXEC_OPTIONS.find(o => o.value === executionMethod)?.desc}
+                                                    </p>
                                                 </div>
 
                                                 <AnimatePresence>
@@ -655,6 +669,7 @@ export function EditGameModal() {
                                                     <h4 className="text-[10px] font-black text-white/40 uppercase tracking-widest mb-2">How it works</h4>
                                                     <ul className="text-xs text-white/50 space-y-2 list-disc pl-4 marker:text-white/20">
                                                         {executionMethod === "direct" && <li>Spawns the <span className="text-white/80 font-mono">Executable Path</span> directly and tracks its PID.</li>}
+                                                        {executionMethod === "official_steam" && <li>Launches via the <span className="text-white/80 font-mono">steam://</span> protocol so Steam can apply DRM and custom arguments correctly. AutoAttach catches the game once it loads.</li>}
                                                         {executionMethod === "unreal_engine" && <li>Spawns the executable, but ignores it when it immediately dies. AutoAttach will intercept the real <span className="text-white/80 font-mono">Win64-Shipping.exe</span> automatically.</li>}
                                                         {executionMethod === "auto_launcher" && <li>Spawns the <span className="text-white/80 font-mono">Launcher Executable</span>, waits 5 seconds, then spawns the <span className="text-white/80 font-mono">Main Game Executable</span> automatically.</li>}
                                                         {executionMethod === "manual_launcher" && <li>Spawns the <span className="text-white/80 font-mono">Launcher Executable</span> and leaves it up to you to click "Play". AutoAttach intercepts the main game when it appears.</li>}
