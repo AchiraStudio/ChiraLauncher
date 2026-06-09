@@ -464,5 +464,74 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         tx.commit()?;
     }
 
+    if current_version < 35 {
+        let tx = conn.unchecked_transaction()?;
+        tx.execute(
+            "CREATE TABLE IF NOT EXISTS http_downloads (
+                id               TEXT PRIMARY KEY,
+                url              TEXT NOT NULL,
+                save_path        TEXT NOT NULL,
+                filename         TEXT NOT NULL,
+                folder_name      TEXT,
+                status           TEXT NOT NULL DEFAULT 'pending',
+                downloaded_bytes INTEGER NOT NULL DEFAULT 0,
+                total_bytes      INTEGER NOT NULL DEFAULT 0,
+                error_message    TEXT
+            )",
+            [],
+        )?;
+        tx.execute("INSERT INTO schema_migrations (version) VALUES (35)", [])?;
+        tx.commit()?;
+    }
+
+    // ── MIGRATION 36: Backfill install_dir from exe_path for all existing games. ──
+    // The launcher was previously using install_dir as the working directory, but
+    // it was never updated when a user edited the exe path. This migration ensures
+    // every game has install_dir set to the folder containing its exe, which also
+    // matches the "Start in" behavior of Windows shortcuts for custom launch args.
+    if current_version < 36 {
+        let tx = conn.unchecked_transaction()?;
+
+        // Collect into an owned Vec immediately so `stmt` is dropped before we prepare the next one.
+        let game_paths: Vec<(String, String)> = {
+            let mut stmt = tx.prepare(
+                "SELECT id, exe_path FROM games WHERE install_dir IS NULL OR trim(install_dir) = ''"
+            )?;
+            let rows: Vec<(String, String)> = stmt
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
+            rows
+            // `stmt` is dropped here, releasing the borrow on `tx`
+        };
+
+        // Now prepare the update — `stmt` above is already gone.
+        {
+            let mut update_stmt = tx.prepare(
+                "UPDATE games SET install_dir = ?1 WHERE id = ?2"
+            )?;
+
+            for (id, exe_path) in &game_paths {
+                let clean_exe = exe_path.trim().trim_matches('"').trim().to_string();
+                let parent_dir = std::path::Path::new(&clean_exe)
+                    .parent()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .filter(|s| !s.is_empty());
+
+                if let Some(dir) = parent_dir {
+                    let _ = update_stmt.execute(rusqlite::params![dir, id]);
+                }
+            }
+            // `update_stmt` is dropped here, releasing its borrow on `tx`
+        }
+
+        tx.execute("INSERT INTO schema_migrations (version) VALUES (36)", [])?;
+        tx.commit()?;
+
+        log::info!("Migration 36: Backfilled install_dir from exe_path for all existing games.");
+    }
+
     Ok(())
 }

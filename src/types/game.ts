@@ -1,21 +1,6 @@
 export type ExecutionMethod = "direct" | "auto_launcher" | "manual_launcher" | "unreal_engine" | "official_steam";
 
-export interface GameMetadata {
-    id: string;
-    title: string;
-    cover_url: string | null;
-    background_url: string | null;
-    summary: string | null;
-    release_date: string | null;
-    developer: string | null;
-    publisher: string | null;
-    rating: number | null;
-    genres: string[] | null;
-    themes: string[] | null;
-    platforms: string[] | null;
-    game_modes: string[] | null;
-    steam_app_id: string | null;
-}
+
 
 export interface Game {
     id: string;
@@ -74,52 +59,17 @@ export interface Game {
     launcher_path: string | null;
 }
 
-export type LaunchSource = "Launcher" | "AutoAttach";
 
-export interface NewGame {
+
+export type NewGame = Partial<Game> & {
     id: string;
     title: string;
     executable_path: string;
-    cover_path: string | null;
-    background_path: string | null;
-    logo_path: string | null;
-    description: string | null;
-    developer: string | null;
-    genre: string | null;
     source: string;
     added_at: string;
-    installed_size: number | null;
-    install_dir: string | null;
-
-    publisher?: string | null;
-    release_date?: string | null;
-    genres?: string | null;
-    tags?: string | null;
-    metacritic_score?: number | null;
-    platforms?: string | null;
-    repack_info?: string | null;
-    run_as_admin?: boolean;
-    manual_achievement_path?: string | null;
-    steam_app_id?: number | null;
-
-    crack_type?: string | null;
-    app_id?: string | null;
-    detected_metadata_path?: string | null;
-    detected_earned_state_path?: string | null;
     is_favorite: boolean;
-
-    custom_ach_sound_path: string | null;
-    custom_bgm_path: string | null;
-    custom_bgm_paths?: string[];
-
-    execution_method?: ExecutionMethod | string;
-    launcher_path?: string | null;
-}
-
-export interface ProcessIdentity {
-    pid: number;
-    exe_path: string;
-    start_time: number;
-    game_id: string;
-    launched_by: LaunchSource;
-}
+    cover_path?: string | null;
+    background_path?: string | null;
+    logo_path?: string | null;
+};
+

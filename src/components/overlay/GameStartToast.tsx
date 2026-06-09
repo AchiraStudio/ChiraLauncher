@@ -1,8 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import type { GameStartPayload } from "./overlay-types";
 
-export type { GameStartPayload };
-
 const HOLD_MS = 10000;
 const EXIT_MS = 700;
 

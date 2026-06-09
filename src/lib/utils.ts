@@ -14,17 +14,3 @@ export function formatElapsedSeconds(seconds: number): string {
     }
     return `${mins}m`;
 }
-
-import { convertFileSrc } from "@tauri-apps/api/core";
-
-export function getValidImageUrl(path: string | null | undefined): string | null {
-    if (!path) return null;
-    if (path.startsWith("http://") || path.startsWith("https://")) {
-        return path;
-    }
-    try {
-        return convertFileSrc(path);
-    } catch {
-        return path;
-    }
-}

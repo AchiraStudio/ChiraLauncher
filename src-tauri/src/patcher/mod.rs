@@ -42,10 +42,14 @@ const PATCHER_RULES: &[PatcherRule] = &[
 
 pub fn patch_game(install_dir: &Path, username: &str, steam_id: &Option<String>) -> Result<Vec<String>> {
     let mut patched_files = Vec::new();
+    
+    // Locate actual crack dir so we don't look for steam_settings at game root for UE games
+    let (_, _, crack_dir) = crate::commands::scanner::detect_crack(install_dir);
+    let base_dir = crack_dir.unwrap_or_else(|| install_dir.to_path_buf());
 
     // 1. Fixed-path rules
     for rule in PATCHER_RULES {
-        let full_path = install_dir.join(rule.relative_path);
+        let full_path = base_dir.join(rule.relative_path);
         if !full_path.exists() {
             continue;
         }

@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { supabase } from "../lib/supabase";
 
-export interface UserProfile {
+interface UserProfile {
     id: string;
     username: string;
     steam_id: string | null;

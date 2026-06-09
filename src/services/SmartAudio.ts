@@ -64,6 +64,7 @@ class SmartAudioEngine {
         if (ext === 'ogg') return 'audio/ogg';
         if (ext === 'wav') return 'audio/wav';
         if (ext === 'flac') return 'audio/flac';
+        if (ext === 'm4a') return 'audio/mp4';
         return 'audio/mpeg'; 
     }
 
@@ -359,68 +360,48 @@ class SmartAudioEngine {
             this.saveCurrentProgress();
         }
 
-        const type = 'global';
-        let state = this.playlists.get(type);
-        const newPlaylistStr = JSON.stringify(settings.launcher_bgm_paths);
-
-        // If the playlist fundamentally changed, rebuild it
-        if (!state || JSON.stringify(state.paths) !== newPlaylistStr) {
-            state = {
-                paths: settings.launcher_bgm_paths,
-                playQueue: [],
-                currentIndex: 0,
-                trackProgress: 0
-            };
-            if (settings.bgm_shuffle && state.paths.length > 1) {
-                state.playQueue = this.generateShuffleQueue(state.paths.length);
-                state.currentIndex = state.playQueue.shift()!;
-            }
-            this.playlists.set(type, state);
-        }
-
-        // If it's already playing the global playlist, don't restart it
-        if (this.activePlaylistType === type) return;
-
-        this.activePlaylistType = type;
-        const path = state.paths[state.currentIndex];
-        await this.requestBGM(path, state.trackProgress);
+        await this.ensurePlaylistAndPlay('global', settings.launcher_bgm_paths, settings.bgm_shuffle);
     }
 
     async playGameBGM(gameId: string, paths: string[]) {
         if (paths && paths.length > 0) {
             const settings = await this.getVolumeSettings();
             const type = `game_${gameId}`;
-            
+
             // Save current progress before switching
             if (this.activePlaylistType !== type) {
                 this.saveCurrentProgress();
             }
 
-            let state = this.playlists.get(type);
-            const newPlaylistStr = JSON.stringify(paths);
-
-            if (!state || JSON.stringify(state.paths) !== newPlaylistStr) {
-                state = {
-                    paths: paths,
-                    playQueue: [],
-                    currentIndex: 0,
-                    trackProgress: 0
-                };
-                if (settings.bgm_shuffle && state.paths.length > 1) {
-                    state.playQueue = this.generateShuffleQueue(state.paths.length);
-                    state.currentIndex = state.playQueue.shift()!;
-                }
-                this.playlists.set(type, state);
-            }
-
-            if (this.activePlaylistType === type) return;
-
-            this.activePlaylistType = type;
-            const path = state.paths[state.currentIndex];
-            await this.requestBGM(path, state.trackProgress);
+            await this.ensurePlaylistAndPlay(type, paths, settings.bgm_shuffle);
         } else {
             await this.playGlobalBGM();
         }
+    }
+
+    /**
+     * Ensures the playlist state for `type` is initialised (or rebuilt if the
+     * track list has changed), then starts playback — unless the playlist is
+     * already the active one, in which case it does nothing.
+     */
+    private async ensurePlaylistAndPlay(type: string, paths: string[], shuffle: boolean) {
+        const newPlaylistStr = JSON.stringify(paths);
+        let state = this.playlists.get(type);
+
+        if (!state || JSON.stringify(state.paths) !== newPlaylistStr) {
+            state = { paths, playQueue: [], currentIndex: 0, trackProgress: 0 };
+            if (shuffle && state.paths.length > 1) {
+                state.playQueue = this.generateShuffleQueue(state.paths.length);
+                state.currentIndex = state.playQueue.shift()!;
+            }
+            this.playlists.set(type, state);
+        }
+
+        if (this.activePlaylistType === type) return;
+
+        this.activePlaylistType = type;
+        const path = state.paths[state.currentIndex];
+        await this.requestBGM(path, state.trackProgress);
     }
 
     async updateLiveVolume() {

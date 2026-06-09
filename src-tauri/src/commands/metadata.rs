@@ -84,6 +84,7 @@ pub async fn read_audio_base64(path: String) -> Result<String, String> {
         "wav" => "audio/wav",
         "ogg" => "audio/ogg",
         "flac" => "audio/flac",
+        "m4a" => "audio/mp4",
         _ => "audio/mpeg",
     };
 

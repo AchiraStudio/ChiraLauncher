@@ -6,6 +6,65 @@ import { useProfileStore } from "../store/profileStore";
 import { useGameStore } from "../store/gameStore";
 import type { AchievementPayload } from "../components/overlay/overlay-types";
 
+async function resolvePlaytimeConflicts(
+    profileId: string,
+    games: Record<string, any>,
+    cloudStats: any[]
+): Promise<{ statsToUpload: any[], localChanged: boolean }> {
+    let localChanged = false;
+    const statsToUpload: any[] = [];
+
+    for (const localGame of Object.values(games)) {
+        if (!localGame.title) continue;
+
+        const cloudStat = cloudStats.find(c => c.game_title === localGame.title);
+
+        if (cloudStat) {
+            if (cloudStat.playtime_seconds > localGame.playtime_seconds) {
+                await invoke("overwrite_playtime", {
+                    gameId: localGame.id,
+                    playtimeSeconds: cloudStat.playtime_seconds,
+                    lastPlayed: cloudStat.last_played
+                });
+                localChanged = true;
+            } else if (localGame.playtime_seconds > cloudStat.playtime_seconds) {
+                statsToUpload.push({
+                    user_id: profileId,
+                    game_title: localGame.title,
+                    app_id: localGame.steam_app_id?.toString() || null,
+                    playtime_seconds: localGame.playtime_seconds,
+                    last_played: localGame.last_played || new Date().toISOString()
+                });
+            }
+        } else if (localGame.playtime_seconds > 0) {
+            statsToUpload.push({
+                user_id: profileId,
+                game_title: localGame.title,
+                app_id: localGame.steam_app_id?.toString() || null,
+                playtime_seconds: localGame.playtime_seconds,
+                last_played: localGame.last_played || new Date().toISOString()
+            });
+        }
+    }
+
+    return { statsToUpload, localChanged };
+}
+
+async function uploadStatsBulk(statsToUpload: any[]) {
+    if (statsToUpload.length === 0) return;
+    const { error: bulkErr } = await supabase
+        .from("user_game_stats")
+        .upsert(statsToUpload, { onConflict: 'user_id,game_title' });
+
+    if (bulkErr) {
+        if (bulkErr.code?.includes("PGRST301") || bulkErr.message?.includes("JWSError") || bulkErr.code === "42501") {
+            // Suppress unauthorized / RLS errors silently
+        } else {
+            console.error("Cloud Sync: Failed bulk upload:", bulkErr);
+        }
+    }
+}
+
 export function useCloudSyncEngine() {
     const { profile } = useProfileStore();
     const gamesById = useGameStore(s => s.gamesById);
@@ -25,60 +84,13 @@ export function useCloudSyncEngine() {
 
             if (!error && cloudStats) {
                 const games = useGameStore.getState().gamesById;
-                let localChanged = false;
-                const statsToUpload: any[] = [];
-
-                for (const localGame of Object.values(games)) {
-                    if (!localGame.title) continue;
-
-                    const cloudStat = cloudStats.find(c => c.game_title === localGame.title);
-
-                    if (cloudStat) {
-                        if (cloudStat.playtime_seconds > localGame.playtime_seconds) {
-                            await invoke("overwrite_playtime", {
-                                gameId: localGame.id,
-                                playtimeSeconds: cloudStat.playtime_seconds,
-                                lastPlayed: cloudStat.last_played
-                            });
-                            localChanged = true;
-                        } else if (localGame.playtime_seconds > cloudStat.playtime_seconds) {
-                            statsToUpload.push({
-                                user_id: profile.supabase_user_id,
-                                game_title: localGame.title,
-                                app_id: localGame.steam_app_id?.toString() || null,
-                                playtime_seconds: localGame.playtime_seconds,
-                                last_played: localGame.last_played || new Date().toISOString()
-                            });
-                        }
-                    } else if (localGame.playtime_seconds > 0) {
-                        statsToUpload.push({
-                            user_id: profile.supabase_user_id,
-                            game_title: localGame.title,
-                            app_id: localGame.steam_app_id?.toString() || null,
-                            playtime_seconds: localGame.playtime_seconds,
-                            last_played: localGame.last_played || new Date().toISOString()
-                        });
-                    }
-                }
+                const { statsToUpload, localChanged } = await resolvePlaytimeConflicts(profile.supabase_user_id as string, games, cloudStats);
 
                 if (localChanged) {
                     await useGameStore.getState().fetchGames();
                 }
 
-                if (statsToUpload.length > 0) {
-                    const { error: bulkErr } = await supabase
-                        .from("user_game_stats")
-                        .upsert(statsToUpload, { onConflict: 'user_id,game_title' });
-
-                    if (bulkErr) {
-                        if (bulkErr.code?.includes("PGRST301") || bulkErr.message?.includes("JWSError") || bulkErr.code === "42501") {
-                            // Suppress unauthorized / RLS errors silently
-                        } else {
-                            console.error("Cloud Sync: Failed bulk upload:", bulkErr);
-                        }
-                    }
-                }
-
+                await uploadStatsBulk(statsToUpload);
                 hasSyncedPlaytimeDown.current = true;
             }
         };

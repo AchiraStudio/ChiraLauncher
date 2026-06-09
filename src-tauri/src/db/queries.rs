@@ -322,7 +322,8 @@ pub fn update_game_conn(conn: &Connection, game: Game) -> rusqlite::Result<usize
             publisher = ?6, release_date = ?7, description = ?8, genre = ?9, steam_app_id = ?10,
             run_as_admin = ?11, manual_achievement_path = ?12, manual_save_path = ?13, logo_path = ?14, 
             is_favorite = ?15, custom_ach_sound_path = ?16, custom_bgm_path = ?17, execution_method = ?18, 
-            launcher_path = ?19, custom_bgm_paths = ?20, launch_args = ?21, custom_cover = ?22
+            launcher_path = ?19, custom_bgm_paths = ?20, launch_args = ?21, custom_cover = ?22,
+            install_dir = ?24
          WHERE id = ?23",
         params![
             game.title,
@@ -347,7 +348,8 @@ pub fn update_game_conn(conn: &Connection, game: Game) -> rusqlite::Result<usize
             custom_bgm_paths_json,
             game.launch_args,
             game.custom_cover as i32,
-            game.id
+            game.id,
+            game.install_dir,
         ],
     )?;
     Ok(1)

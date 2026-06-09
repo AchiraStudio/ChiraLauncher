@@ -5,9 +5,10 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useSettingsStore } from "./store/settingsStore";
 import { useUiStore } from "./store/uiStore";
 import { toast } from "sonner";
+import { TrackListItem } from "./components/ui/TrackListItem";
 import {
     Settings2, Paintbrush, HardDrive, Gamepad2,
-    FolderOpen, MonitorSmartphone, Bell, Zap, AlertOctagon, Volume2, Music, Trophy, X, Play, ArrowUp, ArrowDown, Shuffle, Plus, Rocket,
+    FolderOpen, MonitorSmartphone, Bell, Zap, AlertOctagon, Volume2, Music, Trophy, X, Play, Shuffle, Plus, Rocket,
     Key, Eye, EyeOff, CheckCircle2, XCircle
 } from "lucide-react";
 import { cn } from "./lib/utils";
@@ -25,6 +26,44 @@ const ACCENT_COLORS = [
 ];
 
 type Tab = "general" | "appearance" | "audio" | "downloads" | "overlay" | "integrations";
+
+/** Reusable settings section header */
+function SectionHeader({ title, description }: { title: string, description: string }) {
+    return (
+        <div>
+            <h3 className="text-lg font-black text-white uppercase tracking-wider mb-1">{title}</h3>
+            <p className="text-xs text-white/40 font-medium">{description}</p>
+        </div>
+    );
+}
+
+/** Reusable settings toggle row: title, description, and a pill-style toggle switch. */
+function ToggleRow({
+    title, desc, checked, onChange
+}: {
+    title: string;
+    desc: string;
+    checked: boolean;
+    onChange: (checked: boolean) => void;
+}) {
+    return (
+        <div className="bg-white/5 border border-white/10 p-5 rounded-2xl flex items-center justify-between">
+            <div>
+                <h4 className="text-white font-bold text-sm">{title}</h4>
+                <p className="text-white/40 text-xs mt-1">{desc}</p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                    type="checkbox"
+                    className="sr-only peer"
+                    checked={checked}
+                    onChange={(e) => onChange(e.target.checked)}
+                />
+                <div className="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-accent border border-white/10"></div>
+            </label>
+        </div>
+    );
+}
 
 export function Settings() {
     const { settings, updateSettings, isLoading } = useSettingsStore();
@@ -81,14 +120,14 @@ export function Settings() {
     const handlePickAudio = async (type: "playlist" | "default_ach") => {
         try {
             if (type === "playlist") {
-                const selected = await openDialog({ multiple: true, filters: [{ name: "Audio", extensions: ["mp3", "wav", "ogg", "flac"] }] });
+                const selected = await openDialog({ multiple: true, filters: [{ name: "Audio", extensions: ["mp3", "wav", "ogg", "flac", "m4a"] }] });
                 if (selected && Array.isArray(selected)) {
                     const newPaths = [...settings.launcher_bgm_paths, ...selected];
                     await updateSettings({ launcher_bgm_paths: newPaths });
                     toast.success(`${selected.length} tracks added to playlist.`);
                 }
             } else {
-                const selected = await openDialog({ multiple: false, filters: [{ name: "Audio", extensions: ["mp3", "wav", "ogg", "flac"] }] });
+                const selected = await openDialog({ multiple: false, filters: [{ name: "Audio", extensions: ["mp3", "wav", "ogg", "flac", "m4a"] }] });
                 if (selected && typeof selected === "string") {
                     await updateSettings({ default_ach_sound_path: selected });
                     toast.success("Default Achievement sound updated.");
@@ -188,10 +227,7 @@ export function Settings() {
                             {activeTab === "appearance" && (
                                 <motion.div key="appearance" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} className="space-y-10">
                                     <div className="space-y-4">
-                                        <div>
-                                            <h3 className="text-lg font-black text-white uppercase tracking-wider mb-1">Global Accent Color</h3>
-                                            <p className="text-xs text-white/40 font-medium">Select the primary glowing color for buttons, borders, and overlays.</p>
-                                        </div>
+                                        <SectionHeader title="Global Accent Color" description="Select the primary glowing color for buttons, borders, and overlays." />
                                         <div className="grid grid-cols-4 md:grid-cols-8 gap-4">
                                             {ACCENT_COLORS.map((color) => (
                                                 <button
@@ -258,18 +294,15 @@ export function Settings() {
                                                     </div>
                                                 ) : (
                                                     settings.launcher_bgm_paths.map((path, i) => (
-                                                        <div key={i} className="flex items-center gap-3 bg-white/[0.02] hover:bg-white/[0.04] p-3 rounded-xl border border-white/5 group transition-colors">
-                                                            <Music size={14} className="text-accent/60 shrink-0" />
-                                                            <div className="flex-1 min-w-0">
-                                                                <p className="text-xs font-mono text-white/70 truncate">{path.split('\\').pop()?.split('/').pop()}</p>
-                                                            </div>
-                                                            <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity gap-1">
-                                                                <button onClick={() => moveTrack(i, -1)} disabled={i === 0} className="p-1.5 text-white/40 hover:text-white disabled:opacity-30 rounded-md hover:bg-white/10"><ArrowUp size={14} /></button>
-                                                                <button onClick={() => moveTrack(i, 1)} disabled={i === settings.launcher_bgm_paths.length - 1} className="p-1.5 text-white/40 hover:text-white disabled:opacity-30 rounded-md hover:bg-white/10"><ArrowDown size={14} /></button>
-                                                                <div className="w-px h-4 bg-white/10 mx-1" />
-                                                                <button onClick={() => removeTrack(i)} className="p-1.5 text-red-400/60 hover:text-red-400 rounded-md hover:bg-red-500/10"><X size={14} /></button>
-                                                            </div>
-                                                        </div>
+                                                        <TrackListItem
+                                                            key={i}
+                                                            path={path}
+                                                            index={i}
+                                                            totalTracks={settings.launcher_bgm_paths.length}
+                                                            onMove={moveTrack}
+                                                            onRemove={removeTrack}
+                                                            size={14}
+                                                        />
                                                     ))
                                                 )}
                                             </div>
@@ -353,36 +386,18 @@ export function Settings() {
 
                             {activeTab === "general" && (
                                 <motion.div key="general" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} className="space-y-6">
-                                    <div className="bg-white/5 border border-white/10 p-5 rounded-2xl flex items-center justify-between">
-                                        <div>
-                                            <h4 className="text-white font-bold text-sm">Run on System Startup</h4>
-                                            <p className="text-white/40 text-xs mt-1">Boot ChiraLauncher silently in the system tray when Windows starts.</p>
-                                        </div>
-                                        <label className="relative inline-flex items-center cursor-pointer">
-                                            <input
-                                                type="checkbox"
-                                                className="sr-only peer"
-                                                checked={settings.auto_launch_on_boot}
-                                                onChange={(e) => updateSettings({ auto_launch_on_boot: e.target.checked })}
-                                            />
-                                            <div className="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-accent border border-white/10"></div>
-                                        </label>
-                                    </div>
-                                    <div className="bg-white/5 border border-white/10 p-5 rounded-2xl flex items-center justify-between">
-                                        <div>
-                                            <h4 className="text-white font-bold text-sm">Start Minimized</h4>
-                                            <p className="text-white/40 text-xs mt-1">Skip the main window and start directly in the tray background.</p>
-                                        </div>
-                                        <label className="relative inline-flex items-center cursor-pointer">
-                                            <input
-                                                type="checkbox"
-                                                className="sr-only peer"
-                                                checked={settings.minimize_to_tray}
-                                                onChange={(e) => updateSettings({ minimize_to_tray: e.target.checked })}
-                                            />
-                                            <div className="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-accent border border-white/10"></div>
-                                        </label>
-                                    </div>
+                                    <ToggleRow
+                                        title="Run on System Startup"
+                                        desc="Boot ChiraLauncher silently in the system tray when Windows starts."
+                                        checked={settings.auto_launch_on_boot}
+                                        onChange={(v) => updateSettings({ auto_launch_on_boot: v })}
+                                    />
+                                    <ToggleRow
+                                        title="Start Minimized"
+                                        desc="Skip the main window and start directly in the tray background."
+                                        checked={settings.minimize_to_tray}
+                                        onChange={(v) => updateSettings({ minimize_to_tray: v })}
+                                    />
 
                                     <div className="space-y-2 mt-8">
                                         <label className="text-[10px] font-black text-white/40 tracking-widest uppercase">Default Secondary Launcher Path</label>
@@ -431,10 +446,7 @@ export function Settings() {
                             {activeTab === "downloads" && (
                                 <motion.div key="downloads" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} className="space-y-10">
                                     <div className="space-y-4">
-                                        <div>
-                                            <h3 className="text-lg font-black text-white uppercase tracking-wider mb-1">Download Directory</h3>
-                                            <p className="text-xs text-white/40 font-medium">Where incoming game repacks and P2P files should be saved.</p>
-                                        </div>
+                                        <SectionHeader title="Download Directory" description="Where incoming game repacks and P2P files should be saved." />
                                         <div className="flex gap-3">
                                             <div className="flex-1 bg-black/50 border border-white/10 rounded-2xl px-5 py-4 text-sm font-mono text-white/70 overflow-hidden text-ellipsis whitespace-nowrap shadow-inner">
                                                 {settings.download_path || "No path selected"}
@@ -497,37 +509,18 @@ export function Settings() {
                                     <div className="space-y-4">
                                         <h3 className="text-lg font-black text-white uppercase tracking-wider">Torrent Options</h3>
 
-                                        <div className="bg-white/5 border border-white/10 p-5 rounded-2xl flex items-center justify-between">
-                                            <div>
-                                                <h4 className="text-white font-bold text-sm">Sequential Download</h4>
-                                                <p className="text-white/40 text-xs mt-1">Download torrent pieces in order from start to finish. Useful for streaming video files before fully downloaded.</p>
-                                            </div>
-                                            <label className="relative inline-flex items-center cursor-pointer">
-                                                <input
-                                                    type="checkbox"
-                                                    className="sr-only peer"
-                                                    checked={settings.sequential_download}
-                                                    onChange={(e) => updateSettings({ sequential_download: e.target.checked })}
-                                                />
-                                                <div className="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-accent border border-white/10"></div>
-                                            </label>
-                                        </div>
-
-                                        <div className="bg-white/5 border border-white/10 p-5 rounded-2xl flex items-center justify-between">
-                                            <div>
-                                                <h4 className="text-white font-bold text-sm">Close Launcher When Game Starts</h4>
-                                                <p className="text-white/40 text-xs mt-1">Automatically minimize ChiraLauncher to tray when a game launches.</p>
-                                            </div>
-                                            <label className="relative inline-flex items-center cursor-pointer">
-                                                <input
-                                                    type="checkbox"
-                                                    className="sr-only peer"
-                                                    checked={settings.auto_close_launcher}
-                                                    onChange={(e) => updateSettings({ auto_close_launcher: e.target.checked })}
-                                                />
-                                                <div className="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-accent border border-white/10"></div>
-                                            </label>
-                                        </div>
+                                        <ToggleRow
+                                            title="Sequential Download"
+                                            desc="Download torrent pieces in order from start to finish. Useful for streaming video files before fully downloaded."
+                                            checked={settings.sequential_download}
+                                            onChange={(v) => updateSettings({ sequential_download: v })}
+                                        />
+                                        <ToggleRow
+                                            title="Close Launcher When Game Starts"
+                                            desc="Automatically minimize ChiraLauncher to tray when a game launches."
+                                            checked={settings.auto_close_launcher}
+                                            onChange={(v) => updateSettings({ auto_close_launcher: v })}
+                                        />
                                     </div>
                                 </motion.div>
                             )}

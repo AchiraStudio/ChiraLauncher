@@ -17,7 +17,7 @@ interface OsIntegrationState {
     removeIntegration: (gameId: string) => void;
 }
 
-export const useOsIntegrationStore = create<OsIntegrationState>((set) => ({
+const useOsIntegrationStore = create<OsIntegrationState>((set) => ({
     integrations: {},
     isLoading: false,
 

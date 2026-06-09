@@ -8,13 +8,15 @@ import { useGameStore } from "../../store/gameStore";
 import { fetchSteamMetadata, parseSteamDate, fetchSteamAchievementPercentages } from "../../services/steamService";
 import { toast } from "sonner";
 import {
-    X, FolderOpen, Image, Monitor, User2, Calendar,
-    Save, Gamepad2, FileText, StickyNote, Pencil, Globe, Hash, Link2,
-    Trophy, Activity, Terminal, RefreshCcw, Play, Zap, Rocket, Music, ArrowUp, ArrowDown, Plus, ChevronDown
+    X, Image, Save, Gamepad2, FileText, Pencil, Globe, Link2, Trophy, Activity, Zap
 } from "lucide-react";
 import { cn } from "../../lib/utils";
-import { useLocalImage } from "../../hooks/useLocalImage";
-import { smartAudio } from "../../services/SmartAudio";
+import { ExecutionMethodSettings } from "../game/ExecutionMethodSettings";
+import { EditGameGeneralTab } from "./edit/EditGameGeneralTab";
+import { EditGameMediaTab } from "./edit/EditGameMediaTab";
+import { EditGameAchievementsTab } from "./edit/EditGameAchievementsTab";
+import { EditGameExtraTab } from "./edit/EditGameExtraTab";
+import { EditGameDiagnosticsTab } from "./edit/EditGameDiagnosticsTab";
 
 type Tab = "general" | "execution" | "media" | "extra" | "achievements" | "diagnostics";
 
@@ -29,76 +31,6 @@ interface AchievementDiagnostics {
     earned_count: number;
     probe_log: string[];
 }
-
-function ImagePreview({ path, aspect, placeholder, isLogo = false }: { path: string; aspect: string; placeholder: string; isLogo?: boolean }) {
-    const cleanPath = path ? path.split("?pos=")[0] : "";
-    const { src, error } = useLocalImage(cleanPath);
-
-    const [, focalStr] = path ? path.split("?pos=") : ["", ""];
-    const objectPosition = focalStr?.replace("-", " ") || "center";
-
-    return (
-        <div className={cn("rounded-xl bg-black/45 border border-white/5 overflow-hidden flex items-center justify-center text-white/10 shrink-0 relative shadow-inner", aspect)}>
-            {src && !error ? (
-                <>
-                    {isLogo && (
-                        <img
-                            src={src}
-                            alt=""
-                            className="absolute inset-0 w-full h-full object-contain blur-xl opacity-20 brightness-150 p-4 pointer-events-none"
-                        />
-                    )}
-                    <img
-                        src={src}
-                        alt=""
-                        className={cn(
-                            "absolute inset-0 w-full h-full transition-transform duration-500",
-                            isLogo ? "object-contain p-4 drop-shadow-lg" : "object-cover"
-                        )}
-                        style={{ objectPosition }}
-                    />
-                </>
-            ) : (
-                <span className="relative z-10 text-2xl font-black opacity-20 select-none uppercase tracking-tighter italic">{placeholder}</span>
-            )}
-        </div>
-    );
-}
-
-function Label({ children }: { children: React.ReactNode }) {
-    return <label className="text-white/35 text-[10px] font-black tracking-widest uppercase block mb-2">{children}</label>;
-}
-
-function DiagItem({ label, value, sub }: { label: string; value: any; sub?: string }) {
-    return (
-        <div className="p-3 bg-white/[0.02] border border-white/5 rounded-xl">
-            <p className="text-[8px] font-black text-white/20 uppercase tracking-widest mb-1">{label}</p>
-            <p className="text-xs font-bold text-white/90 truncate">{value}</p>
-            {sub && <p className="text-[8px] font-black text-accent/50 uppercase tracking-wider mt-0.5">{sub}</p>}
-        </div>
-    );
-}
-
-function DiagPath({ label, path }: { label: string; path: string | null }) {
-    return (
-        <div className="space-y-1">
-            <p className="text-[8px] font-black text-white/15 uppercase tracking-widest ml-1">{label}</p>
-            <div className="px-3 py-2 bg-black/40 border border-white/5 rounded-lg text-[9px] text-white/30 truncate font-mono select-all">
-                {path || "Automatic Search"}
-            </div>
-        </div>
-    );
-}
-
-const inputCls = "w-full bg-black/30 border border-white/10 focus:border-accent/60 rounded-xl px-4 py-3 text-white text-sm font-medium outline-none transition-all placeholder:text-white/15";
-
-const EXEC_OPTIONS: { value: string; label: string; desc: string }[] = [
-    { value: "direct", label: "Standard Direct Launch", desc: "Spawns the executable directly and tracks its PID." },
-    { value: "official_steam", label: "Official Steam Game (via steam://)", desc: "Launches via steam:// so Steam applies DRM and args correctly. AutoAttach catches the process." },
-    { value: "unreal_engine", label: "Unreal Engine (Bypass Bootstrap)", desc: "Ignores the bootstrap when it dies. AutoAttach catches Win64-Shipping.exe." },
-    { value: "auto_launcher", label: "Auto-Launcher (Launcher → Wait 5s → Game)", desc: "Spawns the Launcher, waits 5s, then spawns the game automatically." },
-    { value: "manual_launcher", label: "Manual Launcher (Wait for Play click)", desc: "Spawns the Launcher and waits for you to click Play. AutoAttach intercepts the game." },
-];
 
 export function EditGameModal() {
     const isOpen = useUiStore((s: any) => s.isEditGameModalOpen);
@@ -386,14 +318,14 @@ export function EditGameModal() {
 
     const handlePickAudio = async (type: "bgm" | "achievement") => {
         if (type === "bgm") {
-            const selected = await openDialog({ multiple: true, filters: [{ name: "Audio", extensions: ["mp3", "wav", "ogg", "flac"] }] });
+            const selected = await openDialog({ multiple: true, filters: [{ name: "Audio", extensions: ["mp3", "wav", "ogg", "flac", "m4a"] }] });
             if (selected && Array.isArray(selected)) {
                 setCustomBgmPaths(prev => [...prev, ...selected]);
             } else if (selected && typeof selected === "string") {
                 setCustomBgmPaths(prev => [...prev, selected]);
             }
         } else {
-            const selected = await openDialog({ multiple: false, filters: [{ name: "Audio", extensions: ["mp3", "wav", "ogg", "flac"] }] });
+            const selected = await openDialog({ multiple: false, filters: [{ name: "Audio", extensions: ["mp3", "wav", "ogg", "flac", "m4a"] }] });
             if (selected && typeof selected === "string") {
                 setCustomAchSoundPath(selected);
             }
@@ -536,485 +468,76 @@ export function EditGameModal() {
                                 <AnimatePresence mode="wait">
                                     {tab === "general" && (
                                         <motion.div key="general" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }} className="space-y-5">
-                                            <div>
-                                                <Label>Game Title</Label>
-                                                <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} className={inputCls} />
-                                            </div>
-                                            <div>
-                                                <Label>Main Game Executable</Label>
-                                                <div className="flex gap-2">
-                                                    <input type="text" value={exePath} onChange={(e) => setExePath(e.target.value)} className={cn(inputCls, "flex-1 font-mono text-xs")} />
-                                                    <button onClick={handlePickExe} className="shrink-0 bg-white/5 hover:bg-white/10 text-white/60 hover:text-white px-4 rounded-xl font-bold text-xs transition-all border border-white/10 flex items-center gap-2">
-                                                        <FolderOpen size={14} /> Browse
-                                                    </button>
-                                                </div>
-                                                <p className="text-white/30 text-[10px] mt-1 ml-1">The primary game executable (e.g. Game.exe, or Shipping.exe for Unreal Engine).</p>
-                                            </div>
-
-                                            <div>
-                                                <Label>Custom Launch Arguments</Label>
-                                                <div className="flex gap-2">
-                                                    <input
-                                                        type="text"
-                                                        value={launchArgs}
-                                                        onChange={(e) => setLaunchArgs(e.target.value)}
-                                                        className={cn(inputCls, "font-mono text-sm placeholder:text-white/20")}
-                                                        placeholder="-novid -high -fullscreen"
-                                                    />
-                                                </div>
-                                                <p className="text-white/30 text-[10px] mt-1 ml-1">Optional parameters appended when starting the executable.</p>
-                                            </div>
-
-                                            <div className="grid grid-cols-2 gap-4">
-                                                <div>
-                                                    <Label>Steam App ID</Label>
-                                                    <div className="relative">
-                                                        <Hash size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/20" />
-                                                        <input type="number" value={appIdInput} onChange={(e) => setAppIdInput(e.target.value)} className={cn(inputCls, "pl-9 font-mono")} placeholder="e.g. 123456" />
-                                                    </div>
-                                                </div>
-                                                <div>
-                                                    <Label>Developer</Label>
-                                                    <div className="relative">
-                                                        <User2 size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/20" />
-                                                        <input type="text" value={developer} onChange={(e) => setDeveloper(e.target.value)} className={cn(inputCls, "pl-9")} />
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <div className="grid grid-cols-2 gap-4">
-                                                <div>
-                                                    <Label>Release Date</Label>
-                                                    <div className="relative">
-                                                        <Calendar size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/20" />
-                                                        <input type="date" value={releaseDate} onChange={(e) => setReleaseDate(e.target.value)} className={cn(inputCls, "pl-9 [color-scheme:dark]")} />
-                                                    </div>
-                                                </div>
-                                                <div>
-                                                    <Label>Genre / Publisher</Label>
-                                                    <div className="relative">
-                                                        <Monitor size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/20" />
-                                                        <input type="text" value={genre} onChange={(e) => setGenre(e.target.value)} className={cn(inputCls, "pl-9")} />
-                                                    </div>
-                                                </div>
-                                            </div>
+                                            <EditGameGeneralTab
+                                                title={title} setTitle={setTitle}
+                                                exePath={exePath} setExePath={setExePath}
+                                                launchArgs={launchArgs} setLaunchArgs={setLaunchArgs}
+                                                appIdInput={appIdInput} setAppIdInput={setAppIdInput}
+                                                developer={developer} setDeveloper={setDeveloper}
+                                                releaseDate={releaseDate} setReleaseDate={setReleaseDate}
+                                                genre={genre} setGenre={setGenre}
+                                                handlePickExe={handlePickExe}
+                                            />
                                         </motion.div>
                                     )}
 
                                     {tab === "execution" && (
                                         <motion.div key="execution" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }} className="space-y-6">
-                                            <div className="bg-accent/5 border border-accent/15 p-5 rounded-2xl flex gap-4 items-start shadow-inner">
-                                                <Rocket className="text-accent shrink-0 mt-0.5" size={24} />
-                                                <div>
-                                                    <h4 className="text-accent text-sm font-black uppercase tracking-widest mb-1.5">Engine Routing</h4>
-                                                    <p className="text-white/50 text-xs leading-relaxed font-medium">
-                                                        Does this game require a secondary launcher, or is it built on an engine that spawns child processes? Configure how ChiraLauncher tracks the execution flow here.
-                                                    </p>
-                                                </div>
-                                            </div>
-
-                                            <div className="space-y-4">
-                                                <div>
-                                                    <Label>Execution Method</Label>
-                                                    <div className="relative">
-                                                        <select
-                                                            value={executionMethod}
-                                                            onChange={(e) => setExecutionMethod(e.target.value as any)}
-                                                            className={cn(inputCls, "appearance-none cursor-pointer pr-10")}
-                                                        >
-                                                            {EXEC_OPTIONS.map(o => (
-                                                                <option key={o.value} value={o.value}>{o.label}</option>
-                                                            ))}
-                                                        </select>
-                                                        <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 pointer-events-none" />
-                                                    </div>
-                                                    {/* Description badge for selected method */}
-                                                    <p className="text-white/30 text-[10px] mt-1.5 ml-1">
-                                                        {EXEC_OPTIONS.find(o => o.value === executionMethod)?.desc}
-                                                    </p>
-                                                </div>
-
-                                                <AnimatePresence>
-                                                    {(executionMethod === "auto_launcher" || executionMethod === "manual_launcher") && (
-                                                        <motion.div
-                                                            initial={{ opacity: 0, height: 0 }}
-                                                            animate={{ opacity: 1, height: "auto" }}
-                                                            exit={{ opacity: 0, height: 0 }}
-                                                            className="overflow-hidden"
-                                                        >
-                                                            <div className="pt-2">
-                                                                <Label>Secondary Launcher Executable</Label>
-                                                                <div className="flex gap-2">
-                                                                    <input
-                                                                        type="text"
-                                                                        value={launcherPath}
-                                                                        onChange={(e) => setLauncherPath(e.target.value)}
-                                                                        className={cn(inputCls, "flex-1 font-mono text-xs border-dashed bg-black/20")}
-                                                                        placeholder="C:\Games\Launcher.exe"
-                                                                    />
-                                                                    <button
-                                                                        onClick={async () => {
-                                                                            const selected = await openDialog({ multiple: false, filters: [{ name: "Executables", extensions: ["exe"] }] });
-                                                                            if (selected && typeof selected === "string") setLauncherPath(selected);
-                                                                        }}
-                                                                        className="shrink-0 bg-white/5 hover:bg-white/10 text-white/60 hover:text-white px-4 rounded-xl font-bold text-xs transition-all border border-white/10 flex items-center gap-2"
-                                                                    >
-                                                                        <FolderOpen size={14} /> Browse
-                                                                    </button>
-                                                                </div>
-                                                            </div>
-                                                        </motion.div>
-                                                    )}
-                                                </AnimatePresence>
-
-                                                <div className="p-4 bg-black/40 rounded-xl border border-white/5 mt-4">
-                                                    <h4 className="text-[10px] font-black text-white/40 uppercase tracking-widest mb-2">How it works</h4>
-                                                    <ul className="text-xs text-white/50 space-y-2 list-disc pl-4 marker:text-white/20">
-                                                        {executionMethod === "direct" && <li>Spawns the <span className="text-white/80 font-mono">Executable Path</span> directly and tracks its PID.</li>}
-                                                        {executionMethod === "official_steam" && <li>Launches via the <span className="text-white/80 font-mono">steam://</span> protocol so Steam can apply DRM and custom arguments correctly. AutoAttach catches the game once it loads.</li>}
-                                                        {executionMethod === "unreal_engine" && <li>Spawns the executable, but ignores it when it immediately dies. AutoAttach will intercept the real <span className="text-white/80 font-mono">Win64-Shipping.exe</span> automatically.</li>}
-                                                        {executionMethod === "auto_launcher" && <li>Spawns the <span className="text-white/80 font-mono">Launcher Executable</span>, waits 5 seconds, then spawns the <span className="text-white/80 font-mono">Main Game Executable</span> automatically.</li>}
-                                                        {executionMethod === "manual_launcher" && <li>Spawns the <span className="text-white/80 font-mono">Launcher Executable</span> and leaves it up to you to click "Play". AutoAttach intercepts the main game when it appears.</li>}
-                                                    </ul>
-                                                </div>
-                                            </div>
+                                            <ExecutionMethodSettings
+                                                executionMethod={executionMethod}
+                                                setExecutionMethod={setExecutionMethod as any}
+                                                launcherPath={launcherPath}
+                                                setLauncherPath={setLauncherPath}
+                                            />
                                         </motion.div>
                                     )}
 
                                     {tab === "media" && (
                                         <motion.div key="media" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }} className="space-y-6">
-
-                                            <div className="flex gap-5 items-start">
-                                                <ImagePreview path={coverPath} aspect="w-20 h-28" placeholder="🖼️" />
-                                                <div className="flex-1 space-y-2">
-                                                    <Label>Cover Image</Label>
-                                                    <div className="flex gap-2">
-                                                        <input type="text" value={coverPath} onChange={(e) => setCoverPath(e.target.value)} className={cn(inputCls, "flex-1 text-xs font-mono")} />
-                                                        <button onClick={() => handlePickImage("cover")} className="shrink-0 bg-white/5 hover:bg-white/10 text-white/60 hover:text-white px-3 rounded-xl font-bold text-xs transition-all border border-white/10 flex items-center gap-1.5">
-                                                            <FolderOpen size={13} />
-                                                        </button>
-                                                    </div>
-                                                    {coverPath && (
-                                                        <button onClick={() => setCoverPath("")} className="text-red-400/60 hover:text-red-400 text-xs font-semibold transition-colors flex items-center gap-1 mt-1">
-                                                            <X size={11} /> Clear
-                                                        </button>
-                                                    )}
-                                                </div>
-                                            </div>
-
-                                            <div className="border-t border-white/5" />
-
-                                            <div className="flex gap-5 items-start">
-                                                <ImagePreview path={backgroundPath ? `${backgroundPath}?pos=${focalPoint}` : ""} aspect="w-32 h-20" placeholder="🌄" />
-                                                <div className="flex-1 space-y-2">
-                                                    <div className="flex items-center justify-between">
-                                                        <Label>Background / Hero Image</Label>
-                                                        <select value={focalPoint} onChange={(e) => setFocalPoint(e.target.value)} className="bg-white/5 border border-white/10 text-[9px] font-bold uppercase tracking-widest px-2 py-1 rounded outline-none text-white/60 [&>option]:bg-[#0f1423] [&>option]:text-white">
-                                                            <option value="center">Center</option>
-                                                            <option value="top">Top</option>
-                                                            <option value="bottom">Bottom</option>
-                                                        </select>
-                                                    </div>
-                                                    <div className="flex gap-2">
-                                                        <input type="text" value={backgroundPath} onChange={(e) => setBackgroundPath(e.target.value)} className={cn(inputCls, "flex-1 text-xs font-mono")} />
-                                                        <button onClick={() => handlePickImage("bg")} className="shrink-0 bg-white/5 hover:bg-white/10 text-white/60 hover:text-white px-3 rounded-xl font-bold text-xs transition-all border border-white/10 flex items-center gap-1.5">
-                                                            <FolderOpen size={13} />
-                                                        </button>
-                                                    </div>
-                                                    {backgroundPath && (
-                                                        <button onClick={() => setBackgroundPath("")} className="text-red-400/60 hover:text-red-400 text-xs font-semibold transition-colors flex items-center gap-1 mt-1">
-                                                            <X size={11} /> Clear
-                                                        </button>
-                                                    )}
-                                                </div>
-                                            </div>
-
-                                            <div className="border-t border-white/5" />
-
-                                            <div className="flex gap-5 items-start">
-                                                <ImagePreview path={logoPath} aspect="w-32 h-16" placeholder="✨" isLogo />
-                                                <div className="flex-1 space-y-2">
-                                                    <Label>Transparent Logo (Optional)</Label>
-                                                    <div className="flex gap-2">
-                                                        <input type="text" value={logoPath} onChange={(e) => setLogoPath(e.target.value)} className={cn(inputCls, "flex-1 text-xs font-mono")} />
-                                                        <button onClick={() => handlePickImage("logo")} className="shrink-0 bg-white/5 hover:bg-white/10 text-white/60 hover:text-white px-3 rounded-xl font-bold text-xs transition-all border border-white/10 flex items-center gap-1.5">
-                                                            <FolderOpen size={13} />
-                                                        </button>
-                                                    </div>
-                                                    {logoPath && (
-                                                        <button onClick={() => setLogoPath("")} className="text-red-400/60 hover:text-red-400 text-xs font-semibold transition-colors flex items-center gap-1 mt-1">
-                                                            <X size={11} /> Clear
-                                                        </button>
-                                                    )}
-                                                </div>
-                                            </div>
-
-                                            <div className="border-t border-white/5" />
-
-                                            <div className="space-y-5">
-                                                <div className="space-y-2">
-                                                    <div className="flex items-center justify-between">
-                                                        <Label>Custom Background Music Playlist</Label>
-                                                        <button onClick={() => handlePickAudio("bgm")} className="bg-white/5 hover:bg-white/10 text-white/60 hover:text-white px-3 py-1.5 rounded-lg font-bold text-xs transition-all border border-white/10 flex items-center gap-1.5">
-                                                            <Plus size={14} /> Add Tracks
-                                                        </button>
-                                                    </div>
-
-                                                    <div className="bg-black/40 border border-white/5 rounded-2xl p-2 max-h-[150px] overflow-y-auto custom-scrollbar shadow-inner space-y-1">
-                                                        {customBgmPaths.length === 0 ? (
-                                                            <div className="py-6 flex flex-col items-center justify-center text-white/20 gap-2">
-                                                                <Music size={20} />
-                                                                <span className="text-[10px] font-bold uppercase tracking-widest">No Custom Tracks</span>
-                                                            </div>
-                                                        ) : (
-                                                            customBgmPaths.map((path, i) => (
-                                                                <div key={i} className="flex items-center gap-3 bg-white/[0.02] hover:bg-white/[0.04] p-2.5 rounded-xl border border-white/5 group transition-colors">
-                                                                    <Music size={12} className="text-accent/60 shrink-0" />
-                                                                    <div className="flex-1 min-w-0">
-                                                                        <p className="text-xs font-mono text-white/70 truncate">{path.split('\\').pop()?.split('/').pop()}</p>
-                                                                    </div>
-                                                                    <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity gap-1">
-                                                                        <button onClick={() => moveTrack(i, -1)} disabled={i === 0} className="p-1.5 text-white/40 hover:text-white disabled:opacity-30 rounded-md hover:bg-white/10"><ArrowUp size={12} /></button>
-                                                                        <button onClick={() => moveTrack(i, 1)} disabled={i === customBgmPaths.length - 1} className="p-1.5 text-white/40 hover:text-white disabled:opacity-30 rounded-md hover:bg-white/10"><ArrowDown size={12} /></button>
-                                                                        <div className="w-px h-4 bg-white/10 mx-1" />
-                                                                        <button onClick={() => removeTrack(i)} className="p-1.5 text-red-400/60 hover:text-red-400 rounded-md hover:bg-red-500/10"><X size={12} /></button>
-                                                                    </div>
-                                                                </div>
-                                                            ))
-                                                        )}
-                                                    </div>
-                                                    {customBgmPaths.length > 0 && (
-                                                        <div className="flex justify-end gap-2 mt-2">
-                                                            <button onClick={() => smartAudio.playGameBGM(gameToEdit.id, customBgmPaths)} className="bg-accent/10 hover:bg-accent/20 text-accent px-4 py-2 rounded-xl font-bold text-[10px] uppercase tracking-widest transition-all border border-accent/20 flex items-center gap-2">
-                                                                <Play size={12} fill="currentColor" /> Preview Playlist
-                                                            </button>
-                                                            <button onClick={() => { setCustomBgmPaths([]); smartAudio.playGlobalBGM(); }} className="text-red-400/60 hover:text-red-400 px-4 py-2 bg-red-500/5 hover:bg-red-500/10 rounded-xl border border-red-500/10 transition-colors text-[10px] font-bold uppercase tracking-widest">
-                                                                Clear All
-                                                            </button>
-                                                        </div>
-                                                    )}
-                                                </div>
-
-                                                <div className="space-y-2">
-                                                    <Label>Custom Achievement Sound</Label>
-                                                    <div className="flex gap-2">
-                                                        <Trophy size={16} className="mt-2.5 text-yellow-500/40 shrink-0" />
-                                                        <input type="text" value={customAchSoundPath} onChange={(e) => setCustomAchSoundPath(e.target.value)} className={cn(inputCls, "flex-1 text-xs font-mono")} placeholder="C:\Sounds\unlock.wav" />
-                                                        {customAchSoundPath && (
-                                                            <button onClick={() => smartAudio.playAchievement(customAchSoundPath)} className="shrink-0 bg-accent/10 hover:bg-accent/20 text-accent px-4 py-3 rounded-xl font-bold text-xs transition-all border border-accent/20 flex items-center justify-center" title="Preview Sound">
-                                                                <Play size={14} fill="currentColor" />
-                                                            </button>
-                                                        )}
-                                                        <button onClick={() => handlePickAudio("achievement")} className="shrink-0 bg-white/5 hover:bg-white/10 text-white/60 hover:text-white px-3 rounded-xl font-bold text-xs transition-all border border-white/10 flex items-center gap-1.5">
-                                                            <FolderOpen size={13} />
-                                                        </button>
-                                                    </div>
-                                                    <p className="text-white/30 text-[10px] ml-6">The toast duration will automatically match the length of this sound file (minimum 3 seconds).</p>
-                                                    {customAchSoundPath && (
-                                                        <button onClick={() => setCustomAchSoundPath("")} className="text-red-400/60 hover:text-red-400 text-xs font-semibold transition-colors flex items-center gap-1 ml-6 mt-1">
-                                                            <X size={11} /> Clear Sound
-                                                        </button>
-                                                    )}
-                                                </div>
-                                            </div>
-
+                                            <EditGameMediaTab
+                                                coverPath={coverPath} setCoverPath={setCoverPath}
+                                                backgroundPath={backgroundPath} setBackgroundPath={setBackgroundPath}
+                                                logoPath={logoPath} setLogoPath={setLogoPath}
+                                                focalPoint={focalPoint} setFocalPoint={setFocalPoint}
+                                                customAchSoundPath={customAchSoundPath} setCustomAchSoundPath={setCustomAchSoundPath}
+                                                customBgmPaths={customBgmPaths} setCustomBgmPaths={setCustomBgmPaths}
+                                                handlePickImage={handlePickImage} handlePickAudio={handlePickAudio}
+                                                moveTrack={moveTrack} removeTrack={removeTrack}
+                                                gameId={gameToEdit.id}
+                                            />
                                         </motion.div>
                                     )}
 
                                     {tab === "extra" && (
                                         <motion.div key="extra" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }} className="space-y-5">
-                                            <div>
-                                                <Label>Description / Summary</Label>
-                                                <div className="relative">
-                                                    <FileText size={14} className="absolute left-3.5 top-3.5 text-white/20" />
-                                                    <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={5} className={cn(inputCls, "pl-9 resize-none")} />
-                                                </div>
-                                            </div>
-                                            <div>
-                                                <Label>Personal Notes</Label>
-                                                <div className="relative">
-                                                    <StickyNote size={14} className="absolute left-3.5 top-3.5 text-white/20" />
-                                                    <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={4} className={cn(inputCls, "pl-9 resize-none")} />
-                                                </div>
-                                            </div>
+                                            <EditGameExtraTab
+                                                description={description} setDescription={setDescription}
+                                                notes={notes} setNotes={setNotes}
+                                            />
                                         </motion.div>
                                     )}
 
                                     {tab === "achievements" && (
                                         <motion.div key="achievements" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }} className="space-y-6">
-
-                                            {/* ── Generator Panel ─────────────────────────────── */}
-                                            <div className="bg-yellow-500/5 border border-yellow-500/20 rounded-2xl p-5 space-y-4">
-                                                <div className="flex items-start gap-4">
-                                                    <Trophy className="text-yellow-400 shrink-0 mt-0.5" size={18} />
-                                                    <div className="flex-1 min-w-0">
-                                                        <h4 className="text-yellow-400 text-xs font-black uppercase tracking-widest mb-1">Generate Achievement Data</h4>
-                                                        <p className="text-white/40 text-[11px] leading-relaxed">
-                                                            Fetches the achievement schema from Steam and writes <span className="font-mono text-white/60">achievements.json</span> to the game's <span className="font-mono text-white/60">steam_settings/</span> folder. Requires a valid Steam App ID, install directory, and API key.
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                                <div className="grid grid-cols-2 gap-3 text-[10px] font-mono">
-                                                    <div className="bg-black/40 rounded-xl px-3 py-2 border border-white/5 truncate">
-                                                        <p className="text-white/20 font-black uppercase tracking-widest mb-0.5">App ID</p>
-                                                        <p className="text-white/60 truncate">{appIdInput || "Not set"}</p>
-                                                    </div>
-                                                    <div className="bg-black/40 rounded-xl px-3 py-2 border border-white/5 truncate">
-                                                        <p className="text-white/20 font-black uppercase tracking-widest mb-0.5">Install Dir</p>
-                                                        <p className="text-white/60 truncate">{gameToEdit.install_dir || "Not set"}</p>
-                                                    </div>
-                                                </div>
-
-                                                <div className="flex flex-col gap-2 w-full">
-                                                    <button
-                                                        onClick={async () => {
-                                                            const apiKey = useSettingsStore.getState().settings?.steam_api_key;
-                                                            if (!apiKey) {
-                                                                toast.warning("Cannot generate achievements: No Steam API Key configured.");
-                                                                return;
-                                                            }
-                                                            if (!gameToEdit.install_dir) {
-                                                                toast.error("No install directory", { description: "The game must have a valid install directory." });
-                                                                return;
-                                                            }
-                                                            setIsGeneratingAch(true);
-                                                            try {
-                                                                const result = await invoke<{ count: number; has_global_pcts: boolean }>("fetch_and_write_achievements", {
-                                                                    appId: appIdInput,
-                                                                    gameDir: gameToEdit.install_dir,
-                                                                    apiKey
-                                                                });
-                                                                toast.success(`Generated ${result.count} achievements`, {
-                                                                    description: `Written to steam_settings/achievements.json${result.has_global_pcts ? ' with global rarity data.' : '.'}`
-                                                                });
-                                                            } catch (e: any) {
-                                                                toast.error("Generation failed", { description: String(e) });
-                                                            } finally {
-                                                                setIsGeneratingAch(false);
-                                                            }
-                                                        }}
-                                                        disabled={isGeneratingAch || !appIdInput || isSyncingSteam}
-                                                        className="w-full py-3 bg-yellow-500/10 hover:bg-yellow-500/20 disabled:opacity-40 border border-yellow-500/20 text-yellow-400 rounded-xl font-black text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2"
-                                                    >
-                                                        {isGeneratingAch ? (
-                                                            <><div className="w-4 h-4 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin" /> Generating...</>
-                                                        ) : (
-                                                            <><Trophy size={14} /> Generate steam_settings/achievements.json</>
-                                                        )}
-                                                    </button>
-                                                    <button
-                                                        onClick={async () => {
-                                                            if (!gameToEdit.install_dir) {
-                                                                toast.error("No install directory", { description: "The game must have a valid install directory." });
-                                                                return;
-                                                            }
-                                                            setIsSyncingSteam(true);
-                                                            try {
-                                                                await invoke("sync_steam_achievements", {
-                                                                    id: gameToEdit.id,
-                                                                    steamAppId: appIdInput,
-                                                                    installDir: gameToEdit.install_dir
-                                                                });
-                                                                toast.success("Synced from Steam", {
-                                                                    description: "Achievements updated directly from the Steam Client."
-                                                                });
-                                                            } catch (e: any) {
-                                                                toast.error("Sync failed", { description: String(e) });
-                                                            } finally {
-                                                                setIsSyncingSteam(false);
-                                                            }
-                                                        }}
-                                                        disabled={isGeneratingAch || !appIdInput || isSyncingSteam}
-                                                        className="w-full py-3 bg-blue-500/10 hover:bg-blue-500/20 disabled:opacity-40 border border-blue-500/20 text-blue-400 rounded-xl font-black text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2"
-                                                    >
-                                                        {isSyncingSteam ? (
-                                                            <><div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" /> Syncing...</>
-                                                        ) : (
-                                                            <><Trophy size={14} /> Sync Steam Achievements (SAM)</>
-                                                        )}
-                                                    </button>
-                                                </div>
-                                            </div>
-
-                                            {/* ── Manual Override Paths ─────────────────────────── */}
-                                            <div className="bg-accent/5 border border-accent/15 p-5 rounded-2xl flex gap-4 items-start shadow-inner">
-                                                <Trophy className="text-accent shrink-0 mt-0.5" size={18} />
-                                                <div>
-                                                    <h4 className="text-accent text-xs font-black uppercase tracking-widest mb-1.5">Manual Path Overrides</h4>
-                                                    <p className="text-white/40 text-[11px] leading-relaxed font-semibold">
-                                                        Point the launcher directly to your definition and progress files if auto-detection doesn't find them automatically.
-                                                    </p>
-                                                </div>
-                                            </div>
-
-                                            <div className="space-y-4">
-                                                <div className="space-y-2">
-                                                    <Label>Metadata Path (achievements.json)</Label>
-                                                    <div className="flex gap-2">
-                                                        <input type="text" value={manualAchPath} onChange={(e) => setManualAchPath(e.target.value)} className={cn(inputCls, "flex-1 text-xs font-mono")} placeholder="C:\Games\...\achievements.json" />
-                                                        <button onClick={handlePickAchMeta} className="shrink-0 bg-white/5 hover:bg-white/10 text-white/60 hover:text-white px-3 rounded-xl font-bold text-xs transition-all border border-white/10 flex items-center gap-1.5">
-                                                            <FolderOpen size={13} />
-                                                        </button>
-                                                    </div>
-                                                </div>
-
-                                                <div className="space-y-2">
-                                                    <Label>Progress File (achievements.ini / .json / .xml)</Label>
-                                                    <div className="flex gap-2">
-                                                        <input type="text" value={manualSavePath} onChange={(e) => setManualSavePath(e.target.value)} className={cn(inputCls, "flex-1 text-xs font-mono")} placeholder="C:\...\achievements.ini" />
-                                                        <button onClick={handlePickAchSave} className="shrink-0 bg-white/5 hover:bg-white/10 text-white/60 hover:text-white px-3 rounded-xl font-bold text-xs transition-all border border-white/10 flex items-center gap-1.5">
-                                                            <FolderOpen size={13} />
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                            <div className="pt-4 flex justify-end gap-3">
-                                                <button onClick={() => { setManualAchPath(""); setManualSavePath(""); }} disabled={!manualAchPath && !manualSavePath} className="flex items-center gap-2 px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-xl text-[10px] font-black uppercase transition-colors disabled:opacity-30">
-                                                    <RefreshCcw size={12} /> Reset to Auto
-                                                </button>
-                                            </div>
+                                            <EditGameAchievementsTab
+                                                gameToEdit={gameToEdit}
+                                                appIdInput={appIdInput}
+                                                isGeneratingAch={isGeneratingAch} setIsGeneratingAch={setIsGeneratingAch}
+                                                isSyncingSteam={isSyncingSteam} setIsSyncingSteam={setIsSyncingSteam}
+                                                manualAchPath={manualAchPath} setManualAchPath={setManualAchPath}
+                                                manualSavePath={manualSavePath} setManualSavePath={setManualSavePath}
+                                                handlePickAchMeta={handlePickAchMeta} handlePickAchSave={handlePickAchSave}
+                                            />
                                         </motion.div>
                                     )}
 
                                     {tab === "diagnostics" && (
                                         <motion.div key="diagnostics" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }} className="space-y-6">
-                                            <div className="flex items-center justify-between">
-                                                <div className="flex items-center gap-3">
-                                                    <Terminal className="text-white/30" size={16} />
-                                                    <h3 className="text-white/80 font-black uppercase text-[10px] tracking-widest">Scanner Logs</h3>
-                                                </div>
-                                                <button onClick={refreshDiagnostics} disabled={isRefreshingDiag} className="p-2 hover:bg-white/5 rounded-lg transition-colors text-white/30 hover:text-accent disabled:opacity-50">
-                                                    <RefreshCcw size={14} className={cn(isRefreshingDiag && "animate-spin")} />
-                                                </button>
-                                            </div>
-
-                                            {diagnostics ? (
-                                                <div className="space-y-4">
-                                                    <div className="grid grid-cols-2 gap-3">
-                                                        <DiagItem label="Emulator" value={diagnostics.emulator} />
-                                                        <DiagItem label="App ID" value={diagnostics.app_id || "None"} />
-                                                        <DiagItem label="Defs Found" value={diagnostics.metadata_count} sub={diagnostics.metadata_valid ? "Valid JSON" : "Invalid/None"} />
-                                                        <DiagItem label="Earned" value={diagnostics.earned_count} sub={diagnostics.earned_state_format?.toUpperCase() || "N/A"} />
-                                                    </div>
-
-                                                    <div className="bg-black/80 rounded-2xl p-4 border border-white/5 font-mono text-[10px] leading-relaxed text-white/40 max-h-[160px] overflow-y-auto no-scrollbar shadow-inner">
-                                                        {diagnostics.probe_log.map((line, i) => (
-                                                            <div key={i} className="mb-1 flex gap-2"><span className="text-accent/30 shrink-0">›</span><span className="truncate">{line}</span></div>
-                                                        ))}
-                                                        {diagnostics.probe_log.length === 0 && <div className="italic text-white/10">No logs generated.</div>}
-                                                    </div>
-
-                                                    <div className="space-y-3 pt-2">
-                                                        <DiagPath label="Metadata Path" path={diagnostics.metadata_path} />
-                                                        <DiagPath label="Save Path" path={diagnostics.earned_state_path} />
-                                                    </div>
-                                                </div>
-                                            ) : (
-                                                <div className="flex flex-col items-center justify-center py-16 text-white/10">
-                                                    <Activity size={32} className="mb-4 animate-pulse" />
-                                                    <p className="text-[10px] font-black uppercase tracking-[0.2em]">Analyzing Data...</p>
-                                                </div>
-                                            )}
+                                            <EditGameDiagnosticsTab
+                                                diagnostics={diagnostics}
+                                                refreshDiagnostics={refreshDiagnostics}
+                                                isRefreshingDiag={isRefreshingDiag}
+                                            />
                                         </motion.div>
                                     )}
                                 </AnimatePresence>

@@ -6,6 +6,7 @@ import { useProfileStore } from "./store/profileStore";
 import { useProcessStore } from "./store/processStore";
 import { formatPlaytime } from "./lib/format";
 import { useLocalImage } from "./hooks/useLocalImage";
+import { computeLevel } from "./lib/xp";
 import {
     Edit2, Check, Shield, Copy, Trophy, Gamepad2, Clock,
     LogOut, Sparkles, User, Target, Zap, Fingerprint, Hexagon, TrendingUp, BarChart3, Lock, Upload,
@@ -24,22 +25,6 @@ function TopGameCover({ path }: { path: string | null }) {
     );
 }
 
-function computeLevel(xp: number) {
-    let level = 1;
-    while (true) {
-        const nextXp = Math.pow(level, 2) * 50;
-        if (xp >= nextXp) {
-            level++;
-        } else {
-            break;
-        }
-    }
-    const xpForCurrentLevel = Math.pow(level - 1, 2) * 50;
-    const xpForNextLevel = Math.pow(level, 2) * 50;
-    const xpProgress = ((xp - xpForCurrentLevel) / (xpForNextLevel - xpForCurrentLevel)) * 100;
-
-    return { level, xpProgress: Math.min(Math.max(xpProgress, 0), 100), xpForNextLevel, xpForCurrentLevel };
-}
 
 const ALL_MILESTONES = [
     { id: "first_game", icon: <Gamepad2 size={18} />, label: "Core Initialized", desc: "Added your first game", check: (g: number, _: number) => g >= 1 },

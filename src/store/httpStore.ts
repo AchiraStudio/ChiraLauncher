@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 
-export interface HttpDownloadStatus {
+interface HttpDownloadStatus {
     id: string;
     name: string;
     folder_name: string | null;

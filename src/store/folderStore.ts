@@ -13,7 +13,7 @@ export interface Folder {
     gameIds: string[]; // For manual folders
 }
 
-export interface LibrarySettings {
+interface LibrarySettings {
     globalBgImage: string;
     globalBgOpacity: number;
     globalBgBlur: number;

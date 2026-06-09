@@ -55,6 +55,8 @@ impl TorrentEngine {
             persistence: Some(librqbit::SessionPersistenceConfig::Json {
                 folder: Some(session_dir.clone()),
             }),
+            listen_port_range: Some(6881..6899),
+            enable_upnp_port_forwarding: true,
             ..Default::default()
         };
 
@@ -74,16 +76,28 @@ impl TorrentEngine {
     }
 
     pub async fn inspect_magnet(&self, magnet_url: String) -> Result<TorrentInfo> {
+        let add_torrent = if magnet_url.starts_with("file://") {
+            let mut path = magnet_url.trim_start_matches("file://");
+            if cfg!(windows) && path.starts_with('/') {
+                path = &path[1..];
+            }
+            let decoded_path = urlencoding::decode(path).unwrap_or(std::borrow::Cow::Borrowed(path)).into_owned();
+            let bytes = std::fs::read(&decoded_path).context("Failed to read .torrent file from disk")?;
+            AddTorrent::from_bytes(bytes)
+        } else {
+            AddTorrent::from_url(&magnet_url)
+        };
+
         let response = self.session
             .add_torrent(
-                AddTorrent::from_url(&magnet_url),
+                add_torrent,
                 Some(AddTorrentOptions {
                     paused: true,
                     ..Default::default()
                 }),
             )
             .await
-            .context("Failed to add magnet")?;
+            .context("Failed to add torrent")?;
 
         let handle = response.into_handle().context("No handle generated")?;
         
@@ -136,9 +150,23 @@ impl TorrentEngine {
         let output_folder = save_path.unwrap_or_else(|| self.default_download_dir.clone());
         let output_folder_str = output_folder.to_string_lossy().to_string();
 
+        let add_torrent_factory = || {
+            if magnet_url.starts_with("file://") {
+                let mut path = magnet_url.trim_start_matches("file://");
+                if cfg!(windows) && path.starts_with('/') {
+                    path = &path[1..];
+                }
+                let decoded_path = urlencoding::decode(path).unwrap_or(std::borrow::Cow::Borrowed(path)).into_owned();
+                let bytes = std::fs::read(&decoded_path).unwrap_or_default();
+                AddTorrent::from_bytes(bytes)
+            } else {
+                AddTorrent::from_url(&magnet_url)
+            }
+        };
+
         let response = match self.session
             .add_torrent(
-                AddTorrent::from_url(&magnet_url),
+                add_torrent_factory(),
                 Some(AddTorrentOptions {
                     output_folder: Some(output_folder_str.clone()),
                     only_files: selected_files.clone(),
@@ -151,7 +179,7 @@ impl TorrentEngine {
                 log::warn!("Failed to add torrent with options: {}. Retrying without options...", e);
                 self.session
                     .add_torrent(
-                        AddTorrent::from_url(&magnet_url),
+                        add_torrent_factory(),
                         None,
                     )
                     .await
@@ -215,8 +243,8 @@ impl TorrentEngine {
                 progress_percent: progress,
                 downloaded_bytes: progress_bytes,
                 total_bytes,
-                download_speed:   live.map(|l| l.download_speed.mbps as u64).unwrap_or(0),
-                upload_speed:     live.map(|l| l.upload_speed.mbps as u64).unwrap_or(0),
+                download_speed:   live.map(|l| (l.download_speed.mbps * 125_000.0) as u64).unwrap_or(0),
+                upload_speed:     live.map(|l| (l.upload_speed.mbps * 125_000.0) as u64).unwrap_or(0),
                 peers:            live.map(|l| l.snapshot.peer_stats.live as u32).unwrap_or(0),
                 state:            stats
                                       .map(|s| format!("{:?}", s.state))

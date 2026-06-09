@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { smartAudio } from "../services/SmartAudio";
 
-export interface AppSettings {
+interface AppSettings {
     download_path: string;
     accent_color: string;
     steam_bg_pref: string;

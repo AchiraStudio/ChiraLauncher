@@ -404,16 +404,32 @@ pub async fn launch_game_internal(
 
     // ── 2. MAIN GAME EXECUTION ──
     let clean_exe_path = game.exe_path.trim().trim_matches('"').trim().to_string();
-    let mut working_dir = game
-        .install_dir
-        .clone()
-        .unwrap_or_default()
-        .trim()
-        .trim_matches('"')
-        .trim()
-        .to_string();
     let exe_path = Path::new(&clean_exe_path);
     let launch_args = game.launch_args.clone().unwrap_or_default();
+
+    // FIXED: Always derive the working directory from the exe's parent folder.
+    // This mirrors exactly how Windows shortcuts work: the "Start in" field is
+    // always set to the folder that CONTAINS the exe. If we can't derive a parent
+    // (e.g. a bare filename with no path), we fall back to install_dir, then empty.
+    let working_dir = exe_path
+        .parent()
+        .map(|p| p.to_string_lossy().to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            game.install_dir
+                .as_deref()
+                .map(|d| d.trim().trim_matches('"').trim().to_string())
+                .filter(|s| !s.is_empty())
+        })
+        .unwrap_or_default();
+
+    log::info!(
+        "Launching '{}' — exe: '{}', cwd: '{}', args: '{}'",
+        game.title,
+        clean_exe_path,
+        working_dir,
+        launch_args
+    );
 
     if exec_method == "official_steam" {
         let app_id = game.steam_app_id.unwrap_or(0);
@@ -446,12 +462,6 @@ pub async fn launch_game_internal(
             return Err(format!("Executable not found: {}", clean_exe_path));
         }
 
-        if working_dir.is_empty() {
-            working_dir = exe_path
-                .parent()
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_default();
-        }
 
         let pid = if game.run_as_admin {
             log::info!(
@@ -621,10 +631,23 @@ pub async fn force_stop_game(id: String, state: State<'_, AppState>) -> Result<(
 pub async fn open_path_in_explorer(path: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        Command::new("explorer")
-            .args(["/select,", &path])
-            .spawn()
-            .map_err(|e| e.to_string())?;
+        use std::path::Path as StdPath;
+
+        // If it's a directory, open it directly. If it's a file, use /select, to
+        // highlight it inside its parent folder.
+        // IMPORTANT: /select, and the path must be ONE argument (no space between).
+        #[cfg(target_os = "windows")]
+        use std::os::windows::process::CommandExt;
+
+        let mut cmd = Command::new("explorer");
+        if StdPath::new(&path).is_dir() {
+            cmd.arg(&path);
+        } else {
+            // raw_arg prevents Rust from quoting the whole "/select,C:\..." string
+            cmd.raw_arg(format!("/select,\"{}\"", path));
+        }
+
+        cmd.spawn().map_err(|e| e.to_string())?;
         Ok(())
     }
 

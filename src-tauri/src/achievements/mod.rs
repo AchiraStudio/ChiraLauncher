@@ -184,7 +184,7 @@ pub fn discover_achievements(
     let mut probe_log = Vec::new();
     probe_log.push(format!("Starting discovery in: {}", install_dir.display()));
 
-    let (crack_type, app_id_detected) = crate::commands::scanner::detect_crack(install_dir);
+    let (crack_type, app_id_detected, crack_dir) = crate::commands::scanner::detect_crack(install_dir);
     let app_id = opts
         .known_app_id
         .map(|s| s.to_string())
@@ -209,8 +209,11 @@ pub fn discover_achievements(
         emu_info.crack_type, emu_info.app_id
     ));
 
+    // Use the crack_dir if it was found deep in the tree (e.g. Engine/Binaries/...)
+    let search_base = crack_dir.unwrap_or_else(|| install_dir.to_path_buf());
+
     let meta_path = find_metadata_path(
-        install_dir,
+        &search_base,
         app_id.as_deref(),
         opts.manual_metadata_path,
         &mut probe_log,
@@ -218,7 +221,7 @@ pub fn discover_achievements(
 
     let save_path = find_save_path(
         app_id.as_deref(),
-        install_dir,
+        &search_base,
         opts.manual_save_path,
         opts.scan_roots,
         Some(&emu_info.crack_type),
@@ -234,7 +237,7 @@ pub fn discover_achievements(
 }
 
 pub fn resolve_app_id(install_dir: &Path) -> Option<String> {
-    let (_, app_id) = crate::commands::scanner::detect_crack(install_dir);
+    let (_, app_id, _) = crate::commands::scanner::detect_crack(install_dir);
     if app_id.is_empty() {
         None
     } else {
@@ -280,7 +283,7 @@ fn find_metadata_path(
     }
 
     let mut steam_settings_dirs = vec![base.join("steam_settings")];
-    for entry in walkdir::WalkDir::new(base).max_depth(6).into_iter().filter_map(|e| e.ok()) {
+    for entry in walkdir::WalkDir::new(base).max_depth(10).into_iter().filter_map(|e| e.ok()) {
         if entry.file_type().is_dir() && entry.file_name() == "steam_settings" {
             steam_settings_dirs.push(entry.into_path());
         }
@@ -403,7 +406,7 @@ fn find_save_path(
                 
                 let mut anadius_cfg = game_dir.join("anadius.cfg");
                 if !anadius_cfg.exists() {
-                    for entry in walkdir::WalkDir::new(game_dir).max_depth(6).into_iter().filter_map(|e| e.ok()) {
+                    for entry in walkdir::WalkDir::new(game_dir).max_depth(10).into_iter().filter_map(|e| e.ok()) {
                         if entry.file_name() == "anadius.cfg" {
                             anadius_cfg = entry.into_path();
                             break;
@@ -442,7 +445,7 @@ fn find_save_path(
         if is_codex || is_rune || try_all {
             let mut emu_inis = vec![game_dir.join("steam_emu.ini")];
             if is_codex || is_rune {
-                for entry in walkdir::WalkDir::new(game_dir).max_depth(6).into_iter().filter_map(|e| e.ok()) {
+                for entry in walkdir::WalkDir::new(game_dir).max_depth(10).into_iter().filter_map(|e| e.ok()) {
                     if entry.file_name() == "steam_emu.ini" {
                         emu_inis.push(entry.into_path());
                     }
@@ -516,7 +519,7 @@ fn find_save_path(
     }
 
     let mut steam_settings_dirs = vec![game_dir.join("steam_settings")];
-    for entry in walkdir::WalkDir::new(game_dir).max_depth(6).into_iter().filter_map(|e| e.ok()) {
+    for entry in walkdir::WalkDir::new(game_dir).max_depth(10).into_iter().filter_map(|e| e.ok()) {
         if entry.file_type().is_dir() && entry.file_name() == "steam_settings" {
             steam_settings_dirs.push(entry.into_path());
         }
@@ -601,7 +604,7 @@ pub fn load_earned_map(save_path: &Path, game_dir: &Path) -> HashMap<String, u64
         Some("xml") => {
             let mut anadius_cfg = game_dir.join("anadius.cfg");
             if !anadius_cfg.exists() {
-                for entry in walkdir::WalkDir::new(game_dir).max_depth(6).into_iter().filter_map(|e| e.ok()) {
+                for entry in walkdir::WalkDir::new(game_dir).max_depth(10).into_iter().filter_map(|e| e.ok()) {
                     if entry.file_name() == "anadius.cfg" {
                         anadius_cfg = entry.into_path();
                         break;
@@ -622,7 +625,7 @@ fn resolve_icon(base: &Path, relative: &str) -> Option<String> {
     let mut full = base.join(relative);
     if !full.exists() {
         let mut steam_settings_dirs = vec![base.join("steam_settings")];
-        for entry in walkdir::WalkDir::new(base).max_depth(6).into_iter().filter_map(|e| e.ok()) {
+        for entry in walkdir::WalkDir::new(base).max_depth(10).into_iter().filter_map(|e| e.ok()) {
             if entry.file_type().is_dir() && entry.file_name() == "steam_settings" {
                 steam_settings_dirs.push(entry.into_path());
             }
@@ -697,7 +700,7 @@ pub fn sync_achievements(
 
     let is_anadius = matches!(discovery.emulator.crack_type, CrackType::Anadius);
 
-    let defs: Vec<AchievementDef> = discovery
+    let mut defs: Vec<AchievementDef> = discovery
         .metadata_path
         .as_ref()
         .and_then(|p| fs::read_to_string(p).ok())
@@ -712,6 +715,35 @@ pub fn sync_achievements(
             }
         })
         .unwrap_or_default();
+
+    if is_anadius && defs.is_empty() {
+        let mut anadius_cfg = base.join("anadius.cfg");
+        if !anadius_cfg.exists() {
+            for entry in walkdir::WalkDir::new(base).max_depth(10).into_iter().filter_map(|e| e.ok()) {
+                if entry.file_name() == "anadius.cfg" {
+                    anadius_cfg = entry.into_path();
+                    break;
+                }
+            }
+        }
+        let (_, _, names_map) = parse_anadius_cfg(&anadius_cfg);
+        let mut ids: Vec<_> = names_map.keys().collect();
+        ids.sort_by_key(|k| k.parse::<u32>().unwrap_or(0));
+        
+        for id in ids {
+            if let Some(name) = names_map.get(id) {
+                defs.push(AchievementDef {
+                    name: name.clone(),
+                    display_name: serde_json::Value::String(name.clone()),
+                    description: serde_json::Value::String(String::new()),
+                    icon: String::new(),
+                    icon_gray: String::new(),
+                    hidden: 0,
+                    global_percent: Some(0.0),
+                });
+            }
+        }
+    }
 
     let icon_base = discovery
         .metadata_path

@@ -19,8 +19,11 @@ use crate::commands::torrent::TorrentState;
 use crate::state::{AppState, DbWrite};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{Emitter, Manager};
 use tokio::sync::RwLock;
+
+pub static APP_EXITING: AtomicBool = AtomicBool::new(false);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -53,8 +56,6 @@ pub fn run() {
             std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", udf);
         }
     }
-
-    let http_engine = std::sync::Arc::new(commands::http_dl::HttpDownloadEngine::new());
 
     tauri::Builder::default()
         .plugin(tauri_plugin_deep_link::init())
@@ -123,6 +124,11 @@ pub fn run() {
             }
 
             let read_pool = db::create_read_pool(&db_path);
+
+            // Build the HTTP download engine with the DB path so tasks survive restarts
+            let http_engine = std::sync::Arc::new(
+                commands::http_dl::HttpDownloadEngine::new(db_path.clone())
+            );
             let app_settings = crate::settings::get_settings(&read_pool).unwrap_or_default();
 
             let args: Vec<String> = std::env::args().collect();
@@ -167,6 +173,30 @@ pub fn run() {
             app.manage(app_state);
             app.manage(achievement_watcher::ActiveWatchers::default());
             app.manage(http_engine.clone());
+
+            // ── Resume downloads that were in-flight or pending when the app last closed ──
+            {
+                let engine_for_resume = http_engine.clone();
+                tauri::async_runtime::spawn(async move {
+                    // Small delay so the window finishes loading before network activity starts
+                    tokio::time::sleep(tokio::time::Duration::from_millis(800)).await;
+
+                    let ids_to_resume: Vec<String> = {
+                        let lock = engine_for_resume.tasks.read().await;
+                        lock.values()
+                            .filter(|t| t.status == "pending" || t.status == "paused")
+                            .map(|t| t.id.clone())
+                            .collect()
+                    };
+
+                    for id in ids_to_resume {
+                        let engine_clone = engine_for_resume.clone();
+                        tokio::spawn(async move {
+                            crate::commands::http_dl::HttpDownloadEngine::start_download(engine_clone, id).await;
+                        });
+                    }
+                });
+            }
 
             if let Some(game_id) = game_to_launch {
                 let app_handle = app.handle().clone();
@@ -411,7 +441,9 @@ pub fn run() {
                     let window_clone = window.clone();
                     window.on_window_event(move |event| {
                         if let tauri::WindowEvent::Focused(false) = event {
-                            let _ = window_clone.hide();
+                            if !crate::APP_EXITING.load(Ordering::SeqCst) {
+                                let _ = window_clone.hide();
+                            }
                         }
                     });
                 }
@@ -423,8 +455,10 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                let _ = window.hide();
-                api.prevent_close();
+                if !crate::APP_EXITING.load(Ordering::SeqCst) {
+                    let _ = window.hide();
+                    api.prevent_close();
+                }
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -507,6 +541,8 @@ pub fn run() {
             commands::http_dl::delete_http_download,
             commands::http_dl::retry_http_download,
             commands::http_dl::resolve_premium_link,
+            commands::http_dl::get_max_concurrent_downloads,
+            commands::http_dl::set_max_concurrent_downloads,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

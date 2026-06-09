@@ -3,9 +3,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { toast } from "sonner";
 
-export type DownloadStateEnum = "Initializing" | "Downloading" | "Paused" | "Finished" | "Error";
+type DownloadStateEnum = "Initializing" | "Downloading" | "Paused" | "Finished" | "Error";
 
-export interface DownloadStatus {
+interface DownloadStatus {
     id: number;
     name: string;
     state: DownloadStateEnum;

@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useDownloadsStore } from "./store/downloadsStore";
 import { useHttpStore } from "./store/httpStore";
 import { useUiStore } from "./store/uiStore";
@@ -8,334 +9,13 @@ import { ContextMenu, ContextMenuItem } from "./components/ui/ContextMenu";
 import { motion, AnimatePresence } from "framer-motion";
 import {
     Play, Pause, X, HardDriveDownload, Link as LinkIcon, Activity,
-    Clock, ArrowDownToLine, ArrowUpToLine, Users, CheckCircle2, AlertCircle,
-    Globe, FolderTree, Trash2, RotateCcw, FolderOpen, PauseCircle, PlayCircle,
-    ArrowUpDown, TrendingDown
+    AlertCircle, Globe, FolderTree, Trash2, RotateCcw, FolderOpen, PauseCircle, PlayCircle,
+    ArrowUpDown, TrendingDown, File, Layers
 } from "lucide-react";
 import { cn } from "./lib/utils";
 
-function formatBytes(bytes: number, decimals = 1) {
-    if (!+bytes) return '0 B';
-    const k = 1024;
-    const dm = decimals < 0 ? 0 : decimals;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
-}
-
-function formatETA(bytesRemaining: number, bytesPerSec: number) {
-    if (bytesPerSec === 0) return "∞";
-    const seconds = Math.floor(bytesRemaining / bytesPerSec);
-    if (seconds < 60) return `${seconds}s`;
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
-    return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
-}
-
-// Helper accessors for dealing with the union type of HTTP vs Torrent structures
-const getName = (item: any) => item.name || item.filename || "Unknown Download";
-const getStatus = (item: any) => item.state || item.status || "pending";
-const getDownloadSpeed = (item: any) => item.download_speed || item.speed_bytes_per_sec || 0;
-
-const isItemCompleted = (item: any) => {
-    const s = getStatus(item);
-    return s === "Finished" || s === "completed" || item.progress_percent >= 100;
-};
-
-const isItemError = (item: any) => {
-    const s = getStatus(item);
-    return s === "Error" || s === "failed" || s === "cancelled";
-};
-
-const isItemPaused = (item: any) => {
-    const s = getStatus(item);
-    return s === "Paused" || s === "paused";
-};
-
-const getProgress = (item: any) => {
-    if (item.progress_percent !== undefined) return item.progress_percent;
-    if (item.total_bytes > 0) return (item.downloaded_bytes / item.total_bytes) * 100;
-    return 0;
-};
-
-function UnifiedDownloadCard({
-    item, index, type, onOpenFolder, onContextMenu
-}: {
-    item: any;
-    index: number;
-    type: "torrent" | "http" | "folder";
-    onOpenFolder?: (folder: any) => void;
-    onContextMenu?: (e: React.MouseEvent, item: any, type: "torrent" | "http" | "folder") => void;
-}) {
-    const torrentStore = useDownloadsStore();
-
-    const isFolder = type === "folder";
-    const bytesRemaining = item.total_bytes - item.downloaded_bytes;
-
-    const isCompleted = isFolder ? item.state === "Finished" : isItemCompleted(item);
-    const isPaused = isFolder ? item.state === "Paused" : isItemPaused(item);
-    const isError = isFolder ? item.state === "Error" : isItemError(item);
-
-    const displayName = isFolder ? item.name : getName(item);
-    const downloadSpeed = isFolder ? item.download_speed : getDownloadSpeed(item);
-    const statusText = isFolder ? item.state : getStatus(item);
-    const progress = getProgress(item);
-
-    const getTorrentId = () => parseInt((item.id as string).replace('t_', ''));
-
-    const handlePause = (e: React.MouseEvent) => {
-        e.stopPropagation();
-        if (isFolder) {
-            item.files.forEach((f: any) => invoke("pause_http_download", { id: f.id }));
-        } else {
-            type === "torrent" ? torrentStore.pauseDownload(getTorrentId()) : invoke("pause_http_download", { id: item.id });
-        }
-    };
-
-    const handleResume = (e: React.MouseEvent) => {
-        e.stopPropagation();
-        if (isFolder) {
-            item.files.forEach((f: any) => invoke("resume_http_download", { id: f.id }));
-        } else {
-            type === "torrent" ? torrentStore.resumeDownload(getTorrentId()) : invoke("resume_http_download", { id: item.id });
-        }
-    };
-
-    const handleCancel = (e: React.MouseEvent) => {
-        e.stopPropagation();
-        if (isFolder) {
-            item.files.forEach((f: any) => invoke("cancel_http_download", { id: f.id }));
-        } else {
-            type === "torrent" ? torrentStore.cancelDownload(getTorrentId()) : invoke("cancel_http_download", { id: item.id });
-        }
-    };
-
-    const handleDelete = async (e: React.MouseEvent) => {
-        e.stopPropagation();
-        if (isFolder) {
-            for (const f of item.files) {
-                await invoke("delete_http_download", { id: f.id, deleteFile: true });
-            }
-        } else {
-            if (type === "torrent") {
-                torrentStore.cancelDownload(getTorrentId());
-            } else {
-                await invoke("delete_http_download", { id: item.id, deleteFile: true });
-            }
-        }
-    };
-
-    const handleRetry = async (e: React.MouseEvent) => {
-        e.stopPropagation();
-        if (isFolder) {
-            for (const f of item.files) {
-                if (isItemError(f)) {
-                    await invoke("retry_http_download", { id: f.id });
-                }
-            }
-        } else {
-            if (type === "http") {
-                await invoke("retry_http_download", { id: item.id });
-            }
-        }
-    };
-
-    const handleOpenFolder = async (e: React.MouseEvent) => {
-        e.stopPropagation();
-        // Try to open the download directory
-        const folderPath = item.save_path || item.download_path || null;
-        if (folderPath) {
-            try {
-                await invoke("open_path_in_explorer", { path: folderPath });
-            } catch {
-                // fallback: try opening parent of the first file
-            }
-        }
-    };
-
-    const accentColor = isError ? 'bg-red-500'
-        : isCompleted ? 'bg-green-500'
-        : isPaused ? 'bg-yellow-500'
-        : type === "torrent" ? 'bg-accent'
-        : isFolder ? 'bg-purple-500'
-        : 'bg-blue-500';
-
-    const progressColor = isError ? 'bg-red-500'
-        : isCompleted ? 'bg-green-500'
-        : isPaused ? 'bg-yellow-500'
-        : type === "torrent" ? 'bg-accent'
-        : isFolder ? 'bg-purple-500'
-        : 'bg-blue-400';
-
-    return (
-        <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.35, delay: index * 0.05 }}
-            onContextMenu={(e) => onContextMenu && onContextMenu(e, item, type)}
-            className="group relative hover:border-accent/40 transition-all duration-500 hover:shadow-3xl overflow-hidden flex flex-col tech-card-sm p-8"
-        >
-            <div className={cn(
-                "absolute -right-20 -top-20 w-64 h-64 blur-[100px] opacity-0 group-hover:opacity-10 transition-opacity duration-700 pointer-events-none",
-                accentColor
-            )} />
-
-            <div className="flex justify-between items-start mb-6 relative z-10">
-                <div className="flex-1 min-w-0 pr-6">
-                    <div className="flex items-center gap-3">
-                        {isFolder ? <FolderTree size={16} className="text-purple-400" />
-                            : type === "http" ? <Globe size={16} className="text-blue-400" />
-                            : <Users size={16} className="text-accent" />}
-                        <h3 className="font-bold text-white text-xl truncate group-hover:text-white transition-colors" title={displayName}>
-                            {displayName} {isFolder && <span className="text-sm text-white/40 ml-2 font-medium">({item.files.length} files)</span>}
-                        </h3>
-                    </div>
-
-                    {!isFolder && item.folder_name && (
-                        <div className="flex items-center gap-1.5 mt-1.5 text-white/40 text-[10px] font-bold uppercase tracking-widest">
-                            <FolderTree size={12} /> {item.folder_name}
-                        </div>
-                    )}
-
-                    <div className="flex items-center gap-6 mt-3">
-                        <div className="flex items-center gap-2 bg-white/[0.03] px-3 py-1 rounded-lg border border-white/5">
-                            <ArrowDownToLine size={14} className="text-white/20" />
-                            <span className="text-xs text-white/60 tabular-nums">
-                                {formatBytes(item.downloaded_bytes)} <span className="text-white/10 mx-1">/</span> {formatBytes(item.total_bytes)}
-                            </span>
-                        </div>
-
-                        {/* Progress percentage badge */}
-                        {!isCompleted && !isError && (
-                            <div className="flex items-center gap-1 text-xs font-bold text-white/40 tabular-nums">
-                                {progress.toFixed(1)}%
-                            </div>
-                        )}
-
-                        {isError ? (
-                            <div className="flex items-center gap-2 text-red-500 text-xs font-semibold">
-                                <AlertCircle size={14} /> Error: {isFolder ? "Check internal files" : item.error_message || item.error_msg || "Network issue"}
-                            </div>
-                        ) : isCompleted ? (
-                            <div className="flex items-center gap-2 text-green-500 text-xs font-semibold">
-                                <CheckCircle2 size={14} /> Completed
-                            </div>
-                        ) : isPaused ? (
-                            <div className="flex items-center gap-2 text-yellow-500 text-xs font-semibold">
-                                <Pause size={14} /> Paused
-                            </div>
-                        ) : (
-                            <div className="flex items-center gap-2 text-accent text-xs font-semibold animate-pulse">
-                                <Activity size={14} /> {statusText}
-                            </div>
-                        )}
-                    </div>
-                </div>
-
-                <div className="flex gap-3 opacity-0 group-hover:opacity-100 transition-all duration-300 relative z-10">
-                    {/* Open folder — for completed items */}
-                    {isCompleted && (
-                        <button
-                            onClick={handleOpenFolder}
-                            className="w-12 h-12 rounded-lg bg-white/[0.03] hover:bg-green-500/20 text-white/40 hover:text-green-400 transition-all active:scale-90 border border-white/5 flex items-center justify-center shadow-xl"
-                            title="Open Download Folder"
-                        >
-                            <FolderOpen size={20} />
-                        </button>
-                    )}
-
-                    {isError && (type === "http" || isFolder) && (
-                        <button
-                            onClick={handleRetry}
-                            className="w-12 h-12 rounded-lg bg-cyan-400/20 hover:bg-cyan-400 hover:text-black text-cyan-400 transition-all active:scale-90 border border-cyan-400/20 flex items-center justify-center shadow-xl"
-                            title="Retry Download"
-                        >
-                            <RotateCcw size={20} />
-                        </button>
-                    )}
-
-                    {!isCompleted && !isError && (
-                        <button
-                            onClick={isPaused ? handleResume : handlePause}
-                            className="w-12 h-12 rounded-lg bg-white/[0.03] hover:bg-white/[0.08] text-white transition-all active:scale-90 border border-white/5 flex items-center justify-center shadow-xl"
-                            title={isPaused ? "Resume" : "Pause"}
-                        >
-                            {isPaused ? <Play size={20} fill="currentColor" className="ml-1" /> : <Pause size={20} fill="currentColor" />}
-                        </button>
-                    )}
-
-                    <button
-                        onClick={isError || isCompleted ? handleDelete : handleCancel}
-                        className={cn(
-                            "w-12 h-12 rounded-lg transition-all active:scale-90 border flex items-center justify-center shadow-xl",
-                            isError || isCompleted
-                                ? "bg-red-500/10 border-red-500/20 text-red-400 hover:bg-red-500 hover:text-white"
-                                : "bg-white/[0.03] hover:bg-red-500/20 border-white/5 text-white/40 hover:text-red-500"
-                        )}
-                        title={isError || isCompleted ? "Delete from list" : "Cancel & Purge"}
-                    >
-                        {isError || isCompleted ? <Trash2 size={20} /> : <X size={20} />}
-                    </button>
-                </div>
-            </div>
-
-            {/* Progress bar */}
-            <div className="h-2.5 bg-black/40 rounded-full overflow-hidden border border-white/5 shadow-inner relative z-10">
-                <motion.div
-                    initial={{ width: 0 }}
-                    animate={{ width: `${Math.max(0, Math.min(100, progress))}%` }}
-                    transition={{ duration: 1.2, ease: "linear" }}
-                    className={cn("h-full rounded-full transition-colors duration-700 relative diagonal-progress", progressColor)}
-                >
-                    {!isCompleted && !isPaused && !isError && (
-                        <div className="absolute inset-0 bg-white/20 animate-pulse" />
-                    )}
-                </motion.div>
-            </div>
-
-            {/* Footer stats */}
-            <div className="flex items-center justify-between mt-auto pt-6">
-                {!isCompleted && !isError && (
-                    <div className="flex items-center justify-between text-xs font-medium text-white/50 relative z-10 w-full">
-                        <div className="flex items-center gap-10">
-                            <div className="flex items-center gap-3">
-                                <ArrowDownToLine size={16} className={isFolder ? "text-purple-400/40" : type === "http" ? "text-blue-400/40" : "text-accent/40"} />
-                                <span className="text-white/60 tabular-nums">{formatBytes(downloadSpeed)}/s</span>
-                            </div>
-                            {type === "torrent" && (
-                                <>
-                                    <div className="flex items-center gap-3">
-                                        <ArrowUpToLine size={16} className="text-purple-500/30" />
-                                        <span className="text-white/30 tabular-nums">{formatBytes(item.upload_speed)}/s</span>
-                                    </div>
-                                    <div className="flex items-center gap-3">
-                                        <Users size={16} className="text-white/10" />
-                                        <span className="text-white/30 tabular-nums uppercase">{item.peers} Peers</span>
-                                    </div>
-                                </>
-                            )}
-                        </div>
-
-                        {!isPaused && downloadSpeed > 0 && (
-                            <div className="flex items-center gap-2 text-white/80 bg-white/5 border border-white/10 px-3 py-1 rounded-lg text-xs font-semibold">
-                                <Clock size={14} />
-                                {formatETA(bytesRemaining, downloadSpeed)} remaining
-                            </div>
-                        )}
-                    </div>
-                )}
-
-                {isFolder && (
-                    <button
-                        onClick={(e) => { e.stopPropagation(); onOpenFolder && onOpenFolder(item); }}
-                        className="ml-auto px-4 py-2 bg-white/5 hover:bg-white/10 text-[10px] text-white font-black uppercase tracking-widest rounded-xl transition-colors border border-white/10 shadow-md"
-                    >
-                        View Contents
-                    </button>
-                )}
-            </div>
-        </motion.div>
-    );
-}
+import { UnifiedDownloadCard } from "./components/downloads/UnifiedDownloadCard";
+import { formatBytes, computeDownloadStatus, resolveOpenPath, isItemError, isItemPaused, isItemCompleted, getName, getProgress, getDownloadSpeed } from "./components/downloads/DownloadUtils";
 
 type SortKey = 'name' | 'progress' | 'speed' | 'status';
 
@@ -350,8 +30,29 @@ export function Downloads() {
     const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
     const [selectedFolder, setSelectedFolder] = useState<any | null>(null);
     const [contextMenu, setContextMenu] = useState<{ x: number, y: number, item: any, type: "torrent" | "http" | "folder" } | null>(null);
+    const [maxConcurrent, setMaxConcurrent] = useState(4);
+
+    // Load current concurrency limit from backend on mount
+    useEffect(() => {
+        invoke<number>("get_max_concurrent_downloads").then(setMaxConcurrent).catch(() => {});
+    }, []);
+
+    const handleSetConcurrent = async (val: number) => {
+        setMaxConcurrent(val);
+        await invoke("set_max_concurrent_downloads", { limit: val }).catch(() => {});
+    };
 
     const [notifiedIds] = useState(() => new Set<string>());
+
+    const handlePickTorrentFile = async () => {
+        const selected = await openDialog({
+            multiple: false,
+            filters: [{ name: 'Torrent Files', extensions: ['torrent'] }]
+        });
+        if (selected && typeof selected === 'string') {
+            setTorrentModalOpen(true, "file://" + selected);
+        }
+    };
 
     useEffect(() => {
         if (Notification.permission === "default") {
@@ -509,120 +210,102 @@ export function Downloads() {
     const getContextMenuItems = (): ContextMenuItem[] => {
         if (!contextMenu) return [];
         const { item, type } = contextMenu;
-        const isFolder = type === "folder";
-        const isCompleted = isFolder ? item.state === "Finished" : isItemCompleted(item);
-        const isPaused = isFolder ? item.state === "Paused" : isItemPaused(item);
-        const isError = isFolder ? item.state === "Error" : isItemError(item);
+        const { isFolder, isCompleted, isPaused, isError } = computeDownloadStatus(item, type);
         const torrentStore = useDownloadsStore.getState();
 
         const getTorrentId = () => parseInt((item.id as string).replace('t_', ''));
 
         const items: ContextMenuItem[] = [];
 
-        if (isCompleted) {
+        // ── Folder-specific: always available ──
+        if (isFolder) {
             items.push({
-                label: "Open Folder",
+                label: "View Files",
+                icon: <FolderTree size={16} />,
+                onClick: () => setSelectedFolder(item)
+            });
+        }
+
+        // ── Open in Explorer: for completed items or folders ──
+        if (isCompleted || isFolder) {
+            items.push({
+                label: "Open in Explorer",
                 icon: <FolderOpen size={16} />,
                 onClick: () => {
-                    const folderPath = item.save_path || item.download_path || null;
-                    if (folderPath) invoke("open_path_in_explorer", { path: folderPath }).catch(() => {});
+                    const pathToOpen = resolveOpenPath(item, type);
+                    if (pathToOpen) invoke("open_path_in_explorer", { path: pathToOpen }).catch(console.error);
                 }
             });
-            if (isFolder) {
-                items.push({
-                    label: "View Contents",
-                    icon: <FolderTree size={16} />,
-                    onClick: () => setSelectedFolder(item)
-                });
-            }
+        }
+
+        if (items.length > 0) {
             items.push({ separator: true, label: "" });
+        }
+
+        // ── Active/Paused: Pause & Resume ──
+        if (!isCompleted && !isError) {
             items.push({
-                label: "Remove from List",
-                icon: <X size={16} />,
-                onClick: async () => {
-                    if (isFolder) {
-                        for (const f of item.files) await invoke("delete_http_download", { id: f.id, deleteFile: false });
-                    } else if (type === "torrent") {
-                        torrentStore.cancelDownload(getTorrentId());
-                    } else {
-                        await invoke("delete_http_download", { id: item.id, deleteFile: false });
-                    }
-                }
-            });
-            items.push({
-                label: "Remove & Delete Data",
-                icon: <Trash2 size={16} />,
-                danger: true,
-                onClick: async () => {
-                    if (isFolder) {
-                        for (const f of item.files) await invoke("delete_http_download", { id: f.id, deleteFile: true });
-                    } else if (type === "torrent") {
-                        torrentStore.cancelDownload(getTorrentId());
-                    } else {
-                        await invoke("delete_http_download", { id: item.id, deleteFile: true });
-                    }
-                }
-            });
-        } else {
-            if (!isError) {
-                items.push({
-                    label: isPaused ? "Resume Download" : "Pause Download",
-                    icon: isPaused ? <Play size={16} /> : <Pause size={16} />,
-                    onClick: () => {
-                        if (isFolder) {
-                            item.files.forEach((f: any) => invoke(isPaused ? "resume_http_download" : "pause_http_download", { id: f.id }));
-                        } else if (type === "torrent") {
-                            isPaused ? torrentStore.resumeDownload(getTorrentId()) : torrentStore.pauseDownload(getTorrentId());
-                        } else {
-                            invoke(isPaused ? "resume_http_download" : "pause_http_download", { id: item.id });
-                        }
-                    }
-                });
-            } else {
-                items.push({
-                    label: "Retry Download",
-                    icon: <RotateCcw size={16} />,
-                    onClick: async () => {
-                        if (isFolder) {
-                            for (const f of item.files) if (isItemError(f)) await invoke("retry_http_download", { id: f.id });
-                        } else if (type === "http") {
-                            await invoke("retry_http_download", { id: item.id });
-                        }
-                    }
-                });
-            }
-            
-            items.push({ separator: true, label: "" });
-            
-            items.push({
-                label: "Cancel & Remove from List",
-                icon: <X size={16} />,
+                label: isPaused ? "Resume Download" : "Pause Download",
+                icon: isPaused ? <Play size={16} /> : <Pause size={16} />,
                 onClick: () => {
                     if (isFolder) {
-                        item.files.forEach((f: any) => invoke("cancel_http_download", { id: f.id }));
+                        item.files.forEach((f: any) => invoke(isPaused ? "resume_http_download" : "pause_http_download", { id: f.id }));
                     } else if (type === "torrent") {
-                        torrentStore.cancelDownload(getTorrentId());
+                        isPaused ? torrentStore.resumeDownload(getTorrentId()) : torrentStore.pauseDownload(getTorrentId());
                     } else {
-                        invoke("cancel_http_download", { id: item.id });
-                    }
-                }
-            });
-
-            items.push({
-                label: "Cancel & Delete Data",
-                icon: <Trash2 size={16} />,
-                danger: true,
-                onClick: async () => {
-                    if (isFolder) {
-                        for (const f of item.files) await invoke("delete_http_download", { id: f.id, deleteFile: true });
-                    } else if (type === "torrent") {
-                        torrentStore.cancelDownload(getTorrentId());
-                    } else {
-                        await invoke("delete_http_download", { id: item.id, deleteFile: true });
+                        invoke(isPaused ? "resume_http_download" : "pause_http_download", { id: item.id });
                     }
                 }
             });
         }
+
+        // ── Error: Retry ──
+        if (isError && (type === "http" || isFolder)) {
+            items.push({
+                label: "Retry Download",
+                icon: <RotateCcw size={16} />,
+                onClick: async () => {
+                    if (isFolder) {
+                        for (const f of item.files) if (isItemError(f)) await invoke("retry_http_download", { id: f.id });
+                    } else {
+                        await invoke("retry_http_download", { id: item.id });
+                    }
+                }
+            });
+        }
+
+        items.push({ separator: true, label: "" });
+
+        // ── Remove (keep file) ──
+        items.push({
+            label: isCompleted ? "Remove from List" : "Cancel & Remove from List",
+            icon: <X size={16} />,
+            onClick: async () => {
+                if (isFolder) {
+                    for (const f of item.files) await invoke("delete_http_download", { id: f.id, deleteFile: false });
+                } else if (type === "torrent") {
+                    torrentStore.cancelDownload(getTorrentId());
+                } else {
+                    await invoke("delete_http_download", { id: item.id, deleteFile: false });
+                }
+            }
+        });
+
+        // ── Remove + delete file ──
+        items.push({
+            label: isCompleted ? "Remove & Delete Data" : "Cancel & Delete Data",
+            icon: <Trash2 size={16} />,
+            danger: true,
+            onClick: async () => {
+                if (isFolder) {
+                    for (const f of item.files) await invoke("delete_http_download", { id: f.id, deleteFile: true });
+                } else if (type === "torrent") {
+                    torrentStore.cancelDownload(getTorrentId());
+                } else {
+                    await invoke("delete_http_download", { id: item.id, deleteFile: true });
+                }
+            }
+        });
 
         return items;
     };
@@ -697,7 +380,23 @@ export function Downloads() {
 
                             {/* Filter + Sort controls */}
                             <div className="flex items-center gap-3">
-                                {/* Sort dropdown */}
+                                {/* Concurrent downloads control */}
+                                <div className="flex items-center gap-2.5 bg-black/40 border border-white/10 rounded-2xl px-4 py-2" title="Max simultaneous downloads">
+                                    <Layers size={13} className="text-amber-400/80" />
+                                    <span className="text-[10px] font-black uppercase tracking-widest text-white/30">Concurrent</span>
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            onClick={() => handleSetConcurrent(Math.max(1, maxConcurrent - 1))}
+                                            className="w-5 h-5 rounded-md bg-white/5 hover:bg-white/10 text-white/40 hover:text-white text-xs flex items-center justify-center transition-all"
+                                        >-</button>
+                                        <span className="text-sm font-black text-amber-400 w-4 text-center tabular-nums">{maxConcurrent}</span>
+                                        <button
+                                            onClick={() => handleSetConcurrent(Math.min(16, maxConcurrent + 1))}
+                                            className="w-5 h-5 rounded-md bg-white/5 hover:bg-white/10 text-white/40 hover:text-white text-xs flex items-center justify-center transition-all"
+                                        >+</button>
+                                    </div>
+                                </div>
+
                                 <div className="flex items-center gap-2 bg-black/40 border border-white/10 rounded-2xl px-3 py-1.5">
                                     <ArrowUpDown size={13} className="text-white/30" />
                                     <select
@@ -759,6 +458,13 @@ export function Downloads() {
                                     Add Torrent
                                 </button>
                             </div>
+
+                            <button
+                                onClick={handlePickTorrentFile}
+                                className="bg-accent/10 border border-accent/20 text-accent hover:bg-accent hover:text-white px-6 py-5 rounded-2xl text-xs font-black uppercase tracking-widest transition-all whitespace-nowrap shadow-lg flex items-center gap-2"
+                            >
+                                <File size={16} /> Open .torrent
+                            </button>
 
                             <button
                                 onClick={() => setIsBulkModalOpen(true)}

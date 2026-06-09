@@ -38,28 +38,33 @@ export interface SteamReviewsResponse {
     reviews: SteamReview[];
 }
 
-export async function fetchSteamMetadata(appId: string): Promise<SteamAppDetails> {
-    // Phase 4: Unlisted Game ID Mapper
-    // Automatically checks Supabase to see if an Anadius/custom ID maps to a real Steam ID
-    let targetAppId = appId;
-    if (unlistedTableExists) {
-        try {
-            const { data: mapping, error } = await supabase
-                .from("unlisted_games_map")
-                .select("steam_app_id")
-                .eq("unlisted_id", appId)
-                .maybeSingle();
+/**
+ * Resolves a potentially "unlisted" app ID to its canonical Steam App ID.
+ * Checks Supabase's `unlisted_games_map` table for a mapping from Anadius/custom IDs.
+ * Falls back to the original ID if the table doesn't exist or no mapping is found.
+ */
+async function resolveAppId(appId: string): Promise<string> {
+    if (!unlistedTableExists) return appId;
+    try {
+        const { data: mapping, error } = await supabase
+            .from("unlisted_games_map")
+            .select("steam_app_id")
+            .eq("unlisted_id", appId)
+            .maybeSingle();
 
-            if (error && (error.code === '404' || error.message?.includes("404") || error.code === '42P01')) {
-                unlistedTableExists = false;
-            } else if (mapping?.steam_app_id) {
-                targetAppId = mapping.steam_app_id.toString();
-            }
-        } catch (e) {
+        if (error && (error.code === '404' || error.message?.includes("404") || error.code === '42P01')) {
             unlistedTableExists = false;
+        } else if (mapping?.steam_app_id) {
+            return mapping.steam_app_id.toString();
         }
+    } catch {
+        unlistedTableExists = false;
     }
+    return appId;
+}
 
+export async function fetchSteamMetadata(appId: string): Promise<SteamAppDetails> {
+    const targetAppId = await resolveAppId(appId);
     const res = await invoke<any>("fetch_steam_app_details", { appId: targetAppId });
     if (res?.[targetAppId]?.success) {
         return res[targetAppId].data as SteamAppDetails;
@@ -68,25 +73,7 @@ export async function fetchSteamMetadata(appId: string): Promise<SteamAppDetails
 }
 
 export async function fetchSteamReviews(appId: string): Promise<SteamReviewsResponse | null> {
-    let targetAppId = appId;
-    if (unlistedTableExists) {
-        try {
-            const { data: mapping, error } = await supabase
-                .from("unlisted_games_map")
-                .select("steam_app_id")
-                .eq("unlisted_id", appId)
-                .maybeSingle();
-
-            if (error && (error.code === '404' || error.message?.includes("404") || error.code === '42P01')) {
-                unlistedTableExists = false;
-            } else if (mapping?.steam_app_id) {
-                targetAppId = mapping.steam_app_id.toString();
-            }
-        } catch (e) {
-            unlistedTableExists = false;
-        }
-    }
-
+    const targetAppId = await resolveAppId(appId);
     try {
         const res = await invoke<any>("fetch_steam_reviews", { appId: targetAppId });
         if (res?.success === 1) {
@@ -111,25 +98,7 @@ export function parseSteamDate(steamDateStr: string | undefined): string {
 }
 
 export async function fetchSteamAchievementPercentages(appId: string): Promise<Record<string, number>> {
-    let targetAppId = appId;
-    if (unlistedTableExists) {
-        try {
-            const { data: mapping, error } = await supabase
-                .from("unlisted_games_map")
-                .select("steam_app_id")
-                .eq("unlisted_id", appId)
-                .maybeSingle();
-
-            if (error && (error.code === '404' || error.message?.includes("404") || error.code === '42P01')) {
-                unlistedTableExists = false;
-            } else if (mapping?.steam_app_id) {
-                targetAppId = mapping.steam_app_id.toString();
-            }
-        } catch (e) {
-            unlistedTableExists = false;
-        }
-    }
-
+    const targetAppId = await resolveAppId(appId);
     try {
         const res = await invoke<any>("fetch_global_achievement_percentages", { appId: targetAppId });
         const percentages: Record<string, number> = {};
@@ -147,4 +116,4 @@ export async function fetchSteamAchievementPercentages(appId: string): Promise<R
         console.error("Failed to fetch achievement percentages:", e);
         return {};
     }
-}
+}

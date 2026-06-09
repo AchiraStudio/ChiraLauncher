@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { supabase } from "./lib/supabase";
 import { useProfileStore } from "./store/profileStore";
+import { computeLevel } from "./lib/xp";
 import {
     Trophy, Activity, User, Sparkles, MessageSquare, Loader2,
     Image as ImageIcon, Video, Send, Pin, Megaphone, CloudOff,
@@ -45,18 +46,6 @@ interface RecentChat {
     profile?: Profile;
 }
 
-function computeLevel(xp: number) {
-    let level = 1;
-    while (true) {
-        const nextXp = Math.pow(level, 2) * 50;
-        if (xp >= nextXp) {
-            level++;
-        } else {
-            break;
-        }
-    }
-    return level;
-}
 
 const getYouTubeId = (url: string) => {
     const match = url.match(/(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
@@ -732,7 +721,7 @@ export function Discover() {
                                                 {user.role === 'admin' && <span className="text-[8px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded uppercase tracking-widest">Admin</span>}
                                             </p>
                                             <div className="flex items-center gap-2 mt-1">
-                                                <span className="bg-white/5 border border-white/10 px-1.5 py-0.5 rounded text-[8px] font-bold text-white/50 uppercase tracking-widest">LVL {computeLevel(user.xp)}</span>
+                                                <span className="bg-white/5 border border-white/10 px-1.5 py-0.5 rounded text-[8px] font-bold text-white/50 uppercase tracking-widest">LVL {computeLevel(user.xp).level}</span>
                                                 <p className="text-[10px] text-accent font-mono font-bold tracking-widest">{user.xp.toLocaleString()} XP</p>
                                             </div>
                                         </div>

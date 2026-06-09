@@ -101,13 +101,13 @@ fn has_v38_file(dir: &Path) -> bool {
 
 /// Detect emulator type and app_id from a game directory.
 /// Only reads a few small files — never does a recursive walk.
-pub fn detect_crack(dir: &Path) -> (CrackType, String) {
+pub fn detect_crack(dir: &Path) -> (CrackType, String, Option<PathBuf>) {
     // Anadius: anadius.cfg in the game root
     let anadius_cfg = dir.join("anadius.cfg");
     if anadius_cfg.exists() {
         let id = parse_anadius_content_id(&anadius_cfg).unwrap_or_default();
         log::info!("[Crack] Anadius at {} (content_id={})", dir.display(), id);
-        return (CrackType::Anadius, id);
+        return (CrackType::Anadius, id, Some(dir.to_path_buf()));
     }
 
     // Voices38: .v38 file in the game root
@@ -121,7 +121,7 @@ pub fn detect_crack(dir: &Path) -> (CrackType, String) {
             read_plain_app_id(dir).unwrap_or_default()
         };
         log::info!("[Crack] Voices38 via .v38 at {} (app_id={})", dir.display(), id);
-        return (CrackType::Voices38, id);
+        return (CrackType::Voices38, id, Some(dir.to_path_buf()));
     }
 
     // CODEX: steam_emu.ini
@@ -129,14 +129,14 @@ pub fn detect_crack(dir: &Path) -> (CrackType, String) {
     if steam_emu.exists() {
         let id = parse_steam_emu_app_id(&steam_emu).unwrap_or_default();
         log::info!("[Crack] CODEX via steam_emu.ini at {} (app_id={})", dir.display(), id);
-        return (CrackType::Codex, id);
+        return (CrackType::Codex, id, Some(dir.to_path_buf()));
     }
 
     // CODEX: any *.cdx file
     if has_cdx_file(dir) {
         let id = read_plain_app_id(dir).unwrap_or_default();
         log::info!("[Crack] CODEX via .cdx at {} (app_id={})", dir.display(), id);
-        return (CrackType::Codex, id);
+        return (CrackType::Codex, id, Some(dir.to_path_buf()));
     }
 
     // Goldberg: steam_settings/ folder is the canonical marker
@@ -146,71 +146,97 @@ pub fn detect_crack(dir: &Path) -> (CrackType, String) {
             .or_else(|| read_plain_app_id(dir))
             .unwrap_or_default();
         log::info!("[Crack] Goldberg at {} (app_id={})", dir.display(), id);
+        return (CrackType::Goldberg, id, Some(dir.to_path_buf()));
     }
+
     // Deep search for Steamworks / steam_api64.dll
-    if let Some((ct, id)) = find_deep_crack(dir) {
-        log::info!("[Crack] Deep scan found {:?} at {} (app_id={})", ct, dir.display(), id);
-        return (ct, id);
+    // This finds cracks where steam_api lives in Engine/Binaries/ThirdParty/Steamworks/<ver>/Win64/
+    // and steam_settings is a subfolder there (Goldberg / Voices38 in UE games)
+    if let Some((ct, id, crack_dir)) = find_deep_crack(dir) {
+        log::info!("[Crack] Deep scan found {:?} at {} (app_id={})", ct, crack_dir.display(), id);
+        return (ct, id, Some(crack_dir));
     }
 
     // steam_appid.txt with no other marker
     if let Some(id) = read_plain_app_id(dir) {
         log::info!("[Crack] steam_appid.txt at {} (app_id={})", dir.display(), id);
-        return (CrackType::Unknown, id);
+        return (CrackType::Unknown, id, Some(dir.to_path_buf()));
     }
 
-    (CrackType::Unknown, String::new())
+    (CrackType::Unknown, String::new(), None)
 }
 
-fn find_deep_crack(root: &Path) -> Option<(CrackType, String)> {
-    for entry in WalkDir::new(root).max_depth(6).into_iter().filter_map(|e| e.ok()) {
+pub fn find_deep_crack(root: &Path) -> Option<(CrackType, String, PathBuf)> {
+    for entry in WalkDir::new(root).max_depth(10).into_iter().filter_map(|e| e.ok()) {
         let path = entry.path();
         if !path.is_file() { continue; }
         
         let name = path.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
+        let is_custom_dll = name.ends_with(".dll") && (name.contains("rune") || name.contains("goldberg") || name.contains("voices38") || name.contains("codex"));
         
         // Trigger analysis if we see a signature file of ANY known crack, or steam_api
-        if name == "steam_api64.dll" || name == "steam_api.dll" || name == "steam_emu.ini" || name == "anadius.cfg" || name.ends_with(".cdx") || name.ends_with(".v38") {
+        if name == "steam_api64.dll" || name == "steam_api.dll" || name == "steam_emu.ini" || name == "anadius.cfg" || name.ends_with(".cdx") || name.ends_with(".v38") || is_custom_dll {
             let parent = path.parent().unwrap_or(path);
             
+            if is_custom_dll {
+                let id = read_app_id_in_dir(parent).unwrap_or_default();
+                if name.contains("rune") { return Some((CrackType::Rune, id, parent.to_path_buf())); }
+                if name.contains("goldberg") { return Some((CrackType::Goldberg, id, parent.to_path_buf())); }
+                if name.contains("voices38") { return Some((CrackType::Voices38, id, parent.to_path_buf())); }
+                if name.contains("codex") { return Some((CrackType::Codex, id, parent.to_path_buf())); }
+            }
+            
             if parent.join("anadius.cfg").exists() {
-                let id = read_plain_app_id(parent).unwrap_or_default();
-                return Some((CrackType::Anadius, id));
+                let id = read_app_id_in_dir(parent).unwrap_or_default();
+                return Some((CrackType::Anadius, id, parent.to_path_buf()));
             }
             if parent.join("steam_api64.rne").exists() {
-                let id = read_goldberg_app_id(&parent.join("steam_settings")).or_else(|| read_plain_app_id(parent)).unwrap_or_default();
+                let id = read_app_id_in_dir(parent).unwrap_or_default();
                 let id = if id.is_empty() {
                     parse_steam_emu_app_id(&parent.join("steam_emu.ini")).unwrap_or_default()
                 } else { id };
-                return Some((CrackType::Rune, id));
+                return Some((CrackType::Rune, id, parent.to_path_buf()));
             }
             if has_v38_file(parent) {
-                let id = read_plain_app_id(parent).unwrap_or_default();
-                return Some((CrackType::Voices38, id));
+                // v38 cracks store config in steam_settings next to the DLL
+                let id = read_app_id_in_dir(parent).unwrap_or_default();
+                return Some((CrackType::Voices38, id, parent.to_path_buf()));
             }
             let steam_emu = parent.join("steam_emu.ini");
             if steam_emu.exists() {
                 let id = parse_steam_emu_app_id(&steam_emu).unwrap_or_default();
                 let content = fs::read_to_string(&steam_emu).unwrap_or_default();
                 if content.contains("-RUNE-") || content.contains("RUNE") {
-                    return Some((CrackType::Rune, id));
+                    return Some((CrackType::Rune, id, parent.to_path_buf()));
                 }
-                return Some((CrackType::Codex, id));
+                return Some((CrackType::Codex, id, parent.to_path_buf()));
             }
             if has_cdx_file(parent) {
-                let id = parse_steam_emu_app_id(&steam_emu).or_else(|| read_plain_app_id(parent)).unwrap_or_default();
-                return Some((CrackType::Codex, id));
+                let id = parse_steam_emu_app_id(&steam_emu).or_else(|| read_app_id_in_dir(parent)).unwrap_or_default();
+                return Some((CrackType::Codex, id, parent.to_path_buf()));
             }
             let steam_settings = parent.join("steam_settings");
             if steam_settings.exists() && steam_settings.is_dir() {
-                let id = read_goldberg_app_id(&steam_settings).or_else(|| read_plain_app_id(parent)).unwrap_or_default();
-                return Some((CrackType::Goldberg, id));
+                // Goldberg and Voices38 both use steam_settings folder next to the DLL
+                // (common in UE games: Engine/Binaries/ThirdParty/Steamworks/SteamvXXX/Win64/steam_settings/)
+                let id = read_goldberg_app_id(&steam_settings)
+                    .or_else(|| read_plain_app_id(parent))
+                    .unwrap_or_default();
+                // Distinguish Voices38 from Goldberg by checking for .v38 anywhere nearby
+                // or for the emu.ini marker. Goldberg has no .ini, v38 uses steam_settings similarly.
+                // Check parent folder of parent too (the Steamvxxx folder) for .v38
+                let is_v38 = parent.parent().map(|p| has_v38_file(p)).unwrap_or(false)
+                    || has_v38_file(parent);
+                if is_v38 {
+                    return Some((CrackType::Voices38, id, parent.to_path_buf()));
+                }
+                return Some((CrackType::Goldberg, id, parent.to_path_buf()));
             }
             
             // If it's just the steam_api DLLs with no crack config files, assume Official.
             if name == "steam_api64.dll" || name == "steam_api.dll" {
-                let id = read_plain_app_id(parent).unwrap_or_default();
-                return Some((CrackType::Official, id));
+                let id = read_app_id_in_dir(parent).unwrap_or_default();
+                return Some((CrackType::Official, id, parent.to_path_buf()));
             }
         }
     }
@@ -228,9 +254,13 @@ pub fn infer_install_dir(exe_path: &Path) -> PathBuf {
     ];
 
     let mut current = immediate;
+    let mut found_crack_dir = None;
+
     for _ in 0..5 {
-        if has_crack_marker(current) {
-            return current.to_path_buf();
+        if has_crack_marker(current) && found_crack_dir.is_none() {
+            // Remember the highest crack marker we found, but don't return yet
+            // if we are still inside a bin/win64 folder!
+            found_crack_dir = Some(current.to_path_buf());
         }
         let name = current
             .file_name()
@@ -238,12 +268,14 @@ pub fn infer_install_dir(exe_path: &Path) -> PathBuf {
             .unwrap_or_default();
         if BIN_DIRS.iter().any(|d| name == *d) {
             if let Some(parent) = current.parent() {
-                if has_crack_marker(parent) {
-                    return parent.to_path_buf();
-                }
                 current = parent;
                 continue;
             }
+        }
+        // If we are not in a BIN_DIR and we found a crack marker anywhere in the chain,
+        // or if THIS dir has a crack marker, we are done walking up.
+        if found_crack_dir.is_some() || has_crack_marker(current) {
+            return current.to_path_buf();
         }
         match current.parent() {
             Some(p) => current = p,
@@ -431,6 +463,18 @@ fn read_plain_app_id(dir: &Path) -> Option<String> {
     }
 }
 
+/// Read app_id from a directory, checking steam_settings subfolder first (Goldberg/Voices38 style),
+/// then falling back to steam_appid.txt at the same level.
+fn read_app_id_in_dir(dir: &Path) -> Option<String> {
+    let steam_settings = dir.join("steam_settings");
+    if steam_settings.exists() && steam_settings.is_dir() {
+        if let Some(id) = read_goldberg_app_id(&steam_settings) {
+            return Some(id);
+        }
+    }
+    read_plain_app_id(dir)
+}
+
 #[tauri::command]
 pub async fn scan_directory(
     path: String,
@@ -490,7 +534,7 @@ pub async fn scan_directory(
             
             tokio::task::spawn_blocking(move || {
                 let best_exe = find_best_exe(&dir);
-                let (crack_type, app_id) = detect_crack(&dir);
+                let (crack_type, app_id, _) = detect_crack(&dir);
                 
                 let exe_path = best_exe.map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
             
@@ -517,8 +561,8 @@ pub async fn scan_directory(
                     executable_path: exe_path,
                     guessed_title,
                     install_dir: dir.to_string_lossy().to_string(),
-                    crack_type,
-                    app_id,
+                    crack_type: crack_type.clone(),
+                    app_id: app_id.clone(),
                 }
             }).await.unwrap()
         });
@@ -553,15 +597,28 @@ pub async fn scan_single_game(
     path: String,
     _app: AppHandle,
 ) -> Result<SingleScanResult, String> {
-    let exe_path = PathBuf::from(&path);
+    let mut exe_path = PathBuf::from(&path);
     if !exe_path.exists() || !exe_path.is_file() {
         return Err("Invalid executable path".to_string());
     }
 
     let install_dir = infer_install_dir(&exe_path);
+    
+    // Auto-resolve UE Shipping exe
+    for entry in WalkDir::new(&install_dir).max_depth(4).into_iter().filter_map(|e| e.ok()) {
+        if entry.file_type().is_file() {
+            let name = entry.file_name().to_string_lossy();
+            if name.ends_with("-Win64-Shipping.exe") && exe_path != entry.path() {
+                log::info!("Auto-resolved UE shipping exe: {:?}", entry.path());
+                exe_path = entry.into_path();
+                break;
+            }
+        }
+    }
+
     log::info!("Running single native scanner on {:?}", install_dir);
 
-    let (crack_type, app_id) = detect_crack(&install_dir);
+    let (crack_type, app_id, _) = detect_crack(&install_dir);
 
     let filename = exe_path.file_name().unwrap_or_default().to_string_lossy().to_string();
     let guessed_title = crate::commands::cleaner::clean_title(&filename);
@@ -753,7 +810,7 @@ mod tests {
     fn test_detect_crack_codex() {
         let dir = tempdir().unwrap();
         fs::write(dir.path().join("steam_emu.ini"), "[Settings]\nAppId=12345\n").unwrap();
-        let (ct, id) = detect_crack(dir.path());
+        let (ct, id, _) = detect_crack(dir.path());
         assert_eq!(ct, CrackType::Codex);
         assert_eq!(id, "12345");
     }
@@ -762,7 +819,7 @@ mod tests {
     fn test_detect_crack_anadius() {
         let dir = tempdir().unwrap();
         fs::write(dir.path().join("anadius.cfg"), "\"ContentId\"\t\"16425677\"\n").unwrap();
-        let (ct, id) = detect_crack(dir.path());
+        let (ct, id, _) = detect_crack(dir.path());
         assert_eq!(ct, CrackType::Anadius);
         assert_eq!(id, "16425677");
     }
@@ -773,7 +830,7 @@ mod tests {
         let ss = dir.path().join("steam_settings");
         fs::create_dir(&ss).unwrap();
         fs::write(ss.join("steam_appid.txt"), "99999").unwrap();
-        let (ct, id) = detect_crack(dir.path());
+        let (ct, id, _) = detect_crack(dir.path());
         assert_eq!(ct, CrackType::Goldberg);
         assert_eq!(id, "99999");
     }

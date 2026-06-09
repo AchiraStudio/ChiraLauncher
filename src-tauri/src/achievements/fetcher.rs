@@ -103,8 +103,12 @@ pub async fn fetch_and_write_achievements(
         .and_then(|a| a.as_array())
         .ok_or_else(|| "No achievements found in schema".to_string())?;
 
-    // As requested: Always generate in steam_settings.
-    let base_dir = PathBuf::from(&game_dir).join("steam_settings");
+    // Locate actual crack dir so we don't generate dummy folders at game root for UE games
+    let install_path = PathBuf::from(&game_dir);
+    let (_, _, crack_dir) = crate::commands::scanner::detect_crack(&install_path);
+    let mut base_dir = crack_dir.unwrap_or(install_path);
+    base_dir = base_dir.join("steam_settings");
+
     let img_dir = base_dir.join("achievement_images");
     fs::create_dir_all(&img_dir).map_err(|e| e.to_string())?;
 
