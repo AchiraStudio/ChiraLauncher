@@ -4,7 +4,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { motion, AnimatePresence } from "framer-motion";
 import { useGameStore } from "../../store/gameStore";
-import { v4 as uuidv4 } from "uuid";
 import type { NewGame } from "../../types/game";
 import { fetchSteamMetadata, parseSteamDate, SteamAppDetails } from "../../services/steamService";
 import { toast } from "sonner";
@@ -214,7 +213,7 @@ export function AddGameModal() {
             const finalLogo = applySteamData ? await processUrl(logoPath, "logo") : null;
 
             const newGame: NewGame = {
-                id: uuidv4(),
+                id: crypto.randomUUID(),
                 title: title,
                 executable_path: exePath,
                 cover_path: finalCover,

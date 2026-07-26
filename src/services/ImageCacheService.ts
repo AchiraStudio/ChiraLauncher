@@ -1,51 +1,37 @@
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc } from "@tauri-apps/api/core";
 
 class ImageCacheService {
     private cache = new Map<string, string>();
-    private refCount = new Map<string, number>();
 
-    public async acquire(path: string): Promise<string> {
-        const count = this.refCount.get(path) || 0;
-        this.refCount.set(path, count + 1);
+    public getAssetUrl(path: string): string {
+        if (!path || path.trim() === "") return "";
+        const cleanPath = path.trim();
 
-        if (this.cache.has(path)) {
-            return this.cache.get(path)!;
+        if (cleanPath.startsWith("http") || cleanPath.startsWith("data:") || cleanPath.startsWith("blob:") || cleanPath.startsWith("asset:")) {
+            return cleanPath;
+        }
+
+        if (this.cache.has(cleanPath)) {
+            return this.cache.get(cleanPath)!;
         }
 
         try {
-            const bytes = await invoke<Uint8Array>("read_local_file_bytes", { path });
-            const ext = path.split('.').pop()?.toLowerCase() || 'jpg';
-            const mime = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : ext === 'gif' ? 'image/gif' : 'image/jpeg';
-            const blob = new Blob([bytes], { type: mime });
-            const blobUrl = URL.createObjectURL(blob);
-
-            // Double check it wasn't added while we were fetching
-            if (!this.cache.has(path)) {
-                this.cache.set(path, blobUrl);
-            } else {
-                URL.revokeObjectURL(blobUrl);
-            }
-
-            return this.cache.get(path)!;
-        } catch (error) {
-            this.release(path); // Clean up the ref count if it failed
-            throw error;
+            const url = convertFileSrc(cleanPath);
+            this.cache.set(cleanPath, url);
+            return url;
+        } catch {
+            return cleanPath;
         }
     }
 
-    public release(path: string) {
-        const newCount = (this.refCount.get(path) || 1) - 1;
-        if (newCount <= 0) {
-            this.refCount.delete(path);
-            const url = this.cache.get(path);
-            if (url) {
-                URL.revokeObjectURL(url);
-                this.cache.delete(path);
-            }
-        } else {
-            this.refCount.set(path, newCount);
-        }
+    public async acquire(path: string): Promise<string> {
+        return this.getAssetUrl(path);
+    }
+
+    public release(_path: string) {
+        // No-op needed for native asset:// URLs since browser handles disk/GPU cache natively
     }
 }
 
 export const imageCacheService = new ImageCacheService();
+

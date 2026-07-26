@@ -119,12 +119,12 @@ pub fn run() {
             }
 
             let read_pool = db::create_read_pool(&db_path);
-
-            // Build the HTTP download engine with the DB path so tasks survive restarts
-            let http_engine = std::sync::Arc::new(
-                commands::http_dl::HttpDownloadEngine::new(db_path.clone())
-            );
             let app_settings = crate::settings::get_settings(&read_pool).unwrap_or_default();
+
+            let max_concurrent = if app_settings.max_concurrent_downloads == 0 { 4 } else { app_settings.max_concurrent_downloads as usize };
+            let http_engine = std::sync::Arc::new(
+                commands::http_dl::HttpDownloadEngine::new(db_path.clone(), max_concurrent)
+            );
 
             let args: Vec<String> = std::env::args().collect();
             
@@ -169,7 +169,6 @@ pub fn run() {
             app.manage(achievement_watcher::ActiveWatchers::default());
             app.manage(http_engine.clone());
 
-            // ── Resume HTTP downloads that were in-flight when the app last closed ──
             {
                 let engine_for_resume = http_engine.clone();
                 tauri::async_runtime::spawn(async move {
@@ -408,6 +407,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::greet,
+            commands::toggle_devtools,
             commands::game::get_all_games,
             commands::game::add_game,
             commands::game::delete_game,
@@ -465,6 +465,7 @@ pub fn run() {
             commands::game::update_game_orders,
             commands::game::sync_steam_achievements,
             commands::reset::reset_application,
+            commands::http_dl::resolve_link,
             commands::http_dl::add_http_downloads,
             commands::http_dl::get_http_downloads,
             commands::http_dl::cancel_http_download,
@@ -472,7 +473,6 @@ pub fn run() {
             commands::http_dl::resume_http_download,
             commands::http_dl::delete_http_download,
             commands::http_dl::retry_http_download,
-            commands::http_dl::resolve_premium_link,
             commands::http_dl::get_max_concurrent_downloads,
             commands::http_dl::set_max_concurrent_downloads,
         ])

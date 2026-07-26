@@ -5,7 +5,6 @@ import { listen } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { motion, AnimatePresence } from "framer-motion";
 import { useGameStore } from "../../store/gameStore";
-import { v4 as uuidv4 } from "uuid";
 import type { NewGame } from "../../types/game";
 import { fetchSteamMetadata, parseSteamDate } from "../../services/steamService";
 import { toast } from "sonner";
@@ -140,7 +139,7 @@ export function DirectoryScannerModal() {
                 }
 
                 const newGame: NewGame = {
-                    id: uuidv4(),
+                    id: crypto.randomUUID(),
                     title: finalTitle,
                     executable_path: g.executable_path,
                     cover_path: coverPath,

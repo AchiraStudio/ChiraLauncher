@@ -1,171 +1,127 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300..800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap');
 @import "tailwindcss";
 
 @theme {
-  /* Premium Layering */
-  --color-background: #09101f;
-  /* Deepest Navy */
-  --color-surface: #111b2f;
-  /* Base Surface */
-  --color-surface-elevated: #1a2942;
-  /* Elevated Cards */
-  --color-surface-overlay: rgba(17, 27, 47, 0.7);
+  /* Deep Cyber Obsidian Palette */
+  --color-background: #070a12;
+  --color-surface: #0d1322;
+  --color-surface-elevated: #141d33;
+  --color-surface-overlay: rgba(13, 19, 34, 0.75);
 
-  /* Light/Dark Blue Accents */
+  /* Vivid Accents */
   --color-accent: #3b82f6;
-  /* Premium Blue */
   --color-accent-hover: #60a5fa;
-  /* Lighter Blue */
-  --color-accentsubtle: rgba(59, 130, 246, 0.15);
+  --color-accentsubtle: rgba(59, 130, 246, 0.12);
 
-  --color-ring-subtle: rgba(59, 130, 246, 0.35);
+  --color-ring-subtle: rgba(59, 130, 246, 0.3);
   --color-success: #10b981;
   --color-danger: #f43f5e;
   --color-warning: #f59e0b;
 
-  /* Text */
+  /* Typography */
   --color-text-primary: #f8fafc;
   --color-text-secondary: #94a3b8;
   --color-muted: #64748b;
 
-  /* Custom Blur Utilities */
-  --blur-glass: blur(24px);
-  --blur-heavy: blur(48px);
+  /* Performant Blur Utilities */
+  --blur-glass: blur(12px);
+  --blur-heavy: blur(24px);
 }
 
 @layer base {
   body {
     @apply bg-background text-text-primary overflow-hidden select-none;
-    font-family: 'Inter', system-ui, sans-serif;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    /* Cleaner background gradient base */
-    background: radial-gradient(circle at top right, #111b2f 0%, #09101f 100%);
+    background: radial-gradient(circle at 80% 20%, #0d1527 0%, #070a12 100%);
+  }
+
+  /* Monospaced accents */
+  code, pre, .font-mono {
+    font-family: 'JetBrains Mono', monospace;
   }
 
   /* Sleek Scrollbars */
   ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 5px;
+    height: 5px;
   }
 
   ::-webkit-scrollbar-thumb {
-    background: rgba(59, 130, 246, 0.2);
-    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 9999px;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background: rgba(59, 130, 246, 0.5);
+    background: var(--color-accent);
   }
 
   ::-webkit-scrollbar-track {
     background: transparent;
   }
 
-  /* Global Select Styling to match Cyber/Industrial Theme */
+  /* Global Select Styling */
   select {
-    @apply bg-black/40 border border-white/10 text-white rounded-xl px-4 py-3 outline-none transition-colors appearance-none cursor-pointer focus:border-accent/40 shadow-inner;
+    @apply bg-black/50 border border-white/10 text-white rounded-xl px-4 py-2.5 outline-none transition-all appearance-none cursor-pointer focus:border-accent/50 shadow-inner text-sm font-medium;
     background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%23ffffff' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
     background-position: right 0.75rem center;
     background-repeat: no-repeat;
-    background-size: 1.2em 1.2em;
-    padding-right: 2.5rem;
+    background-size: 1.1em 1.1em;
+    padding-right: 2.25rem;
   }
 
   select option {
-    @apply bg-[#0f1423] text-white py-2 font-medium;
+    @apply bg-[#0b101c] text-white py-2 font-medium;
   }
 }
 
 @layer utilities {
   .glass-panel {
-    @apply bg-surface/40 border border-white/5 backdrop-blur-xl shadow-lg;
+    @apply bg-surface/50 border border-white/10 backdrop-blur-md shadow-2xl;
   }
 
   .glass-button {
-    @apply bg-white/5 border border-white/5 backdrop-blur-md hover:bg-white/10 transition-colors duration-200;
+    @apply bg-white/[0.04] border border-white/10 backdrop-blur-sm hover:bg-white/[0.08] hover:border-white/20 transition-all duration-200 active:scale-[0.98];
   }
 
-  .noise-bg {
-    position: relative;
-  }
-
-  .noise-bg::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    opacity: 0.015;
-    pointer-events: none;
-    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 250 250' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
-    z-index: 1;
+  .editorial-badge {
+    @apply font-mono text-[10px] tracking-wider uppercase px-2 py-0.5 rounded border border-white/15 bg-white/[0.04] text-white/70;
   }
 
   .tech-card {
     position: relative;
-    background: rgba(17, 27, 47, 0.45);
-    backdrop-filter: blur(24px);
-    clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 0 100%);
+    background: rgba(14, 21, 38, 0.6);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 1rem;
+    transition: border-color 0.3s ease, transform 0.3s ease, box-shadow 0.3s ease;
   }
 
-  .tech-card::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    padding: 1px;
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.02) 100%);
-    clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 0 100%);
-    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-    -webkit-mask-composite: xor;
-    mask-composite: exclude;
-    pointer-events: none;
-    transition: background 0.3s ease;
-  }
-
-  .tech-card:hover::before {
-    background: linear-gradient(135deg, var(--color-accent) 0%, rgba(255, 255, 255, 0.05) 100%);
+  .tech-card:hover {
+    border-color: rgba(var(--color-accent), 0.4);
+    box-shadow: 0 8px 32px -8px rgba(0, 0, 0, 0.5), 0 0 20px -5px rgba(59, 130, 246, 0.15);
   }
 
   .tech-card-sm {
     position: relative;
-    background: rgba(17, 27, 47, 0.4);
-    backdrop-filter: blur(16px);
-    clip-path: polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 0 100%);
+    background: rgba(14, 21, 38, 0.5);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 0.75rem;
+    transition: border-color 0.25s ease, background 0.25s ease;
   }
 
-  .tech-card-sm::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    padding: 1px;
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.01) 100%);
-    clip-path: polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 0 100%);
-    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-    -webkit-mask-composite: xor;
-    mask-composite: exclude;
-    pointer-events: none;
-    transition: background 0.3s ease;
-  }
-
-  .tech-card-sm:hover::before {
-    background: linear-gradient(135deg, var(--color-accent) 0%, rgba(255, 255, 255, 0.04) 100%);
+  .tech-card-sm:hover {
+    border-color: rgba(255, 255, 255, 0.15);
+    background: rgba(14, 21, 38, 0.75);
   }
 
   .tech-divider {
     position: relative;
     height: 1px;
-    background: linear-gradient(90deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.02) 80%, transparent 100%);
-    margin: 1.5rem 0;
-  }
-
-  .tech-divider::after {
-    content: '';
-    position: absolute;
-    right: 20%;
-    top: -1px;
-    width: 4px;
-    height: 3px;
-    background: var(--color-accent);
-    box-shadow: 0 0 6px var(--color-accent);
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.02) 80%, transparent 100%);
+    margin: 1.25rem 0;
   }
 
   .diagonal-progress {
@@ -180,29 +136,14 @@
     animation: diagonal-move 1.5s linear infinite;
   }
 
+  /* Performant Vector Grid (Zero GPU animation overhead) */
   .radar-grid {
     position: relative;
     background-image: 
-      linear-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
-    background-size: 40px 40px;
+      linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+    background-size: 32px 32px;
     background-position: center;
-    overflow: hidden;
-  }
-
-  .radar-grid::before {
-    content: '';
-    position: absolute;
-    width: 200%;
-    height: 200%;
-    top: -50%;
-    left: -50%;
-    background: conic-gradient(from 0deg, transparent 50%, rgba(59, 130, 246, 0.04) 100%);
-    background-color: var(--color-accent); /* Injects user accent colour in blending mode */
-    background: conic-gradient(from 0deg, transparent 50%, var(--color-accent) 100%);
-    opacity: 0.08;
-    animation: radar-sweep 8s linear infinite;
-    pointer-events: none;
   }
 }
 
@@ -213,13 +154,4 @@
   100% {
     background-position: 30px 0;
   }
-}
-
-@keyframes radar-sweep {
-  0% {
-    transform: rotate(0deg);
-  }
-  100% {
-    transform: rotate(360deg);
-  }
-}
+}
