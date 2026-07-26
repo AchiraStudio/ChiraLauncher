@@ -1,6 +1,5 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
-import { supabase } from "../lib/supabase";
 
 interface UserProfile {
     id: string;
@@ -17,49 +16,19 @@ interface UserProfile {
 interface ProfileState {
     profile: UserProfile | null;
     isLoading: boolean;
-    session: any | null;
     fetchProfile: () => Promise<void>;
     updateProfile: (username: string, steamId?: string | null, avatarUrl?: string | null, supabaseUserId?: string | null, isCloudSynced?: boolean) => Promise<void>;
-    initAuthListener: () => void;
 }
 
 export const useProfileStore = create<ProfileState>((set) => ({
     profile: null,
     isLoading: true,
-    session: null,
 
     fetchProfile: async () => {
         set({ isLoading: true });
         try {
-            const localProfile = await invoke<UserProfile | null>("get_profile");
-
-            // ── SMART XP SYNC ──
-            if (localProfile?.is_cloud_synced && localProfile.supabase_user_id) {
-                const { data: cloudProfile } = await supabase
-                    .from("profiles")
-                    .select("xp")
-                    .eq("id", localProfile.supabase_user_id)
-                    .single();
-
-                if (cloudProfile) {
-                    if (localProfile.xp > cloudProfile.xp) {
-                        // Local is ahead (played offline), push to cloud
-                        await supabase.from("profiles").update({ xp: localProfile.xp }).eq("id", localProfile.supabase_user_id);
-                    } else if (cloudProfile.xp > localProfile.xp) {
-                        // Cloud is ahead (played on another PC), pull to local
-                        localProfile.xp = cloudProfile.xp;
-                        await invoke("update_profile", {
-                            username: localProfile.username,
-                            steamId: localProfile.steam_id,
-                            avatarUrl: localProfile.avatar_url,
-                            supabaseUserId: localProfile.supabase_user_id,
-                            isCloudSynced: true
-                        });
-                    }
-                }
-            }
-
-            set({ profile: localProfile });
+            const profile = await invoke<UserProfile | null>("get_profile");
+            set({ profile });
         } catch (error) {
             console.error("Failed to fetch profile:", error);
         } finally {
@@ -82,14 +51,4 @@ export const useProfileStore = create<ProfileState>((set) => ({
             throw error;
         }
     },
-
-    initAuthListener: () => {
-        supabase.auth.getSession().then(({ data: { session } }) => {
-            set({ session });
-        });
-
-        supabase.auth.onAuthStateChange((_event, session) => {
-            set({ session });
-        });
-    }
-}));
+}));

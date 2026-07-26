@@ -8,7 +8,6 @@ pub mod launcher;
 pub mod metadata;
 pub mod reset;
 pub mod scanner;
-pub mod torrent;
 
 #[tauri::command]
 pub fn greet(name: &str) -> String {

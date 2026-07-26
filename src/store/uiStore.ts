@@ -10,12 +10,9 @@ interface UiState {
     isFolderModalOpen: boolean;
     folderToEdit: Folder | null;
     isLibrarySettingsModalOpen: boolean;
-    isTorrentModalOpen: boolean;
     isAppIdModalOpen: boolean;
-    isAuthModalOpen: boolean;
-    isResetModalOpen: boolean; // NEW
+    isResetModalOpen: boolean;
     isFirstLaunch: boolean;
-    currentMagnet: string | null;
     currentBg: string | null;
 
     setAddGameModalOpen: (open: boolean) => void;
@@ -23,10 +20,8 @@ interface UiState {
     setScannerModalOpen: (open: boolean) => void;
     setFolderModalOpen: (open: boolean, folder?: Folder | null) => void;
     setLibrarySettingsModalOpen: (open: boolean) => void;
-    setTorrentModalOpen: (open: boolean, magnetUrl?: string | null) => void;
     setAppIdModalOpen: (open: boolean) => void;
-    setAuthModalOpen: (open: boolean) => void;
-    setResetModalOpen: (open: boolean) => void; // NEW
+    setResetModalOpen: (open: boolean) => void;
     setFirstLaunch: (first: boolean) => void;
     setCurrentBg: (bg: string | null) => void;
 }
@@ -39,12 +34,9 @@ export const useUiStore = create<UiState>((set) => ({
     isFolderModalOpen: false,
     folderToEdit: null,
     isLibrarySettingsModalOpen: false,
-    isTorrentModalOpen: false,
     isAppIdModalOpen: false,
-    isAuthModalOpen: false,
     isResetModalOpen: false,
     isFirstLaunch: false,
-    currentMagnet: null,
     currentBg: null,
 
     setAddGameModalOpen: (open) => set({ isAddGameModalOpen: open }),
@@ -52,9 +44,7 @@ export const useUiStore = create<UiState>((set) => ({
     setScannerModalOpen: (open) => set({ isScannerModalOpen: open }),
     setFolderModalOpen: (open, folder = null) => set({ isFolderModalOpen: open, folderToEdit: folder ?? null }),
     setLibrarySettingsModalOpen: (open) => set({ isLibrarySettingsModalOpen: open }),
-    setTorrentModalOpen: (open, magnetUrl = null) => set({ isTorrentModalOpen: open, currentMagnet: magnetUrl ?? null }),
     setAppIdModalOpen: (open) => set({ isAppIdModalOpen: open }),
-    setAuthModalOpen: (open) => set({ isAuthModalOpen: open }),
     setResetModalOpen: (open) => set({ isResetModalOpen: open }),
     setFirstLaunch: (first) => set({ isFirstLaunch: first }),
     setCurrentBg: (bg) => set({ currentBg: bg }),

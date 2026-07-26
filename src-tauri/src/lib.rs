@@ -1,7 +1,6 @@
 pub mod achievement_watcher;
 pub mod achievements;
 pub mod commands;
-pub mod crypto;
 pub mod db;
 pub mod metadata;
 pub mod os_integration;
@@ -12,16 +11,13 @@ pub mod settings;
 mod state;
 pub mod stats;
 pub mod steamworks_sync;
-pub mod torrent;
 mod tray;
 
-use crate::commands::torrent::TorrentState;
 use crate::state::{AppState, DbWrite};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{Emitter, Manager};
-use tokio::sync::RwLock;
 
 pub static APP_EXITING: AtomicBool = AtomicBool::new(false);
 
@@ -119,7 +115,6 @@ pub fn run() {
             #[cfg(desktop)]
             {
                 use tauri_plugin_deep_link::DeepLinkExt;
-                app.deep_link().register("magnet")?;
                 app.deep_link().register("chiralauncher")?;
             }
 
@@ -174,11 +169,10 @@ pub fn run() {
             app.manage(achievement_watcher::ActiveWatchers::default());
             app.manage(http_engine.clone());
 
-            // ── Resume downloads that were in-flight or pending when the app last closed ──
+            // ── Resume HTTP downloads that were in-flight when the app last closed ──
             {
                 let engine_for_resume = http_engine.clone();
                 tauri::async_runtime::spawn(async move {
-                    // Small delay so the window finishes loading before network activity starts
                     tokio::time::sleep(tokio::time::Duration::from_millis(800)).await;
 
                     let ids_to_resume: Vec<String> = {
@@ -318,56 +312,7 @@ pub fn run() {
                 });
             }
 
-            let session_dir = app_dir.join("rqbit_session");
-            let download_dir = std::path::PathBuf::from(&app_settings.download_path);
-
-            let torrent_state: TorrentState = Arc::new(RwLock::new(None));
-            let torrent_state_clone = torrent_state.clone();
-            let torrent_state_clone_for_events = torrent_state.clone();
-
-            app.manage(torrent_state);
-            let app_handle_for_events = app.handle().clone();
-
-            tauri::async_runtime::spawn(async move {
-                match crate::torrent::TorrentEngine::new(session_dir, download_dir).await {
-                    Ok(engine) => {
-                        let mut lock = torrent_state_clone.write().await;
-                        *lock = Some(engine);
-                    }
-                    Err(e) => log::error!("[TorrentEngine] Failed to initialize: {e:#}"),
-                }
-            });
-
-            let app_handle_for_args = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                let args: Vec<String> = std::env::args().collect();
-                if let Some(id) = args.iter().skip_while(|a| *a != "--launch-game").nth(1) {
-                    tokio::time::sleep(tokio::time::Duration::from_millis(2500)).await;
-                    let _ = app_handle_for_args.emit("launch-game-requested", id);
-                }
-            });
-
-            tauri::async_runtime::spawn(async move {
-                let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
-                loop {
-                    interval.tick().await;
-
-                    let downloads = {
-                        let lock = torrent_state_clone_for_events.read().await;
-                        if let Some(engine) = lock.as_ref() {
-                            Some(engine.list_downloads().await)
-                        } else {
-                            None
-                        }
-                    };
-
-                    if let Some(list) = downloads {
-                        if let Err(e) = app_handle_for_events.emit("download-progress", list) {
-                            log::warn!("Failed to emit download progress: {e:#}");
-                        }
-                    }
-                }
-            });
+            let _ = app_settings; // suppress unused warning
 
             tauri::async_runtime::spawn(crate::db::writer::run_db_writer(db_path, db_rx));
 
@@ -503,22 +448,9 @@ pub fn run() {
             tray::update_tray,
             tray::show_main_window,
             tray::quit_app,
-            commands::torrent::inspect_magnet,
-            commands::torrent::start_download,
-            commands::torrent::pause_download,
-            commands::torrent::resume_download,
-            commands::torrent::cancel_download,
-            commands::torrent::get_downloads,
             profile::get_profile,
             profile::update_profile,
             profile::is_first_launch,
-            profile::set_profile_keys,
-            profile::save_local_message,
-            profile::get_local_messages,
-            profile::get_recent_chats,
-            crypto::generate_keypair,
-            crypto::encrypt_message,
-            crypto::decrypt_message,
             os_integration::get_os_integration,
             os_integration::toggle_os_integration,
             os_integration::create_all_shortcuts,

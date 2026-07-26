@@ -1,26 +1,10 @@
 use crate::state::{AppState, DbWrite, ProfileDbWrite, UserProfile};
 use anyhow::Result;
 use keyring::Entry;
-use serde::{Deserialize, Serialize};
 use tauri::{command, State};
 use uuid::Uuid;
 
 const KEYRING_SERVICE: &str = "ChiraLauncher";
-
-#[derive(Serialize, Deserialize)]
-pub struct LocalMessage {
-    pub id: String,
-    pub is_mine: bool,
-    pub plain_text: String,
-    pub timestamp: u64,
-}
-
-#[derive(Serialize)]
-pub struct RecentChat {
-    pub contact_id: String,
-    pub last_message: String,
-    pub timestamp: u64,
-}
 
 #[command]
 pub async fn get_profile(state: State<'_, AppState>) -> Result<Option<UserProfile>, String> {
@@ -41,7 +25,7 @@ pub async fn get_profile(state: State<'_, AppState>) -> Result<Option<UserProfil
             xp: row.get(4).unwrap_or(0),
             supabase_user_id: row.get(5).unwrap_or(None),
             is_cloud_synced: row.get::<_, i32>(6).unwrap_or(0) != 0,
-            private_key: row.get(7).unwrap_or(None), // Read from local DB fallback first
+            private_key: row.get(7).unwrap_or(None),
             public_key: row.get(8).unwrap_or(None),
         };
 
@@ -113,119 +97,7 @@ pub async fn update_profile(
 }
 
 #[command]
-pub async fn set_profile_keys(
-    state: State<'_, AppState>,
-    public_key: String,
-    private_key: String,
-) -> Result<(), String> {
-    if let Some(mut p) = get_profile(state.clone()).await? {
-        p.public_key = Some(public_key.clone());
-        p.private_key = Some(private_key.clone()); // FIX: Save to DB as fallback
-
-        // Try to save to OS Keychain (more secure)
-        if let Ok(entry) = Entry::new(KEYRING_SERVICE, &p.id) {
-            if let Err(e) = entry.set_password(&private_key) {
-                log::warn!(
-                    "Failed to save to OS keychain (falling back to SQLite): {}",
-                    e
-                );
-            }
-        } else {
-            log::warn!("Failed to initialize OS keychain (falling back to SQLite)");
-        }
-
-        // Regardless of Keychain success/failure, update the local SQLite profile
-        state
-            .db_tx
-            .send(DbWrite::Profile(ProfileDbWrite::UpdateProfile(p)))
-            .map_err(|e| e.to_string())?;
-    }
-    Ok(())
-}
-
-#[command]
 pub async fn is_first_launch(state: State<'_, AppState>) -> Result<bool, String> {
     let profile = get_profile(state).await?;
     Ok(profile.is_none())
-}
-
-#[command]
-pub async fn save_local_message(
-    id: String,
-    contact_id: String,
-    is_mine: bool,
-    plain_text: String,
-    timestamp: u64,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    state
-        .db_tx
-        .send(DbWrite::Profile(ProfileDbWrite::SaveLocalMessage {
-            id,
-            contact_id,
-            is_mine,
-            plain_text,
-            timestamp,
-        }))
-        .map_err(|e| e.to_string())?;
-
-    Ok(())
-}
-
-#[command]
-pub async fn get_local_messages(
-    contact_id: String,
-    state: State<'_, AppState>,
-) -> Result<Vec<LocalMessage>, String> {
-    let pool = &state.read_pool;
-    let conn = pool.get().map_err(|e| e.to_string())?;
-
-    let mut stmt = conn
-        .prepare("SELECT id, is_mine, plain_text, timestamp FROM local_messages WHERE contact_id = ?1 ORDER BY timestamp ASC")
-        .map_err(|e| e.to_string())?;
-
-    let iter = stmt
-        .query_map([contact_id], |row| {
-            Ok(LocalMessage {
-                id: row.get(0)?,
-                is_mine: row.get::<_, i32>(1)? != 0,
-                plain_text: row.get(2)?,
-                timestamp: row.get::<_, i64>(3)? as u64,
-            })
-        })
-        .map_err(|e| e.to_string())?;
-
-    let mut msgs = Vec::new();
-    for msg in iter {
-        msgs.push(msg.map_err(|e| e.to_string())?);
-    }
-
-    Ok(msgs)
-}
-
-#[command]
-pub async fn get_recent_chats(state: State<'_, AppState>) -> Result<Vec<RecentChat>, String> {
-    let pool = &state.read_pool;
-    let conn = pool.get().map_err(|e| e.to_string())?;
-
-    let mut stmt = conn
-        .prepare("SELECT contact_id, plain_text, MAX(timestamp) as last_ts FROM local_messages GROUP BY contact_id ORDER BY last_ts DESC")
-        .map_err(|e| e.to_string())?;
-
-    let iter = stmt
-        .query_map([], |row| {
-            Ok(RecentChat {
-                contact_id: row.get(0)?,
-                last_message: row.get(1)?,
-                timestamp: row.get::<_, i64>(2)? as u64,
-            })
-        })
-        .map_err(|e| e.to_string())?;
-
-    let mut chats = Vec::new();
-    for chat in iter {
-        chats.push(chat.map_err(|e| e.to_string())?);
-    }
-
-    Ok(chats)
 }

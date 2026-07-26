@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useRef } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { useGameStore } from "./store/gameStore";
@@ -9,22 +9,18 @@ import { useLocalImage } from "./hooks/useLocalImage";
 import { computeLevel } from "./lib/xp";
 import {
     Edit2, Check, Shield, Copy, Trophy, Gamepad2, Clock,
-    LogOut, Sparkles, User, Target, Zap, Fingerprint, Hexagon, TrendingUp, BarChart3, Lock, Upload,
+    Sparkles, User, Target, Zap, Fingerprint, Hexagon, TrendingUp, BarChart3, Lock,
     BookOpen, Database, Crown, Rocket, Flame, Award
 } from "lucide-react";
-import { supabase } from "./lib/supabase";
 import { toast } from "sonner";
 import { cn } from "./lib/utils";
 
 function TopGameCover({ path }: { path: string | null }) {
     const { src } = useLocalImage(path);
-    return src ? (
-        <img src={src} className="w-full h-full object-cover" />
-    ) : (
-        <Gamepad2 className="w-full h-full p-2 text-white/20" />
-    );
+    return src
+        ? <img src={src} className="w-full h-full object-cover" />
+        : <Gamepad2 className="w-full h-full p-2 text-white/20" />;
 }
-
 
 const ALL_MILESTONES = [
     { id: "first_game", icon: <Gamepad2 size={18} />, label: "Core Initialized", desc: "Added your first game", check: (g: number, _: number) => g >= 1 },
@@ -44,122 +40,52 @@ const ALL_MILESTONES = [
 export function UserPage() {
     const navigate = useNavigate();
     const gamesById = useGameStore((s) => s.gamesById);
-    const { profile, updateProfile, fetchProfile, session } = useProfileStore();
+    const { profile, updateProfile, fetchProfile } = useProfileStore();
     const allGames = Object.values(gamesById);
 
     const runningGames = useProcessStore(s => s.running);
     const activeGames = Object.values(runningGames);
     const isPlaying = activeGames.length > 0;
-    const activeGameTitle = isPlaying ? gamesById[activeGames[0].gameId]?.title : "";
-    const playingStatusText = isPlaying ? `Playing ${activeGameTitle}` : (profile?.is_cloud_synced ? "Online" : "Local Node");
+    const activeGameTitle = isPlaying ? gamesById[(activeGames[0] as any).gameId]?.title : "";
 
-    useEffect(() => {
-        fetchProfile();
-    }, [fetchProfile]);
+    useEffect(() => { fetchProfile(); }, [fetchProfile]);
 
     const stats = useMemo(() => {
         const totalGames = allGames.length;
         const totalPlaytime = allGames.reduce((sum, g) => sum + (g.playtime_seconds || 0), 0);
-
-        const topGames = [...allGames]
-            .filter(g => g.playtime_seconds > 0)
-            .sort((a, b) => b.playtime_seconds - a.playtime_seconds)
-            .slice(0, 4);
-
+        const topGames = [...allGames].filter(g => g.playtime_seconds > 0).sort((a, b) => b.playtime_seconds - a.playtime_seconds).slice(0, 4);
         const genreMap: Record<string, number> = {};
-        allGames.forEach(g => {
-            const genre = g.genre || "Unknown";
-            genreMap[genre] = (genreMap[genre] || 0) + 1;
-        });
-        const topGenres = Object.entries(genreMap)
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 4);
-
-        const { level, xpProgress, xpForNextLevel, xpForCurrentLevel } = computeLevel(profile?.xp || 0);
+        allGames.forEach(g => { const genre = g.genre || "Unknown"; genreMap[genre] = (genreMap[genre] || 0) + 1; });
+        const topGenres = Object.entries(genreMap).sort((a, b) => b[1] - a[1]).slice(0, 4);
+        const { level, xpProgress, xpForNextLevel } = computeLevel(profile?.xp || 0);
         const unlockedBadges = ALL_MILESTONES.filter(m => m.check(totalGames, totalPlaytime));
-
-        return { totalGames, totalPlaytime, topGames, topGenres, level, xpProgress, xpForNextLevel, xpForCurrentLevel, unlockedBadges };
+        return { totalGames, totalPlaytime, topGames, topGenres, level, xpProgress, xpForNextLevel, unlockedBadges };
     }, [allGames, profile?.xp]);
 
     const [isEditing, setIsEditing] = useState(false);
     const [editName, setEditName] = useState(profile?.username || "");
     const [editSteamId, setEditSteamId] = useState(profile?.steam_id || "");
 
-    const fileInputRef = useRef<HTMLInputElement>(null);
-
     useEffect(() => {
-        if (profile) {
-            setEditName(profile.username);
-            setEditSteamId(profile.steam_id || "");
-        }
+        if (profile) { setEditName(profile.username); setEditSteamId(profile.steam_id || ""); }
     }, [profile]);
 
     const handleSave = async () => {
         try {
-            await updateProfile(editName, editSteamId || null, profile?.avatar_url, profile?.supabase_user_id, profile?.is_cloud_synced);
+            await updateProfile(editName, editSteamId || null, profile?.avatar_url, null, false);
             setIsEditing(false);
-            toast.success("Identity profile updated");
-        } catch (e) {
-            toast.error("Failed to update profile");
-        }
-    };
-
-    const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file || !profile?.supabase_user_id) return;
-
-        if (file.size > 5 * 1024 * 1024) {
-            toast.error("Avatar must be less than 5MB");
-            return;
-        }
-
-        const uploadToast = toast.loading("Uploading avatar...");
-
-        try {
-            if (profile.avatar_url && profile.avatar_url.includes('supabase.co/storage/v1/object/public/avatars/')) {
-                const oldPath = profile.avatar_url.split('/avatars/')[1];
-                if (oldPath) {
-                    await supabase.storage.from('avatars').remove([oldPath]);
-                }
-            }
-
-            const fileExt = file.name.split('.').pop();
-            const filePath = `${profile.supabase_user_id}/${Date.now()}.${fileExt}`;
-
-            const { error: uploadError } = await supabase.storage
-                .from('avatars')
-                .upload(filePath, file);
-
-            if (uploadError) throw uploadError;
-
-            const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(filePath);
-
-            await updateProfile(profile.username, profile.steam_id, publicUrl, profile.supabase_user_id, profile.is_cloud_synced);
-
-            await supabase.from('profiles').update({ avatar_url: publicUrl }).eq('id', profile.supabase_user_id);
-
-            toast.success("Profile picture updated!", { id: uploadToast });
-        } catch (err: any) {
-            toast.error("Failed to upload avatar", { id: uploadToast, description: err.message });
-        }
+            toast.success("Profile updated");
+        } catch { toast.error("Failed to update profile"); }
     };
 
     const copySteamId = () => {
         if (profile?.steam_id) {
             navigator.clipboard.writeText(profile.steam_id);
-            toast.success("Steam ID copied to system clipboard");
+            toast.success("Steam ID copied");
         }
     };
 
-    const handleSignOut = async () => {
-        await supabase.auth.signOut();
-        toast.info("Logged out of grid");
-
-        if (profile) {
-            await updateProfile(profile.username, profile.steam_id, null, null, false);
-        }
-        navigate("/");
-    };
+    const playingStatusText = isPlaying ? `Playing ${activeGameTitle}` : "Local Node";
 
     return (
         <div className="absolute inset-0 overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent bg-[#08090f]">
@@ -174,29 +100,19 @@ export function UserPage() {
                     </div>
                     <div>
                         <h1 className="text-3xl font-black text-white uppercase tracking-tighter">Pilot Identity</h1>
-                        <p className="text-white/40 text-[10px] font-bold uppercase tracking-widest mt-1">Global User Record</p>
+                        <p className="text-white/40 text-[10px] font-bold uppercase tracking-widest mt-1">Local Profile</p>
                     </div>
-                    {session && (
-                        <button
-                            onClick={handleSignOut}
-                            className="ml-auto px-5 py-2.5 rounded-xl bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white border border-red-500/20 text-[10px] font-black uppercase tracking-widest transition-all shadow-lg active:scale-95 flex items-center gap-2"
-                        >
-                            <LogOut size={14} /> Log Out
-                        </button>
-                    )}
                 </header>
 
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                    {/* Left column */}
                     <div className="col-span-1 lg:col-span-4 flex flex-col gap-8">
-                        <motion.div
-                            layout
-                            className="shadow-2xl relative overflow-hidden group tech-card p-8"
-                        >
+                        <motion.div layout className="shadow-2xl relative overflow-hidden group tech-card p-8">
                             <div className="absolute inset-0 bg-gradient-to-b from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
 
                             <AnimatePresence mode="wait">
                                 {isEditing ? (
-                                    <motion.div key="editing" initial={{ opacity: 0, rotateY: 90 }} animate={{ opacity: 1, rotateY: 0 }} exit={{ opacity: 0, rotateY: -90 }} className="relative z-10 flex flex-col gap-6">
+                                    <motion.div key="editing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="relative z-10 flex flex-col gap-6">
                                         <div className="space-y-4">
                                             <div>
                                                 <label className="text-[10px] font-black text-white/40 uppercase tracking-widest ml-2 mb-2 block">Callsign</label>
@@ -222,58 +138,35 @@ export function UserPage() {
                                         </div>
                                         <div className="flex gap-3 mt-4">
                                             <button onClick={() => setIsEditing(false)} className="flex-1 py-3 rounded-xl bg-white/5 hover:bg-white/10 text-white/60 hover:text-white font-bold text-xs uppercase tracking-widest transition-colors">Cancel</button>
-                                            <button onClick={handleSave} className="flex-1 py-3 rounded-xl bg-accent hover:brightness-110 text-white font-black text-xs uppercase tracking-widest transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2"><Check size={16} /> Save</button>
+                                            <button onClick={handleSave} className="flex-1 py-3 rounded-xl bg-accent hover:brightness-110 text-white font-black text-xs uppercase tracking-widest transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2">
+                                                <Check size={16} /> Save
+                                            </button>
                                         </div>
                                     </motion.div>
                                 ) : (
-                                    <motion.div key="viewing" initial={{ opacity: 0, rotateY: -90 }} animate={{ opacity: 1, rotateY: 0 }} exit={{ opacity: 0, rotateY: 90 }} className="relative z-10 flex flex-col h-full">
-                                        <button onClick={() => setIsEditing(true)} className="absolute top-0 right-0 w-10 h-10 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/40 hover:text-white transition-colors border border-white/5"><Edit2 size={16} /></button>
+                                    <motion.div key="viewing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="relative z-10 flex flex-col h-full">
+                                        <button onClick={() => setIsEditing(true)} className="absolute top-0 right-0 w-10 h-10 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/40 hover:text-white transition-colors border border-white/5">
+                                            <Edit2 size={16} />
+                                        </button>
 
                                         <div className="flex flex-col items-center text-center mt-2 flex-1">
-                                            <input
-                                                type="file"
-                                                ref={fileInputRef}
-                                                className="hidden"
-                                                accept="image/*"
-                                                onChange={handleAvatarUpload}
-                                            />
-                                            <button
-                                                onClick={() => profile?.supabase_user_id && fileInputRef.current?.click()}
-                                                className="w-32 h-32 rounded-xl bg-black/50 border border-white/5 shadow-2xl overflow-hidden mb-6 relative group/avatar cursor-pointer"
-                                                title={profile?.supabase_user_id ? "Change Profile Picture" : "Must connect to Cloud to upload picture"}
-                                            >
-                                                {profile?.avatar_url ? (
-                                                    <img src={profile.avatar_url} alt="Profile" className="w-full h-full object-cover group-hover/avatar:opacity-40 transition-opacity" />
-                                                ) : (
-                                                    <div className="w-full h-full flex items-center justify-center"><User size={48} className="text-white/10" /></div>
-                                                )}
+                                            <div className="w-32 h-32 rounded-xl bg-black/50 border border-white/5 shadow-2xl overflow-hidden mb-6 relative">
+                                                {profile?.avatar_url
+                                                    ? <img src={profile.avatar_url} alt="Profile" className="w-full h-full object-cover" />
+                                                    : <div className="w-full h-full flex items-center justify-center"><User size={48} className="text-white/10" /></div>
+                                                }
                                                 <div className="absolute inset-0 bg-gradient-to-tr from-accent/20 to-transparent mix-blend-overlay" />
+                                            </div>
 
-                                                {profile?.supabase_user_id && (
-                                                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/avatar:opacity-100 transition-opacity">
-                                                        <Upload className="text-white" size={32} />
-                                                    </div>
-                                                )}
-                                            </button>
-
-                                            <h2 className="text-4xl font-black text-white uppercase tracking-tighter mb-3">{profile?.username || (session ? "SYNCING..." : "GUEST")}</h2>
+                                            <h2 className="text-4xl font-black text-white uppercase tracking-tighter mb-3">{profile?.username || "PILOT"}</h2>
 
                                             <div className="flex items-center justify-center gap-2 mt-1 mb-2">
-                                                {session && (
-                                                    <span className="px-3 py-1 rounded-md bg-accent/10 border border-accent/20 text-accent text-[10px] font-black uppercase tracking-widest">
-                                                        Level {stats.level}
-                                                    </span>
-                                                )}
-
+                                                <span className="px-3 py-1 rounded-md bg-accent/10 border border-accent/20 text-accent text-[10px] font-black uppercase tracking-widest">
+                                                    Level {stats.level}
+                                                </span>
                                                 <div className="flex items-center gap-1.5 px-3 py-1 bg-black/40 border border-white/5 rounded-md">
-                                                    <span className={cn(
-                                                        "w-1.5 h-1.5 rounded-full shrink-0",
-                                                        isPlaying ? "bg-green-400 animate-pulse shadow-[0_0_8px_rgba(74,222,128,0.8)]" : (profile?.is_cloud_synced ? "bg-accent" : "bg-white/20")
-                                                    )} />
-                                                    <span className={cn(
-                                                        "text-[10px] font-bold uppercase tracking-widest",
-                                                        isPlaying ? "text-green-400" : (profile?.is_cloud_synced ? "text-white/50" : "text-white/30")
-                                                    )}>
+                                                    <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", isPlaying ? "bg-green-400 animate-pulse shadow-[0_0_8px_rgba(74,222,128,0.8)]" : "bg-white/20")} />
+                                                    <span className={cn("text-[10px] font-bold uppercase tracking-widest", isPlaying ? "text-green-400" : "text-white/30")}>
                                                         {playingStatusText}
                                                     </span>
                                                 </div>
@@ -295,9 +188,9 @@ export function UserPage() {
                                                     {profile?.xp || 0} <span className="text-white/20">/ {stats.xpForNextLevel}</span>
                                                 </span>
                                             </div>
-                                            <div className="h-2 w-full bg-white/[0.05] rounded-full overflow-hidden shadow-inner border border-white/[0.02] relative z-10">
+                                            <div className="h-2 w-full bg-white/[0.05] rounded-full overflow-hidden shadow-inner border border-white/[0.02]">
                                                 <motion.div
-                                                    className="h-full bg-gradient-to-r from-accent to-blue-400 diagonal-progress"
+                                                    className="h-full bg-gradient-to-r from-accent to-blue-400"
                                                     initial={{ width: 0 }}
                                                     animate={{ width: `${stats.xpProgress}%` }}
                                                     transition={{ duration: 1, ease: "easeOut", delay: 0.2 }}
@@ -313,7 +206,7 @@ export function UserPage() {
                             <div className="p-6 flex flex-col items-center text-center group transition-colors shadow-2xl tech-card-sm">
                                 <Gamepad2 className="text-accent mb-4 group-hover:scale-110 transition-transform relative z-10" size={28} />
                                 <span className="text-4xl font-black text-white mb-2 tabular-nums tracking-tighter relative z-10">{stats.totalGames}</span>
-                                <span className="text-[9px] font-black text-white/30 uppercase tracking-widest relative z-10">Total Cores</span>
+                                <span className="text-[9px] font-black text-white/30 uppercase tracking-widest relative z-10">Total Games</span>
                             </div>
                             <div className="p-6 flex flex-col items-center text-center group transition-colors shadow-2xl tech-card-sm">
                                 <Clock className="text-purple-400 mb-4 group-hover:scale-110 transition-transform relative z-10" size={28} />
@@ -325,7 +218,9 @@ export function UserPage() {
                         </div>
                     </div>
 
+                    {/* Right column */}
                     <div className="xl:col-span-8 flex flex-col gap-6">
+                        {/* Milestones */}
                         <div className="flex flex-col">
                             <div className="flex items-center justify-between mb-6">
                                 <h3 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-3">
@@ -335,7 +230,6 @@ export function UserPage() {
                                     {stats.unlockedBadges.length} / {ALL_MILESTONES.length}
                                 </span>
                             </div>
-
                             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
                                 {ALL_MILESTONES.map((badge, i) => {
                                     const unlocked = stats.unlockedBadges.some(b => b.id === badge.id);
@@ -369,7 +263,9 @@ export function UserPage() {
                             </div>
                         </div>
 
+                        {/* Bottom stats */}
                         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 flex-1">
+                            {/* Most Played */}
                             <div className="p-8 shadow-2xl flex flex-col tech-card">
                                 <h3 className="text-sm font-black text-white uppercase tracking-widest mb-6 flex items-center gap-3 relative z-10">
                                     <Zap className="text-blue-400" size={18} /> Most Played
@@ -380,22 +276,21 @@ export function UserPage() {
                                             <Gamepad2 size={32} className="mb-3 opacity-50" />
                                             <span className="text-[10px] font-black uppercase tracking-widest">No Data Recorded</span>
                                         </div>
-                                    ) : (
-                                        stats.topGames.map((g) => (
-                                            <div key={g.id} onClick={() => navigate('/library', { state: { gameId: g.id } })} className="flex items-center gap-4 bg-black/40 p-3 rounded-xl border border-white/5 hover:bg-white/[0.08] hover:border-white/15 cursor-pointer transition-all group shadow-inner relative z-10">
-                                                <div className="w-11 h-14 bg-black/50 rounded-lg overflow-hidden border border-white/5 shrink-0 shadow-md group-hover:shadow-accent/20 transition-all">
-                                                    <TopGameCover path={g.cover_image_path || (g as any).cover_path} />
-                                                </div>
-                                                <div className="flex-1 min-w-0">
-                                                    <p className="text-white text-xs font-bold truncate group-hover:text-accent transition-colors">{g.title}</p>
-                                                    <p className="text-white/40 text-[10px] font-semibold tracking-wide uppercase mt-1">{formatPlaytime(g.playtime_seconds)}</p>
-                                                </div>
+                                    ) : stats.topGames.map((g) => (
+                                        <div key={g.id} onClick={() => navigate('/library', { state: { gameId: g.id } })} className="flex items-center gap-4 bg-black/40 p-3 rounded-xl border border-white/5 hover:bg-white/[0.08] hover:border-white/15 cursor-pointer transition-all group shadow-inner">
+                                            <div className="w-11 h-14 bg-black/50 rounded-lg overflow-hidden border border-white/5 shrink-0 shadow-md">
+                                                <TopGameCover path={g.cover_image_path || (g as any).cover_path} />
                                             </div>
-                                        ))
-                                    )}
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-white text-xs font-bold truncate group-hover:text-accent transition-colors">{g.title}</p>
+                                                <p className="text-white/40 text-[10px] font-semibold tracking-wide uppercase mt-1">{formatPlaytime(g.playtime_seconds)}</p>
+                                            </div>
+                                        </div>
+                                    ))}
                                 </div>
                             </div>
 
+                            {/* Top Genres */}
                             <div className="p-8 shadow-2xl flex flex-col tech-card">
                                 <h3 className="text-sm font-black text-white uppercase tracking-widest mb-8 flex items-center gap-3 relative z-10">
                                     <Hexagon className="text-green-400" size={18} /> Top Genres
@@ -406,35 +301,31 @@ export function UserPage() {
                                             <BarChart3 size={32} className="mb-3 opacity-50" />
                                             <span className="text-[10px] font-black uppercase tracking-widest">No Data Recorded</span>
                                         </div>
-                                    ) : (
-                                        stats.topGenres.map(([genre, count], i) => {
-                                            const max = stats.topGenres[0][1];
-                                            const colors = ["bg-accent", "bg-purple-400", "bg-blue-400", "bg-green-400", "bg-yellow-400"];
-                                            return (
-                                                <div key={genre} className="space-y-2.5">
-                                                    <div className="flex justify-between items-end text-[10px] font-black tracking-widest uppercase">
-                                                        <span className="text-white/60 truncate pr-4">{genre}</span>
-                                                        <span className="text-white/80">{count}</span>
-                                                    </div>
-                                                    <div className="h-1.5 w-full bg-black/50 rounded-full overflow-hidden shadow-inner border border-white/[0.02] relative z-10">
-                                                        <motion.div
-                                                            className={cn("h-full rounded-full shadow-[0_0_10px_rgba(255,255,255,0.2)] diagonal-progress", colors[i] || "bg-white/20")}
-                                                            initial={{ width: 0 }}
-                                                            animate={{ width: `${(count / max) * 100}%` }}
-                                                            transition={{ duration: 1.2, delay: i * 0.15, ease: "easeOut" }}
-                                                        />
-                                                    </div>
+                                    ) : stats.topGenres.map(([genre, count], i) => {
+                                        const max = stats.topGenres[0][1];
+                                        const colors = ["bg-accent", "bg-purple-400", "bg-blue-400", "bg-green-400", "bg-yellow-400"];
+                                        return (
+                                            <div key={genre} className="space-y-2.5">
+                                                <div className="flex justify-between items-end text-[10px] font-black tracking-widest uppercase">
+                                                    <span className="text-white/60 truncate pr-4">{genre}</span>
+                                                    <span className="text-white/80">{count}</span>
                                                 </div>
-                                            );
-                                        })
-                                    )}
+                                                <div className="h-1.5 w-full bg-black/50 rounded-full overflow-hidden shadow-inner border border-white/[0.02]">
+                                                    <motion.div
+                                                        className={cn("h-full rounded-full", colors[i] || "bg-white/20")}
+                                                        initial={{ width: 0 }}
+                                                        animate={{ width: `${(count / max) * 100}%` }}
+                                                        transition={{ duration: 1.2, delay: i * 0.15, ease: "easeOut" }}
+                                                    />
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
                                 </div>
                             </div>
                         </div>
-
                     </div>
                 </div>
-
             </div>
         </div>
     );

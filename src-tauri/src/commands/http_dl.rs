@@ -621,15 +621,7 @@ pub async fn retry_http_download(
 }
 
 #[tauri::command]
-pub async fn resolve_premium_link(url: String) -> Result<(String, String), String> {
-    let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
-        .build()
-        .map_err(|e| e.to_string())?;
-
-    let res = client.get(&url).send().await.map_err(|e| e.to_string())?;
-    let html = res.text().await.map_err(|e| e.to_string())?;
-
+fn parse_fuckingfast_html(html: &str, url: &str) -> Result<(String, String), String> {
     let mut title = String::new();
     if let Some(start) = html.find("<meta name=\"title\" content=\"") {
         let content_start = start + 28;
@@ -642,35 +634,254 @@ pub async fn resolve_premium_link(url: String) -> Result<(String, String), Strin
             title = html[content_start..content_start + end].to_string();
         }
     }
-    
+
     title = title.replace(&['\\', '/', '*', '?', ':', '"', '<', '>', '|'][..], "");
     if title.is_empty() {
-        if let Some(last_seg) = url.split('/').last() {
-            title = last_seg.to_string();
+        if let Some(last_seg) = url.split('/').filter(|s| !s.is_empty()).last() {
+            title = urlencoding::decode(last_seg).unwrap_or(std::borrow::Cow::Borrowed(last_seg)).to_string();
+        }
+    }
+    if title.is_empty() {
+        title = "download.bin".to_string();
+    }
+
+    // Pattern 1: regex matching https://fuckingfast.co/dl/...
+    if let Ok(re) = regex::Regex::new(r#"https?://(?:[a-zA-Z0-9.-]*\.)?fuckingfast\.co/dl/[^\s"'\x22<>\)\\]+"#) {
+        if let Some(mat) = re.find(html) {
+            let dl_link = mat.as_str().trim_end_matches(&[';', ',', ')', '"', '\''][..]).to_string();
+            return Ok((title, dl_link));
         }
     }
 
-    let mut download_url = String::new();
+    // Fallback: check window.open in script chunk
     if let Some(func_start) = html.find("function download") {
         let chunk = &html[func_start..];
         if let Some(open_start) = chunk.find("window.open(\"") {
             let url_start = open_start + 13;
             if let Some(end) = chunk[url_start..].find('"') {
-                download_url = chunk[url_start..url_start + end].to_string();
+                return Ok((title, chunk[url_start..url_start + end].to_string()));
             }
         } else if let Some(open_start) = chunk.find("window.open('") {
             let url_start = open_start + 13;
             if let Some(end) = chunk[url_start..].find('\'') {
-                download_url = chunk[url_start..url_start + end].to_string();
+                return Ok((title, chunk[url_start..url_start + end].to_string()));
             }
         }
     }
 
-    if download_url.is_empty() {
-        return Err("Download URL not found in premium link".to_string());
+    // Pattern 2: any link with /dl/ inside script or HTML
+    if let Ok(re_generic) = regex::Regex::new(r#"https?://[^\s"'\x22<>]+/dl/[^\s"'\x22<>]+"#) {
+        if let Some(mat) = re_generic.find(html) {
+            let dl_link = mat.as_str().trim_end_matches(&[';', ',', ')', '"', '\''][..]).to_string();
+            return Ok((title, dl_link));
+        }
     }
 
-    Ok((title, download_url))
+    Err(format!("Download URL pattern not found on FuckingFast page (HTML size: {} bytes)", html.len()))
+}
+
+async fn resolve_fuckingfast_link(client: &reqwest::Client, url: &str) -> Result<(String, String), String> {
+    // 1. FAST-PATH: If URL is already a direct /dl/ link, return it directly!
+    if url.contains("/dl/") {
+        let clean_url = url.split('?').next().unwrap_or(url);
+        let mut title = String::new();
+        if let Some(last_seg) = clean_url.split('/').filter(|s| !s.is_empty()).last() {
+            title = urlencoding::decode(last_seg)
+                .unwrap_or(std::borrow::Cow::Borrowed(last_seg))
+                .to_string();
+        }
+        title = title.replace(&['\\', '/', '*', '?', ':', '"', '<', '>', '|'][..], "");
+        if title.is_empty() {
+            title = "download.bin".to_string();
+        }
+        return Ok((title, url.to_string()));
+    }
+
+    // 2. Fetch page HTML using modern browser headers
+    let res = client.get(url)
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+        .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8")
+        .header("Accept-Language", "en-US,en;q=0.9")
+        .header("Sec-Ch-Ua", "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"")
+        .header("Sec-Ch-Ua-Mobile", "?0")
+        .header("Sec-Ch-Ua-Platform", "\"Windows\"")
+        .header("Sec-Fetch-Dest", "document")
+        .header("Sec-Fetch-Mode", "navigate")
+        .header("Sec-Fetch-Site", "cross-site")
+        .header("Sec-Fetch-User", "?1")
+        .header("Upgrade-Insecure-Requests", "1")
+        .header("Referer", "https://fuckingfast.co/")
+        .send()
+        .await;
+
+    let res = match res {
+        Ok(r) => r,
+        Err(e) => return Err(format!("FuckingFast network error: {}", e)),
+    };
+
+    let status = res.status();
+    if !status.is_success() {
+        // Retry fallback with URL as Referer
+        if let Ok(retry_res) = client.get(url)
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+            .header("Referer", url)
+            .send()
+            .await
+        {
+            if retry_res.status().is_success() {
+                let html = retry_res.text().await.unwrap_or_default();
+                return parse_fuckingfast_html(&html, url);
+            }
+        }
+        return Err(format!("FuckingFast returned HTTP status {}", status));
+    }
+
+    let html = res.text().await.map_err(|e| format!("FuckingFast read error: {}", e))?;
+    parse_fuckingfast_html(&html, url)
+}
+
+async fn resolve_datanodes_link(_client: &reqwest::Client, url: &str) -> Result<(String, String), String> {
+    // 1. FAST-PATH: If URL is already a direct /dl/ link, return it directly!
+    if url.contains("/dl/") {
+        let clean_url = url.split('?').next().unwrap_or(url);
+        let mut title = String::new();
+        if let Some(last_seg) = clean_url.split('/').filter(|s| !s.is_empty()).last() {
+            title = urlencoding::decode(last_seg)
+                .unwrap_or(std::borrow::Cow::Borrowed(last_seg))
+                .to_string();
+        }
+        title = title.replace(&['\\', '/', '*', '?', ':', '"', '<', '>', '|'][..], "");
+        if title.is_empty() {
+            title = "download.bin".to_string();
+        }
+        return Ok((title, url.to_string()));
+    }
+
+    let no_redirect_client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    // URL format: https://datanodes.to/{file_code}/{file_name} or https://datanodes.to/{file_code}
+    let path = if let Some(idx) = url.find("datanodes.to/") {
+        &url[idx + 13..]
+    } else {
+        url
+    };
+    let path_segments: Vec<&str> = path.split('?').next().unwrap_or(path)
+        .split('/')
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    if path_segments.is_empty() {
+        return Err("Invalid DataNodes URL path".to_string());
+    }
+
+    let file_code = path_segments[0];
+    let raw_file_name = if path_segments.len() > 1 {
+        path_segments[path_segments.len() - 1]
+    } else {
+        file_code
+    };
+
+    let file_name = urlencoding::decode(raw_file_name)
+        .unwrap_or(std::borrow::Cow::Borrowed(raw_file_name))
+        .to_string();
+
+    let clean_title = file_name.replace(&['\\', '/', '*', '?', ':', '"', '<', '>', '|'][..], "");
+    let cookie_header = format!("lang=english; file_name={}; file_code={};", file_name, file_code);
+
+    let params = [
+        ("op", "download2"),
+        ("id", file_code),
+        ("rand", ""),
+        ("referer", "https://datanodes.to/download"),
+        ("method_free", "Free Download >>"),
+        ("method_premium", ""),
+        ("dl", "1"),
+    ];
+
+    let res = no_redirect_client.post("https://datanodes.to/download")
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .header("Cookie", cookie_header)
+        .header("Host", "datanodes.to")
+        .header("Origin", "https://datanodes.to")
+        .header("Referer", "https://datanodes.to/download")
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36")
+        .form(&params)
+        .send()
+        .await
+        .map_err(|e| format!("DataNodes request failed: {}", e))?;
+
+    // Check if 301/302 Redirect Location header is returned
+    if let Some(loc) = res.headers().get("location").or_else(|| res.headers().get("Location")) {
+        if let Ok(loc_str) = loc.to_str() {
+            let decoded_url = urlencoding::decode(loc_str)
+                .unwrap_or(std::borrow::Cow::Borrowed(loc_str))
+                .to_string();
+            let final_title = if clean_title.is_empty() { "download.bin".to_string() } else { clean_title };
+            return Ok((final_title, decoded_url));
+        }
+    }
+
+    let status = res.status();
+    let body_text = res.text().await.map_err(|e| format!("DataNodes body read error: {}", e))?;
+
+    // Check JSON response
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body_text) {
+        if let Some(dl_url_val) = json.get("url").and_then(|v| v.as_str()) {
+            let decoded_url = urlencoding::decode(dl_url_val)
+                .unwrap_or(std::borrow::Cow::Borrowed(dl_url_val))
+                .to_string();
+            let final_title = if clean_title.is_empty() { "download.bin".to_string() } else { clean_title };
+            return Ok((final_title, decoded_url));
+        }
+    }
+
+    // Fallback: check if body contains direct link URL
+    if let Ok(re) = regex::Regex::new(r#"https?://[^\s"'\x22<>]*(?:datanodes|dl)[^\s"'\x22<>]+"#) {
+        if let Some(mat) = re.find(&body_text) {
+            let dl_link = mat.as_str().trim_end_matches(&[';', ',', ')', '"', '\''][..]).to_string();
+            let decoded_url = urlencoding::decode(&dl_link)
+                .unwrap_or(std::borrow::Cow::Borrowed(&dl_link))
+                .to_string();
+            let final_title = if clean_title.is_empty() { "download.bin".to_string() } else { clean_title };
+            return Ok((final_title, decoded_url));
+        }
+    }
+
+    Err(format!("DataNodes returned HTTP {} but no download URL was found. Body: {}", status, body_text.chars().take(200).collect::<String>()))
+}
+
+fn resolve_direct_link(url: &str) -> (String, String) {
+    let clean_url = url.split('?').next().unwrap_or(url);
+    let mut title = String::new();
+    if let Some(last_seg) = clean_url.split('/').filter(|s| !s.is_empty()).last() {
+        title = urlencoding::decode(last_seg)
+            .unwrap_or(std::borrow::Cow::Borrowed(last_seg))
+            .to_string();
+    }
+    title = title.replace(&['\\', '/', '*', '?', ':', '"', '<', '>', '|'][..], "");
+    if title.is_empty() {
+        title = "download.bin".to_string();
+    }
+    (title, url.to_string())
+}
+
+#[tauri::command]
+pub async fn resolve_premium_link(url: String) -> Result<(String, String), String> {
+    let url_trimmed = url.trim();
+    let client = reqwest::Client::builder()
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    if url_trimmed.contains("fuckingfast.co") {
+        resolve_fuckingfast_link(&client, url_trimmed).await
+    } else if url_trimmed.contains("datanodes.to") {
+        resolve_datanodes_link(&client, url_trimmed).await
+    } else {
+        Ok(resolve_direct_link(url_trimmed))
+    }
 }
 
 #[tauri::command]

@@ -9,13 +9,11 @@ import { DirectoryScannerModal } from "../modals/DirectoryScannerModal";
 import { FolderBuilderModal } from "../modals/FolderBuilderModal";
 import { LibrarySettingsModal } from "../modals/LibrarySettingsModal";
 import { AppIdManagerModal } from "../modals/AppIdManagerModal";
-import { AuthModal } from "../modals/AuthModal";
 import { ResetAppModal } from "../modals/ResetAppModal";
 
 import { Sidebar } from "./Sidebar";
 import { TitleBar } from "./TitleBar";
 import { useLocalImage } from "../../hooks/useLocalImage";
-import { useProfileStore } from "../../store/profileStore";
 import { useEffect } from "react";
 import { smartAudio } from "../../services/SmartAudio";
 
@@ -28,19 +26,15 @@ function Modals() {
             <FolderBuilderModal />
             <LibrarySettingsModal />
             <AppIdManagerModal />
-            <AuthModal />
             <ResetAppModal />
-
         </>
     );
 }
 
 function GlobalBackground() {
     const currentBgPath = useUiStore(s => s.currentBg);
-
     const cleanPath = currentBgPath ? currentBgPath.split("?pos=")[0] : null;
     const { src: currentBg } = useLocalImage(cleanPath);
-
     const focalStr = currentBgPath?.includes("?pos=") ? currentBgPath.split("?pos=")[1].replace("-", " ") : "center";
 
     return (
@@ -78,14 +72,8 @@ function GlobalBackground() {
 
 export function AppLayout() {
     const settings = useSettingsStore(s => s.settings);
-    const initAuthListener = useProfileStore(s => s.initAuthListener);
     const location = useLocation();
 
-    useEffect(() => {
-        initAuthListener();
-    }, [initAuthListener]);
-
-    // ── Background Music Router ──
     useEffect(() => {
         if (!location.pathname.startsWith('/library')) {
             smartAudio.playGlobalBGM();
@@ -99,11 +87,7 @@ export function AppLayout() {
     return (
         <div style={customStyle} className="h-screen w-screen bg-background text-text-primary overflow-hidden selection:bg-accent/30 selection:text-white flex flex-col relative">
             <GlobalBackground />
-            
-            {/* Custom title bar — draggable strip at the top */}
             <TitleBar />
-
-            {/* Main content area below the title bar */}
             <div className="flex flex-row flex-1 min-h-0 relative overflow-hidden z-10">
                 <Toaster theme="dark" position="bottom-right" />
                 <Sidebar />

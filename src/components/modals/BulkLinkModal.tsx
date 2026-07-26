@@ -3,6 +3,7 @@ import { useHttpStore } from "../../store/httpStore";
 import { useSettingsStore } from "../../store/settingsStore";
 import { open } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
+import { toast } from "sonner";
 import { motion } from "framer-motion";
 import { X, Link as LinkIcon, Folder, DownloadCloud, FolderTree, Zap } from "lucide-react";
 
@@ -18,39 +19,26 @@ export function BulkLinkModal({ isOpen, onClose }: Props) {
     const [links, setLinks] = useState("");
     const [savePath, setSavePath] = useState<string | null>(null);
     const [folderName, setFolderName] = useState("");
-    const [category, setCategory] = useState<"direct" | "fuckingfast">("fuckingfast");
+    const [category, setCategory] = useState<"auto" | "direct">("auto");
     const [isResolving, setIsResolving] = useState(false);
+    const [resolveProgress, setResolveProgress] = useState("");
 
+    // Auto-derive folder name from first URL
     useEffect(() => {
-        if (!links.trim() || folderName.trim() !== "") return;
-        
+        if (!links.trim() || folderName.trim()) return;
         const firstUrl = links.split('\n').map(l => l.trim()).find(l => l.startsWith("http"));
         if (!firstUrl) return;
-
         try {
-            const urlObj = new URL(firstUrl);
-            let filename = urlObj.hash.replace('#', '') || urlObj.pathname.split('/').pop() || "";
-            
-            if (filename) {
-                // Decode URI component just in case
-                filename = decodeURIComponent(filename);
-                
-                // Strip common archive extensions
-                filename = filename.replace(/\.part\d+\.rar$/i, '');
-                filename = filename.replace(/\.zip$/i, '');
-                filename = filename.replace(/\.rar$/i, '');
-                
-                // Fitgirl specific replacements
-                filename = filename.replace(/_--_fitgirl-repacks\.site_--_/gi, ' [Fitgirl Repacks]');
-                
-                // Clean up underscores
-                filename = filename.replace(/_/g, ' ').trim();
-                
-                if (filename) {
-                    setFolderName(filename);
-                }
-            }
-        } catch(e) {}
+            const url = new URL(firstUrl);
+            let name = url.hash.replace('#', '') || url.pathname.split('/').pop() || "";
+            name = decodeURIComponent(name)
+                .replace(/\.part\d+\.rar$/i, '')
+                .replace(/\.(zip|rar)$/i, '')
+                .replace(/_--_fitgirl-repacks\.site_--_/gi, ' [Fitgirl Repacks]')
+                .replace(/_/g, ' ')
+                .trim();
+            if (name) setFolderName(name);
+        } catch { }
     }, [links]);
 
     const handlePickFolder = async () => {
@@ -60,48 +48,45 @@ export function BulkLinkModal({ isOpen, onClose }: Props) {
 
     const handleStart = async () => {
         const urlArray = links.split('\n').map(l => l.trim()).filter(l => l.startsWith("http"));
-        if (urlArray.length === 0) return;
+        if (!urlArray.length) return;
 
-        let finalUrls: string[] = [];
-        let finalPaths: string[] = [];
-        let baseDir = savePath || defaultPath;
+        const baseDir = savePath || defaultPath;
+        const folder = folderName.trim();
+        const finalUrls: string[] = [];
+        const finalPaths: string[] = [];
 
-        if (category === "fuckingfast") {
-            setIsResolving(true);
-            try {
-                for (let i = 0; i < urlArray.length; i++) {
+        setIsResolving(true);
+        try {
+            for (let i = 0; i < urlArray.length; i++) {
+                setResolveProgress(`Resolving ${i + 1} / ${urlArray.length}...`);
+                try {
                     const [title, dlUrl] = await invoke<[string, string]>("resolve_premium_link", { url: urlArray[i] });
                     finalUrls.push(dlUrl);
-                    let folderStr = folderName.trim();
-                    if (folderStr.length > 0) {
-                        finalPaths.push(`${baseDir}\\${folderStr}\\${title}`);
+                    finalPaths.push(folder ? `${baseDir}\\${folder}\\${title}` : `${baseDir}\\${title}`);
+                } catch (e) {
+                    if (category === "direct") {
+                        const title = urlArray[i].split('/').pop() || `file_${i}`;
+                        finalUrls.push(urlArray[i]);
+                        finalPaths.push(folder ? `${baseDir}\\${folder}\\${title}` : `${baseDir}\\${title}`);
                     } else {
-                        finalPaths.push(`${baseDir}\\${title}`);
+                        toast.error(`Failed to resolve link ${i + 1}`, { description: String(e) });
                     }
                 }
-            } catch (e) {
-                console.error("Failed to resolve FuckingFast links", e);
-                setIsResolving(false);
+            }
+
+            if (!finalUrls.length) {
+                toast.error("No links could be resolved. Check your URLs.");
                 return;
             }
-            setIsResolving(false);
-        } else {
-            for (let i = 0; i < urlArray.length; i++) {
-                finalUrls.push(urlArray[i]);
-                let folderStr = folderName.trim();
-                let title = urlArray[i].split('/').pop() || `file_${i}`;
-                if (folderStr.length > 0) {
-                    finalPaths.push(`${baseDir}\\${folderStr}\\${title}`);
-                } else {
-                    finalPaths.push(`${baseDir}\\${title}`);
-                }
-            }
-        }
 
-        await addDownloads(finalUrls, finalPaths, folderName.trim() || undefined);
-        setLinks("");
-        setFolderName("");
-        onClose();
+            await addDownloads(finalUrls, finalPaths, folder || undefined);
+            setLinks("");
+            setFolderName("");
+            onClose();
+        } finally {
+            setIsResolving(false);
+            setResolveProgress("");
+        }
     };
 
     if (!isOpen) return null;
@@ -121,7 +106,7 @@ export function BulkLinkModal({ isOpen, onClose }: Props) {
                         </div>
                         <div>
                             <h2 className="text-xl font-black text-white uppercase tracking-tight">Bulk Direct Downloader</h2>
-                            <p className="text-white/40 text-xs font-bold uppercase tracking-widest mt-1">Paste multiple URLs (One per line)</p>
+                            <p className="text-white/40 text-xs font-bold uppercase tracking-widest mt-1">Paste multiple URLs (one per line)</p>
                         </div>
                     </div>
                     <button onClick={onClose} className="p-2 text-white/30 hover:text-white hover:bg-white/5 rounded-xl transition-all">
@@ -130,25 +115,25 @@ export function BulkLinkModal({ isOpen, onClose }: Props) {
                 </div>
 
                 <div className="p-8 flex flex-col gap-6">
-                    <div className="flex gap-4 mb-2">
-                        <button 
-                            onClick={() => setCategory("fuckingfast")}
-                            className={`flex-1 py-3 px-4 rounded-xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-all ${category === 'fuckingfast' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/50' : 'bg-black/40 text-white/40 border border-white/5 hover:bg-white/5'}`}
-                        >
-                            <Zap size={16} /> FuckingFast Links
-                        </button>
-                        <button 
-                            onClick={() => setCategory("direct")}
-                            className={`flex-1 py-3 px-4 rounded-xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-all ${category === 'direct' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/50' : 'bg-black/40 text-white/40 border border-white/5 hover:bg-white/5'}`}
-                        >
-                            <LinkIcon size={16} /> Direct URLs
-                        </button>
+                    {/* Category toggle */}
+                    <div className="flex gap-4">
+                        {(["auto", "direct"] as const).map(cat => (
+                            <button
+                                key={cat}
+                                onClick={() => setCategory(cat)}
+                                className={`flex-1 py-3 px-4 rounded-xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-all ${category === cat ? 'bg-blue-500/20 text-blue-400 border border-blue-500/50' : 'bg-black/40 text-white/40 border border-white/5 hover:bg-white/5'}`}
+                            >
+                                {cat === "auto" ? <><Zap size={16} /> Auto-Resolver (FuckingFast / DataNodes)</> : <><LinkIcon size={16} /> Direct URLs</>}
+                            </button>
+                        ))}
                     </div>
 
                     <textarea
                         value={links}
                         onChange={(e) => setLinks(e.target.value)}
-                        placeholder={category === "fuckingfast" ? "https://fuckingfast.co/12345/game.part1.rar\nhttps://fuckingfast.co/67890/game.part2.rar" : "https://example.com/game.part1.rar\nhttps://example.com/game.part2.rar"}
+                        placeholder={category === "auto"
+                            ? "https://fuckingfast.co/12345/game.part1.rar\nhttps://datanodes.to/abc123xyz/game.part2.rar"
+                            : "https://example.com/game.part1.rar\nhttps://example.com/game.part2.rar"}
                         className="w-full h-40 bg-black/50 border border-white/10 rounded-2xl p-5 text-sm text-white font-mono outline-none focus:border-blue-500/50 shadow-inner resize-none custom-scrollbar"
                     />
 
@@ -187,13 +172,12 @@ export function BulkLinkModal({ isOpen, onClose }: Props) {
                     <button
                         disabled={!links.trim() || isResolving}
                         onClick={handleStart}
-                        className="px-8 py-3 rounded-xl text-[10px] uppercase tracking-widest font-black text-black bg-blue-400 hover:bg-blue-300 disabled:opacity-50 transition-all shadow-[0_0_20px_rgba(96,165,250,0.3)] flex items-center gap-2"
+                        className="px-8 py-3 rounded-xl text-[10px] uppercase tracking-widest font-black text-black bg-blue-400 hover:bg-blue-300 disabled:opacity-50 transition-all shadow-[0_0_20px_rgba(96,165,250,0.3)] flex items-center gap-2 min-w-[180px] justify-center"
                     >
-                        {isResolving ? (
-                            <>Resolving Links...</>
-                        ) : (
-                            <><LinkIcon size={14} /> Start Bulk Download</>
-                        )}
+                        {isResolving
+                            ? <span className="text-black">{resolveProgress || "Resolving..."}</span>
+                            : <><LinkIcon size={14} /> Start Bulk Download</>
+                        }
                     </button>
                 </div>
             </motion.div>

@@ -9,25 +9,18 @@ import { useProcessStore } from "./store/processStore";
 import { useGameStore } from "./store/gameStore";
 import { useSettingsStore } from "./store/settingsStore";
 import { useFolderStore } from "./store/folderStore";
-import { useDownloadsStore } from "./store/downloadsStore";
-import { useProfileStore } from "./store/profileStore";
 import { initOsIntegrationListeners } from "./store/osIntegrationStore";
 import { AppLayout } from "./components/layout/AppLayout";
-import { Discover } from "./Discover";
-import { Browse } from "./Browse";
 import Library from "./Library";
 import { Favorites } from "./Favorites";
 import { Downloads } from "./Downloads";
 import { Settings } from "./Settings";
 import { UserPage } from "./UserPage";
-import { Messages } from "./Messages";
 import { LaunchSplash } from "./LaunchSplash";
 import TrayMenu from "./pages/TrayMenu";
-import { TorrentFileModal } from "./components/modals/TorrentFileModal";
 import { FirstLaunchModal } from "./components/modals/FirstLaunchModal";
 import { useUiStore } from "./store/uiStore";
 import { launchGame } from "./services/gameService";
-import { useCloudSyncEngine } from "./lib/syncEngine";
 
 import { invoke } from "@tauri-apps/api/core";
 import { smartAudio } from "./services/SmartAudio";
@@ -43,7 +36,6 @@ function useTraySync() {
     const titles = Object.keys(runningGames)
       .map((id) => gamesById[id]?.title)
       .filter(Boolean) as string[];
-
     invoke("update_tray", { titles }).catch(console.error);
   }, [runningGames, gamesById]);
 }
@@ -54,7 +46,6 @@ function MainApp() {
   const setGameStopped = useProcessStore((s: any) => s.setGameStopped);
   const tickElapsed = useProcessStore((s: any) => s.tickElapsed);
   const updateGamePlaytime = useGameStore((s: any) => s.updateGamePlaytime);
-  const setTorrentModalOpen = useUiStore((s: any) => s.setTorrentModalOpen);
   const isFirstLaunch = useUiStore((s: any) => s.isFirstLaunch);
   const setFirstLaunch = useUiStore((s: any) => s.setFirstLaunch);
 
@@ -68,8 +59,6 @@ function MainApp() {
     smartAudio.setGameRunning(isPlaying);
   }, [runningGames]);
 
-  useCloudSyncEngine();
-
   // ── AUTO-SHORTCUT CREATOR ──
   useEffect(() => {
     const currentGames = Object.values(gamesById);
@@ -77,7 +66,6 @@ function MainApp() {
 
     if (prevGames.length > 0 && currentGames.length > prevGames.length) {
       const addedGames = currentGames.filter((g: any) => !prevGames.some((pg: any) => pg.id === g.id));
-
       addedGames.forEach((newGame: any) => {
         invoke("create_all_shortcuts", {
           gameId: newGame.id,
@@ -89,40 +77,24 @@ function MainApp() {
         }).catch(console.error);
       });
     }
-
     prevGamesRef.current = currentGames;
   }, [gamesById]);
 
   // ── Background Launch Handler ──
   const triggerBackgroundLaunch = async (gameId: string, attempts = 0) => {
     let game = useGameStore.getState().gamesById[gameId];
-
-    // Retry up to 10 times (5 seconds) if the DB is still hydrating
     if (!game && attempts < 10) {
       setTimeout(() => triggerBackgroundLaunch(gameId, attempts + 1), 500);
       return;
     }
-
-    if (!game) {
-      launchGame(gameId).catch(console.error);
-      return;
-    }
+    if (!game) { launchGame(gameId).catch(console.error); return; }
 
     new WebviewWindow(`splash-${Date.now()}`, {
       url: `/splash?title=${encodeURIComponent(game.title)}&cover=${encodeURIComponent(game.cover_image_path || '')}`,
-      width: 480,
-      height: 160,
-      transparent: true,
-      decorations: false,
-      alwaysOnTop: true,
-      center: true,
-      skipTaskbar: true,
-      resizable: false
+      width: 480, height: 160, transparent: true, decorations: false,
+      alwaysOnTop: true, center: true, skipTaskbar: true, resizable: false
     });
-
-    setTimeout(() => {
-      launchGame(gameId).catch(console.error);
-    }, 1000);
+    setTimeout(() => launchGame(gameId).catch(console.error), 1000);
   };
 
   useEffect(() => {
@@ -153,9 +125,9 @@ function MainApp() {
 
     const unlistenDeepLink = onOpenUrl((urls) => {
       for (const url of urls) {
-        if (url.startsWith("magnet:")) {
-          setTorrentModalOpen(true, url);
-          toast.success("Magnet link intercepted!", { description: url.slice(0, 50) + "..." });
+        if (url.startsWith("chiralauncher://launch/")) {
+          const id = url.replace("chiralauncher://launch/", "").replace(/\/$/, "");
+          triggerBackgroundLaunch(id);
         }
       }
     });
@@ -163,18 +135,16 @@ function MainApp() {
     const unlistenSingleInstance = listen<string[]>("single-instance", (event) => {
       const args = event.payload;
       for (const arg of args) {
-        if (arg.startsWith("magnet:")) {
-          setTorrentModalOpen(true, arg);
-          toast.success("Magnet link intercepted!", { description: arg.slice(0, 50) + "..." });
+        if (arg.startsWith("chiralauncher://launch/")) {
+          const id = arg.replace("chiralauncher://launch/", "").replace(/\/$/, "");
+          triggerBackgroundLaunch(id);
         }
       }
     });
 
     const ticker = setInterval(() => {
       const { running } = useProcessStore.getState();
-      if (Object.keys(running).length > 0) {
-        tickElapsed();
-      }
+      if (Object.keys(running).length > 0) tickElapsed();
     }, 1000);
 
     return () => {
@@ -196,18 +166,11 @@ function MainApp() {
     useGameStore.getState().fetchGames();
     useSettingsStore.getState().initialize();
     useFolderStore.getState().load();
-    useDownloadsStore.getState().startPolling();
 
-    useProfileStore.getState().fetchProfile();
-    useProfileStore.getState().initAuthListener();
-
-    // Initialize global event listeners here, ensuring they only run in MainApp
     initOsIntegrationListeners();
 
     invoke("is_first_launch")
-      .then((isFirst) => {
-        if (isFirst) setFirstLaunch(true);
-      })
+      .then((isFirst) => { if (isFirst) setFirstLaunch(true); })
       .catch(console.error);
   }, []);
 
@@ -216,38 +179,28 @@ function MainApp() {
       const target = e.target as HTMLElement;
       const isClickable = target.closest('button') || target.closest('[role="button"]') || target.closest('a');
       const shouldSkip = target.closest('[data-no-press-sound]');
-
-      if (isClickable && !shouldSkip) {
-        smartAudio.playUI('press-sound.mp3');
-      }
+      if (isClickable && !shouldSkip) smartAudio.playUI('press-sound.mp3');
     };
-
     document.addEventListener('click', handleGlobalClick, { capture: true });
     return () => document.removeEventListener('click', handleGlobalClick, { capture: true });
   }, []);
 
   useTraySync();
 
-  if (isFirstLaunch) {
-    return <FirstLaunchModal />;
-  }
+  if (isFirstLaunch) return <FirstLaunchModal />;
 
   return (
     <>
       <BrowserRouter>
         <GlobalContextMenu />
-        <TorrentFileModal />
         <Routes>
           <Route element={<AppLayout />}>
-            <Route path="/" element={<Navigate to="/discover" replace />} />
-            <Route path="/discover" element={<Discover />} />
-            <Route path="/browse" element={<Browse />} />
+            <Route path="/" element={<Navigate to="/library" replace />} />
             <Route path="/library" element={<Library />} />
             <Route path="/favorites" element={<Favorites />} />
             <Route path="/downloads" element={<Downloads />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/user" element={<UserPage />} />
-            <Route path="/messages/:targetId" element={<Messages />} />
           </Route>
         </Routes>
       </BrowserRouter>
@@ -257,18 +210,8 @@ function MainApp() {
 
 // ── Root entry — reads window label BEFORE any hooks ──
 export default function App() {
-  // Read synchronously so the correct component renders on the very first paint.
-  // This MUST stay outside MainApp so tray/splash windows never execute
-  // main-app hooks (listen, startPolling, useCloudSyncEngine, etc.)
   const label = window.__TAURI_INTERNALS__ ? getCurrentWindow().label : 'main';
-
-  if (label === 'tray') {
-    return <TrayMenu />;
-  }
-
-  if (label.startsWith('splash')) {
-    return <LaunchSplash />;
-  }
-
+  if (label === 'tray') return <TrayMenu />;
+  if (label.startsWith('splash')) return <LaunchSplash />;
   return <MainApp />;
 }

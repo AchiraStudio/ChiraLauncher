@@ -63,8 +63,8 @@ export const resolveOpenPath = (item: any, type: string): string | null => {
     return path ? path.replace(/\//g, "\\") : null;
 };
 
-/** Computes the completion/pause/error state for any download item (HTTP, Torrent, or virtual folder). */
-export function computeDownloadStatus(item: any, type: "torrent" | "http" | "folder") {
+/** Computes the completion/pause/error state for any download item (HTTP or virtual folder). */
+export function computeDownloadStatus(item: any, type: "http" | "folder") {
     const isFolder = type === "folder";
     return {
         isFolder,

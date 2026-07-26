@@ -1,7 +1,4 @@
 import { invoke } from "@tauri-apps/api/core";
-import { supabase } from "../lib/supabase";
-
-let unlistedTableExists = true;
 
 export interface SteamAppDetails {
     name: string;
@@ -38,28 +35,8 @@ export interface SteamReviewsResponse {
     reviews: SteamReview[];
 }
 
-/**
- * Resolves a potentially "unlisted" app ID to its canonical Steam App ID.
- * Checks Supabase's `unlisted_games_map` table for a mapping from Anadius/custom IDs.
- * Falls back to the original ID if the table doesn't exist or no mapping is found.
- */
+/** Simple passthrough — resolves the app ID as-is. */
 async function resolveAppId(appId: string): Promise<string> {
-    if (!unlistedTableExists) return appId;
-    try {
-        const { data: mapping, error } = await supabase
-            .from("unlisted_games_map")
-            .select("steam_app_id")
-            .eq("unlisted_id", appId)
-            .maybeSingle();
-
-        if (error && (error.code === '404' || error.message?.includes("404") || error.code === '42P01')) {
-            unlistedTableExists = false;
-        } else if (mapping?.steam_app_id) {
-            return mapping.steam_app_id.toString();
-        }
-    } catch {
-        unlistedTableExists = false;
-    }
     return appId;
 }
 
