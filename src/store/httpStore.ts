@@ -1,46 +1,66 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 
-interface HttpDownloadStatus {
+export interface DownloadItem {
     id: string;
-    name: string;
+    url: string;
+    original_url?: string | null;
+    save_path: string;
+    filename: string;
     folder_name: string | null;
-    state: "Initializing" | "Downloading" | "Paused" | "Finished" | "Error";
-    progress_percent: number;
+    status: "pending" | "queued" | "downloading" | "paused" | "completed" | "failed" | "cancelled";
     downloaded_bytes: number;
     total_bytes: number;
-    download_speed: number;
-    error_msg: string | null;
+    speed_bytes_per_sec: number;
+    error_message: string | null;
 }
 
-interface HttpDownloadsState {
-    downloads: HttpDownloadStatus[];
+export interface ResolvedLinkInfo {
+    title: string;
+    download_url: string;
+    file_size: number;
+}
+
+interface HttpStoreState {
+    downloads: DownloadItem[];
     fetchDownloads: () => Promise<void>;
-    addDownloads: (urls: string[], savePaths: string[], folderName?: string) => Promise<void>;
+    resolveLink: (url: string) => Promise<ResolvedLinkInfo>;
+    addDownloads: (urls: string[], savePaths: string[], folderName?: string, originalUrls?: string[]) => Promise<void>;
     pauseDownload: (id: string) => Promise<void>;
     resumeDownload: (id: string) => Promise<void>;
     cancelDownload: (id: string) => Promise<void>;
+    deleteDownload: (id: string, deleteFile: boolean) => Promise<void>;
+    retryDownload: (id: string) => Promise<void>;
     startPolling: () => void;
     stopPolling: () => void;
 }
 
 let pollingInterval: number | null = null;
 
-export const useHttpStore = create<HttpDownloadsState>((set, get) => ({
+export const useHttpStore = create<HttpStoreState>((set, get) => ({
     downloads: [],
 
     fetchDownloads: async () => {
         if (!window.__TAURI_INTERNALS__) return;
         try {
-            const data = await invoke<HttpDownloadStatus[]>("get_http_downloads");
+            const data = await invoke<DownloadItem[]>("get_http_downloads");
             set({ downloads: data });
         } catch (err) {
             console.error("Failed to fetch HTTP downloads:", err);
         }
     },
 
-    addDownloads: async (urls, savePaths, folderName) => {
-        await invoke("add_http_downloads", { urls, savePaths, folderName: folderName || null });
+    resolveLink: async (url: string) => {
+        return await invoke<ResolvedLinkInfo>("resolve_link", { url });
+    },
+
+    addDownloads: async (urls, savePaths, folderName, originalUrls) => {
+        await invoke("add_http_downloads", {
+            urls,
+            savePaths,
+            folderName: folderName || null,
+            originalUrls: originalUrls || null
+        });
         get().fetchDownloads();
     },
 
@@ -56,6 +76,16 @@ export const useHttpStore = create<HttpDownloadsState>((set, get) => ({
 
     cancelDownload: async (id) => {
         await invoke("cancel_http_download", { id });
+        get().fetchDownloads();
+    },
+
+    deleteDownload: async (id, deleteFile) => {
+        await invoke("delete_http_download", { id, deleteFile });
+        get().fetchDownloads();
+    },
+
+    retryDownload: async (id) => {
+        await invoke("retry_http_download", { id });
         get().fetchDownloads();
     },
 

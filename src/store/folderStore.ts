@@ -1,5 +1,4 @@
 import { create } from "zustand";
-import { v4 as uuidv4 } from "uuid";
 import { invoke } from "@tauri-apps/api/core";
 
 export interface Folder {
@@ -56,7 +55,7 @@ export const useFolderStore = create<FolderState>((set, get) => ({
 
     addCustomFolder: (folder) =>
         set((state) => ({
-            customFolders: [...state.customFolders, { ...folder, id: uuidv4(), gameIds: [] }],
+            customFolders: [...state.customFolders, { ...folder, id: crypto.randomUUID(), gameIds: [] }],
         })),
 
     removeCustomFolder: (id) =>

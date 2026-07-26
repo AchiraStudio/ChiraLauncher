@@ -28,8 +28,8 @@ function Tooltip({ children, label }: { children: React.ReactNode, label: string
 
 export function Sidebar() {
     const location = useLocation();
-    const { downloads: httpDownloads } = useHttpStore();
-    const activeDownloads = httpDownloads.filter(d => d.state !== "Finished" && d.state !== "Error").length;
+    const downloads = useHttpStore(s => s.downloads);
+    const activeDownloads = downloads.filter(d => d.status === "downloading" || d.status === "queued" || d.status === "pending").length;
 
     const { profile } = useProfileStore();
     const setAddGameModalOpen = useUiStore((s) => s.setAddGameModalOpen);
