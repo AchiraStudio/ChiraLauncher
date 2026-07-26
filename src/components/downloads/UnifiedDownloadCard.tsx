@@ -68,90 +68,77 @@ export function UnifiedDownloadCard({
         if (pathToOpen) await invoke("open_path_in_explorer", { path: pathToOpen }).catch(console.error);
     };
 
-    const accentColor = isError ? 'bg-red-500'
-        : isCompleted ? 'bg-green-500'
-        : isPaused ? 'bg-yellow-500'
+    const accentColor = isError ? 'bg-rose-500'
+        : isCompleted ? 'bg-emerald-500'
+        : isPaused ? 'bg-amber-500'
         : isQueued ? 'bg-amber-500'
         : isFolder ? 'bg-purple-500'
-        : 'bg-cyan-400';
-
-    const glowColor = isError ? 'shadow-[0_0_30px_rgba(239,68,68,0.3)]'
-        : isCompleted ? 'shadow-[0_0_30px_rgba(34,197,94,0.3)]'
-        : isPaused ? 'shadow-[0_0_30px_rgba(234,179,8,0.2)]'
-        : isQueued ? 'shadow-[0_0_30px_rgba(245,158,11,0.2)]'
-        : isFolder ? 'shadow-[0_0_40px_rgba(168,85,247,0.4)]'
-        : 'shadow-[0_0_40px_rgba(34,211,238,0.4)]';
+        : 'bg-accent';
 
     return (
-        <motion.div
-            initial={{ opacity: 0, scale: 0.98, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            transition={{ duration: 0.4, ease: "easeOut", delay: index * 0.05 }}
-            onContextMenu={(e) => onContextMenu && onContextMenu(e, item, type)}
-            className="group relative rounded-[2rem] bg-black/40 backdrop-blur-3xl border border-white/10 hover:bg-black/60 hover:border-white/20 transition-all duration-500 p-8 overflow-hidden shadow-2xl"
-        >
-            {/* Dynamic Background Glow */}
-            <div className={cn(
-                "absolute -right-24 -top-24 w-64 h-64 blur-[100px] opacity-10 group-hover:opacity-30 transition-opacity duration-700 pointer-events-none rounded-full",
-                accentColor
-            )} />
 
-            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-8 relative z-10">
+        <motion.div
+            initial={{ opacity: 0, scale: 0.98, y: 12 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            transition={{ duration: 0.3, ease: "easeOut", delay: index * 0.04 }}
+            onContextMenu={(e) => onContextMenu && onContextMenu(e, item, type)}
+            className="group relative rounded-2xl bg-surface/60 backdrop-blur-md border border-white/10 hover:border-white/20 transition-all duration-300 p-6 overflow-hidden shadow-xl"
+        >
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 relative z-10">
                 {/* Left Section: Icon & Identity */}
-                <div className="flex items-center gap-6 flex-1 min-w-0">
+                <div className="flex items-center gap-5 flex-1 min-w-0">
                     <div className={cn(
-                        "w-16 h-16 rounded-2xl flex items-center justify-center shrink-0 border border-white/10 transition-all duration-500",
-                        glowColor, "bg-white/5 backdrop-blur-md group-hover:scale-105"
+                        "w-12 h-12 rounded-xl flex items-center justify-center shrink-0 border border-white/10 transition-all duration-300 bg-white/[0.04]"
                     )}>
-                        {isFolder ? <FolderTree size={28} className="text-purple-400" />
-                            : <Globe size={28} className="text-cyan-400" />}
+                        {isFolder ? <FolderTree size={22} className="text-purple-400" />
+                            : <Globe size={22} className="text-accent" />}
                     </div>
 
                     <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-3 mb-2">
-                            {isFolder && <span className="px-3 py-1 rounded-lg bg-purple-500/10 border border-purple-500/20 text-purple-400 text-[10px] font-black uppercase tracking-[0.2em]">Batch Folder</span>}
+                        <div className="flex flex-wrap items-center gap-2 mb-1.5">
+                            {isFolder && <span className="editorial-badge border-purple-500/30 text-purple-300 bg-purple-500/10">Batch Folder</span>}
                             {!isFolder && item.folder_name && (
-                                <span className="px-3 py-1 rounded-lg bg-white/5 border border-white/10 text-white/60 text-[10px] font-black uppercase tracking-[0.2em] flex items-center gap-1.5">
-                                    <FolderTree size={10} /> {item.folder_name}
+                                <span className="editorial-badge flex items-center gap-1">
+                                    <FolderTree size={9} /> {item.folder_name}
                                 </span>
                             )}
-                            {!isFolder && <span className="px-3 py-1 rounded-lg bg-cyan-400/10 border border-cyan-400/20 text-cyan-400 text-[10px] font-black uppercase tracking-[0.2em]">Direct HTTP</span>}
+                            {!isFolder && <span className="editorial-badge border-accent/30 text-accent bg-accent/10">Direct HTTP</span>}
                         </div>
 
-                        <h3 className="font-black text-white text-2xl truncate tracking-tight drop-shadow-md mb-2">{displayName}</h3>
+                        <h3 className="font-bold text-white text-lg truncate tracking-tight mb-1">{displayName}</h3>
 
-                        <div className="flex items-center gap-4 text-white/50 text-[11px] font-bold uppercase tracking-widest">
-                            <span className="flex items-center gap-2 bg-white/5 px-3 py-1 rounded-lg border border-white/5">
-                                <ArrowDownToLine size={14} className="text-white/30" />
-                                <span className="text-white">{formatBytes(item.downloaded_bytes)}</span> / {formatBytes(item.total_bytes)}
+                        <div className="flex flex-wrap items-center gap-3 font-mono text-[11px] text-white/50">
+                            <span className="flex items-center gap-1.5 bg-white/[0.04] px-2.5 py-0.5 rounded border border-white/10">
+                                <ArrowDownToLine size={12} className="text-white/40" />
+                                <span className="text-white/90">{formatBytes(item.downloaded_bytes)}</span> / {formatBytes(item.total_bytes)}
                             </span>
 
                             {isFolder && (
-                                <span className="flex items-center gap-2 bg-white/5 px-3 py-1 rounded-lg border border-white/5">
-                                    <Layers size={14} className="text-white/30" />
-                                    <span className="text-white">{item.files.length}</span> Files
+                                <span className="flex items-center gap-1.5 bg-white/[0.04] px-2.5 py-0.5 rounded border border-white/10">
+                                    <Layers size={12} className="text-white/40" />
+                                    <span className="text-white/90">{item.files.length}</span> Files
                                 </span>
                             )}
 
                             {isError ? (
-                                <span className="flex items-center gap-2 text-red-400 bg-red-500/10 px-3 py-1 rounded-lg border border-red-500/20">
-                                    <AlertCircle size={14} /> {isFolder ? "Check files" : item.error_message || item.error_msg || "Error"}
+                                <span className="flex items-center gap-1.5 text-rose-400 bg-rose-500/10 px-2.5 py-0.5 rounded border border-rose-500/20">
+                                    <AlertCircle size={12} /> {isFolder ? "Check files" : item.error_message || item.error_msg || "Error"}
                                 </span>
                             ) : isCompleted ? (
-                                <span className="flex items-center gap-2 text-green-400 bg-green-500/10 px-3 py-1 rounded-lg border border-green-500/20">
-                                    <CheckCircle2 size={14} /> Completed
+                                <span className="flex items-center gap-1.5 text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded border border-emerald-500/20">
+                                    <CheckCircle2 size={12} /> Completed
                                 </span>
                             ) : isPaused ? (
-                                <span className="flex items-center gap-2 text-yellow-400 bg-yellow-500/10 px-3 py-1 rounded-lg border border-yellow-500/20">
-                                    <Pause size={14} /> Paused
+                                <span className="flex items-center gap-1.5 text-amber-400 bg-amber-500/10 px-2.5 py-0.5 rounded border border-amber-500/20">
+                                    <Pause size={12} /> Paused
                                 </span>
                             ) : isQueued ? (
-                                <span className="flex items-center gap-2 text-amber-400 bg-amber-500/10 px-3 py-1 rounded-lg border border-amber-500/20">
-                                    <Clock size={14} /> Queued
+                                <span className="flex items-center gap-1.5 text-amber-400 bg-amber-500/10 px-2.5 py-0.5 rounded border border-amber-500/20">
+                                    <Clock size={12} /> Queued
                                 </span>
                             ) : (
-                                <span className="flex items-center gap-2 text-accent animate-pulse bg-accent/10 px-3 py-1 rounded-lg border border-accent/20">
-                                    <Activity size={14} /> {statusText}
+                                <span className="flex items-center gap-1.5 text-accent bg-accent/10 px-2.5 py-0.5 rounded border border-accent/20">
+                                    <Activity size={12} /> {statusText}
                                 </span>
                             )}
                         </div>
@@ -159,86 +146,82 @@ export function UnifiedDownloadCard({
                 </div>
 
                 {/* Right Section: Action Controls */}
-                <div className="flex items-center gap-3 shrink-0">
+                <div className="flex items-center gap-2 shrink-0">
                     {isFolder && onOpenFolder && (
                         <button
                             onClick={(e) => { e.stopPropagation(); onOpenFolder(item); }}
-                            className="px-5 h-14 rounded-2xl bg-purple-500/15 hover:bg-purple-500/30 border border-purple-500/30 hover:border-purple-400/50 text-purple-300 hover:text-white font-black text-xs uppercase tracking-widest transition-all flex items-center gap-3 shadow-lg hover:shadow-xl active:scale-95"
+                            className="px-4 h-10 rounded-xl bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/30 text-purple-300 font-mono text-xs uppercase tracking-wider transition-all flex items-center gap-2 active:scale-95"
                         >
-                            <FolderTree size={18} /> View Files
+                            <FolderTree size={15} /> Files
                         </button>
                     )}
 
                     {(isCompleted || isFolder) && (
-                        <button onClick={handleOpenFolder} className="w-14 h-14 rounded-2xl bg-white/5 hover:bg-white/15 border border-white/10 flex items-center justify-center text-white/50 hover:text-white transition-all shadow-lg active:scale-95" title="Open in Explorer">
-                            <FolderOpen size={20} />
+                        <button onClick={handleOpenFolder} className="w-10 h-10 rounded-xl bg-white/[0.04] hover:bg-white/10 border border-white/10 flex items-center justify-center text-white/70 hover:text-white transition-all active:scale-95" title="Open in Explorer">
+                            <FolderOpen size={16} />
                         </button>
                     )}
 
                     {isError && (
-                        <button onClick={handleRetry} className="w-14 h-14 rounded-2xl bg-cyan-400/20 hover:bg-cyan-400 text-cyan-400 hover:text-black transition-all border border-cyan-400/30 flex items-center justify-center shadow-lg active:scale-95" title="Retry Download">
-                            <RotateCcw size={20} />
+                        <button onClick={handleRetry} className="w-10 h-10 rounded-xl bg-accent/20 hover:bg-accent text-accent hover:text-white transition-all border border-accent/30 flex items-center justify-center active:scale-95" title="Retry Download">
+                            <RotateCcw size={16} />
                         </button>
                     )}
 
                     {!isCompleted && !isError && !isQueued && (
                         <button
                             onClick={isPaused ? handleResume : handlePause}
-                            className="px-6 h-14 rounded-2xl bg-white/5 hover:bg-white/15 border border-white/10 text-white font-black text-xs uppercase tracking-widest transition-all flex items-center gap-3 shadow-lg active:scale-95"
+                            className="px-4 h-10 rounded-xl bg-white/[0.04] hover:bg-white/10 border border-white/10 text-white font-mono text-xs uppercase tracking-wider transition-all flex items-center gap-2 active:scale-95"
                         >
-                            {isPaused ? <><Play size={18} fill="currentColor" /> Resume</> : <><Pause size={18} fill="currentColor" /> Pause</>}
+                            {isPaused ? <><Play size={14} fill="currentColor" /> Resume</> : <><Pause size={14} fill="currentColor" /> Pause</>}
                         </button>
                     )}
 
                     <button
                         onClick={isError || isCompleted ? handleDelete : handleCancel}
                         className={cn(
-                            "w-14 h-14 rounded-2xl transition-all border flex items-center justify-center shadow-lg active:scale-95",
+                            "w-10 h-10 rounded-xl transition-all border flex items-center justify-center active:scale-95",
                             isError || isCompleted
-                                ? "bg-red-500/10 border-red-500/20 text-red-400 hover:bg-red-500 hover:text-white"
-                                : "bg-white/5 hover:bg-red-500/20 border-white/10 text-white/40 hover:text-red-500 hover:border-red-500/30"
+                                ? "bg-rose-500/10 border-rose-500/20 text-rose-400 hover:bg-rose-500 hover:text-white"
+                                : "bg-white/[0.04] hover:bg-rose-500/20 border-white/10 text-white/50 hover:text-rose-400 hover:border-rose-500/30"
                         )}
                         title={isError || isCompleted ? "Remove Entry" : "Cancel Download"}
                     >
-                        {isError || isCompleted ? <Trash2 size={20} /> : <X size={20} />}
+                        {isError || isCompleted ? <Trash2 size={16} /> : <X size={16} />}
                     </button>
                 </div>
             </div>
 
             {/* Bottom: Progress & Stats */}
-            <div className="mt-8 pt-8 border-t border-white/5 relative z-10">
-                <div className="flex flex-col lg:flex-row items-center justify-between gap-6">
-                    <div className="flex-1 w-full max-w-2xl">
-                        <div className="flex items-end justify-between mb-3">
-                            <span className="text-4xl font-black text-white tracking-tighter drop-shadow-md">
-                                {progress.toFixed(1)}<span className="text-xl text-white/50">%</span>
+            <div className="mt-5 pt-4 border-t border-white/[0.06] relative z-10">
+                <div className="flex flex-col lg:flex-row items-center justify-between gap-4">
+                    <div className="flex-1 w-full">
+                        <div className="flex items-end justify-between mb-2">
+                            <span className="font-mono text-2xl font-bold text-white tracking-tight">
+                                {progress.toFixed(1)}<span className="text-sm text-white/40">%</span>
                             </span>
                             {!isCompleted && !isPaused && !isError && downloadSpeed > 0 && (
-                                <span className="text-[11px] font-black text-white/50 uppercase tracking-[0.2em] flex items-center gap-2 mb-1">
-                                    <Clock size={12} className="text-cyan-400" /> {formatETA(bytesRemaining, downloadSpeed)} REMAINING
+                                <span className="font-mono text-[10px] text-white/50 uppercase tracking-widest flex items-center gap-1.5">
+                                    <Clock size={11} className="text-accent" /> {formatETA(bytesRemaining, downloadSpeed)} REMAINING
                                 </span>
                             )}
                         </div>
-                        <div className="h-3 w-full bg-white/5 rounded-full overflow-hidden border border-white/5 shadow-inner">
+                        <div className="h-2 w-full bg-black/40 rounded-full overflow-hidden border border-white/10">
                             <motion.div
                                 initial={{ width: 0 }}
                                 animate={{ width: `${Math.max(0, Math.min(100, progress))}%` }}
-                                transition={{ duration: 1.2, ease: "easeOut" }}
-                                className={cn("h-full rounded-full transition-colors duration-700 relative diagonal-progress", accentColor)}
-                            >
-                                {!isCompleted && !isPaused && !isError && (
-                                    <div className="absolute inset-0 bg-white/20 animate-pulse" />
-                                )}
-                            </motion.div>
+                                transition={{ duration: 0.8, ease: "easeOut" }}
+                                className={cn("h-full rounded-full transition-colors duration-500 relative diagonal-progress", accentColor)}
+                            />
                         </div>
                     </div>
 
                     {!isCompleted && !isError && (
-                        <div className="flex items-center gap-4 w-full lg:w-auto overflow-x-auto hide-scroll">
-                            <div className="flex flex-col bg-black/40 backdrop-blur-md border border-white/5 px-6 py-3 rounded-2xl min-w-[120px]">
-                                <span className="text-[9px] font-black text-white/30 uppercase tracking-[0.2em] mb-1">Download</span>
-                                <div className="text-sm font-bold text-white flex items-center gap-2">
-                                    <ArrowDownToLine size={14} className="text-cyan-400" /> {formatBytes(downloadSpeed)}/s
+                        <div className="flex items-center gap-3 w-full lg:w-auto shrink-0">
+                            <div className="flex flex-col bg-black/30 border border-white/10 px-4 py-2 rounded-xl">
+                                <span className="font-mono text-[9px] text-white/40 uppercase tracking-widest mb-0.5">Speed</span>
+                                <div className="font-mono text-xs font-semibold text-white flex items-center gap-1.5">
+                                    <ArrowDownToLine size={12} className="text-accent" /> {formatBytes(downloadSpeed)}/s
                                 </div>
                             </div>
                         </div>
@@ -248,3 +231,4 @@ export function UnifiedDownloadCard({
         </motion.div>
     );
 }
+

@@ -1,10 +1,13 @@
 import { useState, useEffect, useRef } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Minus, Square, X } from "lucide-react";
+import { Minus, Square, X, Terminal } from "lucide-react";
 import { motion } from "framer-motion";
+import { useDevConsoleStore } from "../../store/devConsoleStore";
 
 export function TitleBar() {
     const [isMaximized, setIsMaximized] = useState(false);
+    const toggleDevConsole = useDevConsoleStore(s => s.toggle);
+    const showDevButtons = useDevConsoleStore(s => s.showDevButtons);
     const appWindow = getCurrentWindow();
 
     // Used to detect double-click vs single-click on the drag region
@@ -98,6 +101,22 @@ export function TitleBar() {
 
             {/* Windows Control Buttons */}
             <div className="flex items-stretch h-full shrink-0">
+                {/* DevConsole Toggle (Hidden by default until shortcut Alt+Shift+F2 is pressed) */}
+                {showDevButtons && (
+                    <button
+                        onClick={toggleDevConsole}
+                        className="group w-10 h-full flex items-center justify-center text-white/40 hover:text-accent hover:bg-white/[0.07] transition-all duration-150 focus:outline-none"
+                        aria-label="Developer Console"
+                        title="Developer Console (Ctrl+Shift+D or `)"
+                    >
+                        <Terminal
+                            size={13}
+                            strokeWidth={2}
+                            className="group-hover:scale-110 transition-transform"
+                        />
+                    </button>
+                )}
+
                 {/* Minimize */}
                 <button
                     onClick={handleMinimize}

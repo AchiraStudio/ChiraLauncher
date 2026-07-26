@@ -44,7 +44,7 @@ export function GameTitle({ game }: { game: Game }) {
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: -10 }}
                         transition={{ duration: 0.4 }}
-                        className="text-6xl lg:text-7xl font-black tracking-tighter text-white leading-[0.9] max-w-4xl drop-shadow-[0_4px_40px_rgba(0,0,0,0.8)]"
+                        className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-black tracking-tight text-white leading-[1.05] max-w-full break-words drop-shadow-[0_4px_40px_rgba(0,0,0,0.8)]"
                     >
                         {game.title}
                     </motion.h1>

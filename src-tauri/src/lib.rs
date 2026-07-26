@@ -408,6 +408,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::greet,
+            commands::toggle_devtools,
             commands::game::get_all_games,
             commands::game::add_game,
             commands::game::delete_game,

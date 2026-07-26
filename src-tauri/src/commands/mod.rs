@@ -13,3 +13,12 @@ pub mod scanner;
 pub fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
+
+#[tauri::command]
+pub fn toggle_devtools(window: tauri::WebviewWindow) {
+    if window.is_devtools_open() {
+        window.close_devtools();
+    } else {
+        window.open_devtools();
+    }
+}

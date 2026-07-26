@@ -10,6 +10,7 @@ import { FolderBuilderModal } from "../modals/FolderBuilderModal";
 import { LibrarySettingsModal } from "../modals/LibrarySettingsModal";
 import { AppIdManagerModal } from "../modals/AppIdManagerModal";
 import { ResetAppModal } from "../modals/ResetAppModal";
+import { DevConsoleModal } from "../modals/DevConsoleModal";
 
 import { Sidebar } from "./Sidebar";
 import { TitleBar } from "./TitleBar";
@@ -27,6 +28,7 @@ function Modals() {
             <LibrarySettingsModal />
             <AppIdManagerModal />
             <ResetAppModal />
+            <DevConsoleModal />
         </>
     );
 }
