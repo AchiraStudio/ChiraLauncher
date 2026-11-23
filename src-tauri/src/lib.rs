@@ -12,6 +12,7 @@ mod state;
 pub mod stats;
 pub mod steamworks_sync;
 mod tray;
+pub mod updater;
 
 use crate::state::{AppState, DbWrite};
 use std::collections::HashMap;
@@ -89,6 +90,8 @@ pub fn run() {
             let _ = app.emit("single-instance", &args);
         }))
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
@@ -125,6 +128,8 @@ pub fn run() {
             let http_engine = std::sync::Arc::new(
                 commands::http_dl::HttpDownloadEngine::new(db_path.clone(), max_concurrent)
             );
+
+            http_engine.set_speed_limit_kbps(app_settings.max_download_speed_kbps);
 
             let args: Vec<String> = std::env::args().collect();
             
@@ -224,6 +229,7 @@ pub fn run() {
 
                     let active_watchers: tauri::State<ActiveWatchers> =
                         app_handle_for_watchers.state();
+                    let startup_sync_permits = Arc::new(tokio::sync::Semaphore::new(3));
 
                     for game in games {
                         let has_manual_path = game
@@ -240,30 +246,40 @@ pub fn run() {
                                 .db_tx
                                 .clone();
 
+                            let permits = startup_sync_permits.clone();
                             tauri::async_runtime::spawn(async move {
-                                let db_app_id = game.steam_app_id.map(|id| id.to_string());
-                                let crack_type: Option<crate::achievements::CrackType> = game
-                                    .crack_type
-                                    .as_deref()
-                                    .and_then(|s| serde_json::from_str(&format!("\"{}\"", s)).ok());
-
-                                let default_roots = crate::settings::default_scan_roots();
-                                let opts = crate::achievements::SyncOptions {
-                                    crack_type,
-                                    known_app_id: db_app_id.as_deref(),
-                                    manual_metadata_path: None,
-                                    manual_save_path: None,
-                                    scan_roots: &default_roots,
-                                    steam_api_key: None,
-                                    db_tx: Some(&db_tx),
+                                // The scan is blocking filesystem work. Previously every game was scanned at the
+                                // same time on the async worker threads, starving IPC and the process monitor at
+                                // startup. Now a few at a time, on the blocking pool.
+                                let Ok(_permit) = permits.acquire_owned().await else {
+                                    return;
                                 };
+                                let _ = tauri::async_runtime::spawn_blocking(move || {
+                                    let db_app_id = game.steam_app_id.map(|id| id.to_string());
+                                    let crack_type: Option<crate::achievements::CrackType> = game
+                                        .crack_type
+                                        .as_deref()
+                                        .and_then(|s| serde_json::from_str(&format!("\"{}\"", s)).ok());
 
-                                crate::achievements::sync_achievements(
-                                    &game_id,
-                                    &install_dir,
-                                    db_app_id.as_deref(),
-                                    &opts,
-                                );
+                                    let default_roots = crate::settings::default_scan_roots();
+                                    let opts = crate::achievements::SyncOptions {
+                                        crack_type,
+                                        known_app_id: db_app_id.as_deref(),
+                                        manual_metadata_path: None,
+                                        manual_save_path: None,
+                                        scan_roots: &default_roots,
+                                        steam_api_key: None,
+                                        db_tx: Some(&db_tx),
+                                    };
+
+                                    crate::achievements::sync_achievements(
+                                        &game_id,
+                                        &install_dir,
+                                        db_app_id.as_deref(),
+                                        &opts,
+                                    );
+                                })
+                                .await;
                             });
                             continue;
                         }
@@ -399,14 +415,35 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if !crate::APP_EXITING.load(Ordering::SeqCst) {
+                if crate::APP_EXITING.load(Ordering::SeqCst) {
+                    return;
+                }
+                // Launch-splash windows are created per shortcut launch and must really close.
+                // They used to be hidden instead, leaking a webview process on every launch.
+                if window.label().starts_with("splash") {
+                    return;
+                }
+                // Only the main window honours the "close hides to tray" setting. The tray and overlay
+                // windows are long-lived and are always hidden, never destroyed.
+                let hide_to_tray = window.label() != "main"
+                    || window
+                        .app_handle()
+                        .try_state::<AppState>()
+                        .and_then(|state| settings::get_settings(&state.read_pool).ok())
+                        .map(|s| s.minimize_to_tray)
+                        .unwrap_or(true);
+                if hide_to_tray {
                     let _ = window.hide();
                     api.prevent_close();
+                } else {
+                    crate::APP_EXITING.store(true, Ordering::SeqCst);
+                    window.app_handle().exit(0);
                 }
             }
         })
         .invoke_handler(tauri::generate_handler![
             commands::greet,
+            updater::updater_configured,
             commands::toggle_devtools,
             commands::game::get_all_games,
             commands::game::add_game,

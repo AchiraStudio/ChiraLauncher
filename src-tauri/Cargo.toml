@@ -1,6 +1,6 @@
 [package]
 name = "chiralauncher"
-version = "0.1.7"
+version = "0.2.0"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -101,6 +101,9 @@ libloading = "0.9.0"
 # Linux/macOS: reads /proc/{pid}/stat or sysctl
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+# In-app updates: signed, verified installers pulled from GitHub Releases
+tauri-plugin-updater = "~2.12.0"
+tauri-plugin-process = "~2.3.1"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.52", features = ["Win32_System_Threading", "Win32_Security", "Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader", "Win32_System_Registry"] }

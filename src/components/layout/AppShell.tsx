@@ -1,4 +1,4 @@
-import { Suspense, lazy } from "react";
+import { Suspense, lazy, useEffect } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Toaster } from "sonner";
 import { useUiStore } from "../../store/uiStore";
@@ -11,6 +11,7 @@ import { ContextMenuRoot } from "../ui/ContextMenu";
 import { ConfirmHost } from "../ui/ConfirmHost";
 import { UpdateDialog } from "../update/UpdateDialog";
 import { Spinner } from "../ui/Spinner";
+import { smartAudio } from "../../services/SmartAudio";
 
 // Heavy, rarely-opened dialogs are code-split: they aren't parsed until first use.
 const AddGameModal = lazy(() => import("../modals/AddGameModal").then((m) => ({ default: m.AddGameModal })));
@@ -41,6 +42,11 @@ export function AppShell() {
     const navigate = useNavigate();
     const setPaletteOpen = useUiStore((s) => s.setPaletteOpen);
     const toggleSidebar = useUiStore((s) => s.toggleSidebar);
+
+    // Launcher music plays everywhere except on a game page, which plays that game's own music (if it has any)
+    useEffect(() => {
+        if (!location.pathname.startsWith("/game/")) void smartAudio.playGlobalBGM();
+    }, [location.pathname]);
 
     useHotkeys({
         "mod+k": (e) => { e.preventDefault(); setPaletteOpen(true); },

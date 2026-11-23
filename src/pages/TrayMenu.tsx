@@ -6,6 +6,7 @@ import { Play, Square, Maximize, Power, Gamepad2 } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { cn } from "../lib/utils";
+import { on } from "../lib/tauri";
 
 export default function TrayMenu() {
     const gamesById = useGameStore(s => s.gamesById);
@@ -23,6 +24,17 @@ export default function TrayMenu() {
         // Fresh data poll so the list is always 100% accurate when opened
         fetchGames();
     }, [fetchGames]);
+
+    // The tray is its own webview with its own stores, so it has to listen for process events itself;
+    // before this it never learned which games were running.
+    useEffect(() => {
+        const offs = [
+            on<{ game_id: string; source: "Launcher" | "AutoAttach" }>("game-started", (p) =>
+                useProcessStore.getState().setGameStarted(p.game_id, { gameId: p.game_id, source: p.source, startTime: Math.floor(Date.now() / 1000) })),
+            on<{ game_id: string }>("game-stopped", (p) => useProcessStore.getState().setGameStopped(p.game_id)),
+        ];
+        return () => offs.forEach((off) => off());
+    }, []);
 
     const allGames = Object.values(gamesById);
     const activeGames = Object.values(runningGames);

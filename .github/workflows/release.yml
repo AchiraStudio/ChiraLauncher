@@ -1,0 +1,51 @@
+# Builds a signed Windows installer and publishes it (plus the updater manifest latest.json) to a GitHub Release.
+#
+#   git tag v0.2.0 && git push origin v0.2.0
+#
+# One-time setup (see README > "Releasing updates"):
+#   1. npm run updater:keygen                      (writes the public key into tauri.conf.json, commit that)
+#   2. Add repository secrets:
+#        TAURI_SIGNING_PRIVATE_KEY           the contents of the private key file it generated
+#        TAURI_SIGNING_PRIVATE_KEY_PASSWORD  the password you chose (leave empty if none)
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: ChiraLauncher ${{ github.ref_name }}
+          releaseBody: See CHANGELOG.md for what's new in this version.
+          releaseDraft: false
+          prerelease: false
+          # Produce the signed installer + latest.json that the in-app updater reads
+          includeUpdaterJson: true
+          args: --bundles nsis --config {\"bundle\":{\"createUpdaterArtifacts\":true}}

@@ -41,7 +41,11 @@ pub async fn get_app_settings(state: State<'_, AppState>) -> Result<AppSettings,
 pub async fn update_app_settings(
     settings: AppSettings,
     state: State<'_, AppState>,
+    downloads: State<'_, std::sync::Arc<crate::commands::http_dl::HttpDownloadEngine>>,
 ) -> Result<(), String> {
+    // Apply the download speed limit immediately (it is otherwise only read from the database at startup)
+    downloads.set_speed_limit_kbps(settings.max_download_speed_kbps);
+
     state
         .db_tx
         .send(crate::state::DbWrite::Settings(

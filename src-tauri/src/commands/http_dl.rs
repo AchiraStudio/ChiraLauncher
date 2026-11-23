@@ -40,6 +40,8 @@ pub struct HttpDownloadEngine {
     db_path: PathBuf,
     semaphore: Arc<Semaphore>,
     max_concurrent: Arc<AtomicUsize>,
+    /// Global download speed limit ("Max download speed" in Settings).
+    throttle: super::throttle::Throttle,
 }
 
 impl HttpDownloadEngine {
@@ -171,7 +173,13 @@ impl HttpDownloadEngine {
             db_path,
             semaphore: Arc::new(Semaphore::new(concurrent)),
             max_concurrent: Arc::new(AtomicUsize::new(concurrent)),
+            throttle: super::throttle::Throttle::new(),
         }
+    }
+
+    /// Applies the combined download speed limit in KiB/s (0 = unlimited). Takes effect on the next chunk.
+    pub fn set_speed_limit_kbps(&self, kbps: u32) {
+        self.throttle.set_limit_kbps(kbps);
     }
 
     pub async fn start_download(engine: Arc<Self>, id: String) {
@@ -381,6 +389,7 @@ impl HttpDownloadEngine {
             };
 
             let mut last_update = std::time::Instant::now();
+            let mut last_persist = std::time::Instant::now();
             let mut bytes_since_update = 0u64;
 
             loop {
@@ -406,16 +415,33 @@ impl HttpDownloadEngine {
                                 downloaded_bytes += data.len() as u64;
                                 bytes_since_update += data.len() as u64;
 
+                                // Honour the global speed limit before reading the next chunk
+                                engine.throttle.pace(data.len() as u64).await;
+
                                 if last_update.elapsed().as_millis() >= 500 {
                                     let speed = (bytes_since_update as f64 / last_update.elapsed().as_secs_f64()) as u64;
                                     last_update = std::time::Instant::now();
                                     bytes_since_update = 0;
 
-                                    let mut lock = engine.tasks.write().await;
-                                    if let Some(task) = lock.get_mut(&id) {
-                                        task.downloaded_bytes = downloaded_bytes;
-                                        task.speed_bytes_per_sec = speed;
-                                        engine.persist_task(task).await;
+                                    // Update the in-memory state the UI reads, then release the lock.
+                                    let snapshot = {
+                                        let mut lock = engine.tasks.write().await;
+                                        lock.get_mut(&id).map(|task| {
+                                            task.downloaded_bytes = downloaded_bytes;
+                                            task.speed_bytes_per_sec = speed;
+                                            task.clone()
+                                        })
+                                    };
+
+                                    // Persisting opens a SQLite connection, so it used to run twice a second per
+                                    // download *while holding the tasks lock*, stalling every UI poll. The stored
+                                    // progress is informational only (a resume re-reads the real file length), so
+                                    // write it every few seconds and never under the lock.
+                                    if last_persist.elapsed().as_secs() >= 5 {
+                                        last_persist = std::time::Instant::now();
+                                        if let Some(task) = snapshot {
+                                            engine.persist_task(&task).await;
+                                        }
                                     }
                                 }
                             }

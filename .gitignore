@@ -24,3 +24,7 @@ dist_debug/
 *.sln
 *.sw?
 .env
+
+# Release output and signing keys
+dist_release/
+*.key

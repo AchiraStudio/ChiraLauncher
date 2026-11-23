@@ -18,6 +18,10 @@
     "shell:default",
     "dialog:default",
     "fs:default",
-    "deep-link:default"
+    "deep-link:default",
+    "core:window:allow-toggle-maximize",
+    "updater:default",
+    "process:allow-restart",
+    "opener:default"
   ]
 }

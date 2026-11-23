@@ -24,8 +24,9 @@ export function ConfirmHost() {
                 <>
                     <span />
                     <div className="flex gap-2">
-                        <Button variant="secondary" onClick={() => settle(false)}>{current.cancelLabel ?? "Cancel"}</Button>
-                        <Button variant={current.danger ? "danger" : "primary"} disabled={blocked} data-autofocus onClick={() => settle(true)}>
+                        {/* Destructive prompts focus Cancel, so a stray Enter can never confirm a deletion */}
+                        <Button variant="secondary" data-autofocus={current.danger ? true : undefined} onClick={() => settle(false)}>{current.cancelLabel ?? "Cancel"}</Button>
+                        <Button variant={current.danger ? "danger" : "primary"} disabled={blocked} data-autofocus={current.danger ? undefined : true} onClick={() => settle(true)}>
                             {current.confirmLabel ?? "Confirm"}
                         </Button>
                     </div>

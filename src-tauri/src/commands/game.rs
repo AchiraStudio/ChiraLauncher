@@ -260,7 +260,7 @@ pub async fn sync_steam_achievements(
     id: String,
     steam_app_id: String,
     install_dir: String,
-    state: tauri::State<'_, std::sync::Arc<AppState>>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     use crate::steamworks_sync::SteamworksClient;
     use crate::state::{DbWrite, ProfileDbWrite, AchSync};

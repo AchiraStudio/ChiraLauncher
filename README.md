@@ -14,11 +14,18 @@ A personal game launcher built with Tauri, Rust, and React. ChiraLauncher lets y
 - **Graceful process management** — Stopping a game sends a proper WM_CLOSE message to the window first (giving it a chance to save), then force-kills if it doesn't respond within 2 seconds.
 - **Custom themes** — The accent color is configurable per user. An extension system lets you apply full CSS themes.
 - **Borderless fullscreen helper** — One-click button to strip a game's window chrome and stretch it to fill the screen, with the overlay staying on top.
+- **Command palette** — Press `Ctrl+K` anywhere to jump to a game, a page or an action.
+- **Collections** — Group games your own way and filter the library by collection.
+- **In-app updates** — ChiraLauncher checks GitHub Releases, shows the release notes and installs signed updates for you.
 - **Repack database** — Includes a searchable index of FitGirl repacks so you can quickly find where to grab a game.
 
 ---
 
 ## Recent Updates
+
+### ✨ v0.2.0 — Interface rebuild & in-app updates
+
+See [CHANGELOG.md](CHANGELOG.md) for the full list. Highlights: a completely new interface (collapsible sidebar, Home dashboard, virtualised grid/list library, redesigned game page), `Ctrl+K` command palette, collections, signed in-app updates, a working download speed limit, and a long list of performance and bug fixes.
 
 ### 🚀 v0.1.7 Release Notes
 
@@ -135,23 +142,56 @@ The output on Windows will be an `.msi` and a standalone `.exe` in subdirectorie
 
 ---
 
+## Releasing updates
+
+ChiraLauncher updates itself from **GitHub Releases**. Installers are verified with a minisign signature before they run, so only builds signed with *your* private key can ever be installed.
+
+**One-time setup**
+
+```
+npm run updater:keygen
+```
+
+This writes a key pair, stores the **private** key outside the repo (`~/.tauri/chiralauncher-updater.key` — back it up, and never commit it) and puts the **public** key into `src-tauri/tauri.conf.json`. Commit that file.
+
+> Until a key exists, the app runs normally but Settings → Updates shows that signing isn't set up yet.
+
+**Publishing a version (local build)**
+
+1. Bump `version` in `package.json`, `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml`, and add a `## x.y.z` section to `CHANGELOG.md` (it becomes the in-app release notes).
+2. Expose the key to the build (PowerShell):
+   ```
+   $env:TAURI_SIGNING_PRIVATE_KEY_PATH = "$HOME\.tauri\chiralauncher-updater.key"
+   $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = "<your password>"
+   ```
+3. `npm run build:setup` — produces `dist_release/Setup/<installer>.exe` and `latest.json`.
+4. Create a GitHub release tagged `vX.Y.Z` and upload **both** files. Running copies of ChiraLauncher pick it up from `releases/latest/download/latest.json`.
+
+**Publishing with GitHub Actions (optional)**
+
+Add the repository secrets `TAURI_SIGNING_PRIVATE_KEY` (the private key file's contents) and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, then push a tag: `git tag v0.2.0 && git push origin v0.2.0`. See `.github/workflows/release.yml`.
+
 ## Project structure
 
 ```
 ChiraLauncher/
 ├── src/                        # React + TypeScript frontend
-│   ├── App.tsx                 # Root component, Tauri event bridge
-│   ├── Library.tsx             # Library page (main game detail view)
-│   ├── Browse.tsx              # Discover/home page
+│   ├── App.tsx                 # Window router (main / tray / splash) and route table
+│   ├── pages/                  # Home, Library, GameDetail, Downloads, Settings, Profile, TrayMenu
 │   ├── components/
-│   │   ├── layout/             # Sidebar, AppLayout
-│   │   ├── modals/             # Add/Edit game, scanner, etc.
-│   │   ├── game/               # AchievementGrid, GameCard
-│   │   └── ui/                 # ContextMenu, DownloadManager, etc.
-│   ├── hooks/                  # useLocalImage, etc.
-│   ├── services/               # Steam API, game launch, achievement fetch
-│   ├── store/                  # Zustand state (games, UI, process, profile)
-│   └── types/                  # TypeScript interfaces
+│   │   ├── layout/             # AppShell, TitleBar, Sidebar, CommandPalette
+│   │   ├── ui/                 # Design-system primitives (Button, Modal, controls, ContextMenu...)
+│   │   ├── game/               # GameCard/GameRow, Cover, AchievementGrid
+│   │   ├── modals/             # Add/Edit game, folder scanner, add links, reset
+│   │   ├── downloads/          # Download rows and grouped multi-part cards
+│   │   ├── settings/           # Settings building blocks
+│   │   └── update/             # In-app update dialog
+│   ├── hooks/                  # useBackendBridge (events + boot), useGameActions, useGames, ...
+│   ├── lib/                    # tauri bridge, theme, formatting, HTML sanitiser
+│   ├── services/               # Steam API (cached), audio engine, game launch
+│   ├── store/                  # Zustand state (games, process, settings, updates, collections, ...)
+│   ├── styles/globals.css      # Design tokens (colours, type, radii) and base styles
+│   └── types/                  # TypeScript interfaces mirroring the Rust structs
 │
 ├── src-tauri/                  # Rust backend (Tauri app)
 │   ├── src/
@@ -163,10 +203,13 @@ ChiraLauncher/
 │   │   ├── achievement_watcher.rs  # File watcher for live unlock detection
 │   │   ├── metadata/           # Image cache, Steam metadata fetching
 │   │   ├── process/            # Process monitoring and identity
-│   │   └── profile.rs          # User profile management
+│   │   ├── updater.rs          # Reports whether in-app updates are configured
+│   │   └── profile/            # User profile management
 │   ├── tauri.conf.json         # Tauri app configuration
 │   └── Cargo.toml              # Rust dependencies
 │
+├── scripts/                    # distribute.js (installer + latest.json), updater-keygen.js
+├── CHANGELOG.md                # Release notes (also shown in the in-app update dialog)
 ├── public/                     # Static assets served by Vite
 ├── index.html                  # Main HTML entry point
 └── package.json                # Node dependencies and scripts

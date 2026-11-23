@@ -6,7 +6,9 @@ use tokio::sync::mpsc;
 
 pub async fn run_db_writer(db_path: PathBuf, mut rx: mpsc::UnboundedReceiver<DbWrite>) {
     let mut conn = Connection::open(&db_path).expect("DB writer failed to open connection");
-    conn.execute_batch("PRAGMA journal_mode=WAL;").unwrap();
+    // synchronous=NORMAL is the recommended pairing with WAL: still crash-safe, far fewer fsyncs per write.
+    conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000; PRAGMA temp_store=MEMORY;")
+        .expect("DB writer failed to configure its connection");
 
     while let Some(write) = rx.recv().await {
         let result = match write {
