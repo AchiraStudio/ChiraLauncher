@@ -1,557 +1,218 @@
 import { useState } from "react";
-import { useUiStore } from "../../store/uiStore";
-import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { motion, AnimatePresence } from "framer-motion";
-import { useGameStore } from "../../store/gameStore";
-import type { NewGame } from "../../types/game";
-import { fetchSteamMetadata, parseSteamDate, SteamAppDetails } from "../../services/steamService";
 import { toast } from "sonner";
-import {
-    FolderOpen, Gamepad2, CheckCircle2, X, ChevronLeft, Activity,
-    Hash, Globe, Sparkles
-} from "lucide-react";
-import { cn } from "../../lib/utils";
+import { FolderOpen, Gamepad2, Hash, Sparkles, ChevronLeft, Activity, CheckCircle2, Globe } from "lucide-react";
+import { useUiStore } from "../../store/uiStore";
+import { useGameStore } from "../../store/gameStore";
+import { call, errMsg } from "../../lib/tauri";
+import { fetchSteamMetadata, steamArtwork, steamToFields, type SteamAppDetails } from "../../services/steamService";
+import type { ExecutionMethod, NewGame } from "../../types/game";
 import { ExecutionMethodSettings } from "../game/ExecutionMethodSettings";
+import { Modal } from "../ui/Modal";
+import { Button } from "../ui/Button";
+import { Badge, Field, ProgressBar, TextInput } from "../ui/controls";
+import { Spinner } from "../ui/Spinner";
+import { cn } from "../../lib/utils";
 
-function applySteamMetadataState(
-    data: SteamAppDetails,
-    app_id: string,
-    setSteamData: any,
-    setTitle: any,
-    setDescription: any,
-    setDeveloper: any,
-    setPublisher: any,
-    setReleaseDate: any,
-    setGenre: any,
-    setCoverPath: any,
-    setBackgroundPath: any,
-    setLogoPath: any
-) {
-    setSteamData(data);
-    setTitle(data.name);
-    setDescription(data.detailed_description || data.short_description);
-    setDeveloper(data.developers?.[0] || "");
-    setPublisher(data.publishers?.[0] || "");
-    setReleaseDate(parseSteamDate(data.release_date?.date));
-    setGenre(data.genres?.map((g: any) => g.description).join(", ") || "");
+type Step = "pick" | "details" | "metadata" | "confirm";
+const STEPS: Step[] = ["pick", "details", "metadata", "confirm"];
+const STEP_LABEL: Record<Step, string> = { pick: "Choose executable", details: "Game details", metadata: "Artwork & info", confirm: "Review" };
 
-    const bgPref = localStorage.getItem("steam_bg_pref") || "hero";
-    setCoverPath(`https://cdn.cloudflare.steamstatic.com/steam/apps/${app_id}/library_600x900.jpg`);
-    setBackgroundPath(bgPref === "hero" ? `https://cdn.cloudflare.steamstatic.com/steam/apps/${app_id}/library_hero.jpg` : data.header_image);
-    setLogoPath(`https://cdn.cloudflare.steamstatic.com/steam/apps/${app_id}/logo_2x.png`);
+interface ScanResult {
+    executable_path: string; guessed_title: string; install_dir: string; crack_type: string; app_id: string;
+    achievements_ini?: string; achievements_json?: string; achievements_xml?: string;
 }
-type AddStep = "PICK_FILE" | "DETAILS" | "EXECUTION" | "METADATA" | "CONFIRM";
 
-interface SingleScanResult {
-    executable_path: string;
-    guessed_title: string;
-    install_dir: string;
-    crack_type: string;
-    app_id: string;
-    achievements_ini?: string;
-    achievements_json?: string;
-    achievements_xml?: string;
-}
+interface Meta { title: string; description: string; developer: string; publisher: string; releaseDate: string; genre: string; cover: string; background: string; logo: string }
 
 export function AddGameModal() {
-    const isAddGameModalOpen = useUiStore((s: any) => s.isAddGameModalOpen);
-    const setAddGameModalOpen = useUiStore((s: any) => s.setAddGameModalOpen);
-    const fetchGames = useGameStore((s: any) => s.fetchGames);
+    const setOpen = useUiStore((s) => s.setAddGameOpen);
+    const [step, setStep] = useState<Step>("pick");
+    const [busy, setBusy] = useState<"" | "scan" | "steam" | "import">("");
 
-    const [step, setStep] = useState<AddStep>("PICK_FILE");
     const [exePath, setExePath] = useState("");
     const [installDir, setInstallDir] = useState("");
-
     const [title, setTitle] = useState("");
     const [launchArgs, setLaunchArgs] = useState("");
-
-    // Launcher config
-    const [executionMethod, setExecutionMethod] = useState<"direct" | "auto_launcher" | "manual_launcher" | "unreal_engine" | "official_steam">("direct");
+    const [method, setMethod] = useState<ExecutionMethod>("direct");
     const [launcherPath, setLauncherPath] = useState("");
+    const [showAdvanced, setShowAdvanced] = useState(false);
+    const [crack, setCrack] = useState<string | null>(null);
+    const [appId, setAppId] = useState("");
+    const [achPath, setAchPath] = useState<string | null>(null);
 
-    const [description, setDescription] = useState("");
-    const [coverPath, setCoverPath] = useState<string | null>(null);
-    const [backgroundPath, setBackgroundPath] = useState<string | null>(null);
-    const [logoPath, setLogoPath] = useState<string | null>(null);
-    const [developer, setDeveloper] = useState("");
-    const [publisher, setPublisher] = useState("");
-    const [releaseDate, setReleaseDate] = useState("");
-    const [genre, setGenre] = useState("");
+    const [steam, setSteam] = useState<SteamAppDetails | null>(null);
+    const [meta, setMeta] = useState<Meta | null>(null);
+    const [applyMeta, setApplyMeta] = useState(true);
 
-    const [isScanning, setIsScanning] = useState(false);
-    const [isFetchingSteam, setIsFetchingSteam] = useState(false);
-    const [isImporting, setIsImporting] = useState(false);
+    const close = () => setOpen(false);
 
-    const [detectedCrackType, setDetectedCrackType] = useState<string | null>(null);
-    const [detectedAppId, setDetectedAppId] = useState<string | null>(null);
-    const [manualAchievementPath, setManualAchievementPath] = useState<string | null>(null);
-
-    const [steamData, setSteamData] = useState<SteamAppDetails | null>(null);
-    const [applySteamData, setApplySteamData] = useState(true);
-
-
-
-    if (!isAddGameModalOpen) return null;
-
-    const reset = () => {
-        setStep("PICK_FILE");
-        setExePath("");
-        setInstallDir("");
-        setTitle("");
-        setLaunchArgs("");
-        setExecutionMethod("direct");
-        setLauncherPath("");
-        setDescription("");
-        setCoverPath(null);
-        setBackgroundPath(null);
-        setLogoPath(null);
-        setDeveloper("");
-        setPublisher("");
-        setReleaseDate("");
-        setGenre("");
-        setIsImporting(false);
-        setIsScanning(false);
-        setIsFetchingSteam(false);
-        setDetectedCrackType(null);
-        setDetectedAppId(null);
-        setManualAchievementPath(null);
-        setSteamData(null);
-        setAddGameModalOpen(false);
+    const loadSteam = async (id: string, quiet = false) => {
+        if (!id.trim()) return;
+        setBusy("steam");
+        try {
+            const data = await fetchSteamMetadata(id.trim());
+            const f = steamToFields(data);
+            const art = steamArtwork(id.trim(), data.header_image);
+            setSteam(data);
+            setMeta({ title: f.title, description: f.description, developer: f.developer, publisher: f.publisher, releaseDate: f.releaseDate, genre: f.genre, cover: art.cover, background: art.background, logo: art.logo });
+            if (f.title) setTitle(f.title);
+            return true;
+        } catch {
+            if (!quiet) toast.error("Couldn't find that game on Steam", { description: "Check the App ID and try again." });
+            return false;
+        } finally { setBusy(""); }
     };
 
-    const handlePickFile = async () => {
-        if (!window.__TAURI_INTERNALS__) return;
-
+    const pick = async () => {
+        const sel = await openDialog({ multiple: false, filters: [{ name: "Executables", extensions: ["exe"] }] }).catch(() => null);
+        if (typeof sel !== "string") return;
+        setExePath(sel); setBusy("scan"); setStep("details");
         try {
-            const selected = await openDialog({
-                multiple: false,
-                filters: [{ name: "Executables", extensions: ["exe"] }],
-            });
-
-            if (selected && typeof selected === "string") {
-                setExePath(selected);
-                setIsScanning(true);
-                setStep("DETAILS");
-
-                try {
-                    const result = await invoke<SingleScanResult>("scan_single_game", { path: selected });
-
-                    setExePath(result.executable_path);
-                    setTitle(result.guessed_title);
-                    setInstallDir(result.install_dir);
-                    setDetectedCrackType(result.crack_type);
-                    setDetectedAppId(result.app_id);
-
-                    const achPath = result.achievements_json || result.achievements_ini || result.achievements_xml || null;
-                    if (achPath) {
-                        setManualAchievementPath(achPath);
-                    }
-
-                    if (result.app_id) {
-                        try {
-                            const data = await fetchSteamMetadata(result.app_id);
-                            applySteamMetadataState(data, result.app_id, setSteamData, setTitle, setDescription, setDeveloper, setPublisher, setReleaseDate, setGenre, setCoverPath, setBackgroundPath, setLogoPath);
-                        } catch (err) {
-                            console.error("Silent Steam fetch failed:", err);
-                        }
-                    }
-
-                } catch (e) {
-                    console.error("Scanner failed:", e);
-                    const filename = selected.split("\\").pop() || "";
-                    const cleaned: string = await invoke("clean_title", { filename });
-                    setTitle(cleaned);
-                } finally {
-                    setIsScanning(false);
-                }
-            }
+            const r = await call<ScanResult>("scan_single_game", { path: sel });
+            setExePath(r.executable_path); setTitle(r.guessed_title); setInstallDir(r.install_dir);
+            setCrack(r.crack_type); setAppId(r.app_id || "");
+            setAchPath(r.achievements_json || r.achievements_ini || r.achievements_xml || null);
+            if (r.app_id) await loadSteam(r.app_id, true);
         } catch (e) {
-            console.error(e);
-        }
+            console.error("Scanner failed:", e);
+            const cleaned = await call<string>("clean_title", { filename: sel.split(/[\\/]/).pop() || "" }).catch(() => "");
+            setTitle(cleaned);
+        } finally { setBusy(""); }
     };
 
-    const fetchMetadata = async () => {
-        if (!detectedAppId) {
-            setStep("CONFIRM");
-            return;
-        }
+    const next = async () => {
+        if (step === "details") {
+            if (!title.trim()) return toast.error("Give the game a title");
+            if (appId.trim() && !steam) await loadSteam(appId);
+            setStep(appId.trim() ? "metadata" : "confirm");
+        } else if (step === "metadata") setStep("confirm");
+    };
+    const back = () => setStep((s) => (s === "confirm" ? (appId.trim() ? "metadata" : "details") : s === "metadata" ? "details" : "pick"));
 
-        if (steamData) {
-            setStep("METADATA");
-            return;
-        }
-
-        setIsFetchingSteam(true);
-        setStep("METADATA");
+    const importGame = async () => {
+        setBusy("import");
         try {
-            const data = await fetchSteamMetadata(detectedAppId);
-            applySteamMetadataState(data, detectedAppId, setSteamData, setTitle, setDescription, setDeveloper, setPublisher, setReleaseDate, setGenre, setCoverPath, setBackgroundPath, setLogoPath);
-        } catch (error) {
-            toast.error("Could not fetch Steam metadata");
-        } finally {
-            setIsFetchingSteam(false);
-        }
+            const cache = async (url: string | null | undefined, type: string) => {
+                if (!url || !url.startsWith("http")) return url ?? null;
+                return call<string>("download_url_to_cache", { url, imageType: type }).catch(() => url);
+            };
+            const use = applyMeta && meta;
+            const [cover, bg, logo] = use ? await Promise.all([cache(meta.cover, "cover"), cache(meta.background, "background"), cache(meta.logo, "logo")]) : [null, null, null];
+            const game: NewGame = {
+                id: crypto.randomUUID(), title: title.trim(), executable_path: exePath, source: "manual",
+                added_at: new Date().toISOString(), is_favorite: false, run_as_admin: false,
+                cover_path: cover, background_path: bg, logo_path: logo,
+                description: use ? meta.description : null, developer: use ? meta.developer : null, publisher: use ? meta.publisher : null,
+                release_date: use ? meta.releaseDate : null, genre: use ? meta.genre : null,
+                install_dir: installDir, steam_app_id: appId.trim() ? parseInt(appId, 10) || null : null,
+                crack_type: crack, app_id: appId.trim() || null, manual_achievement_path: achPath,
+                custom_bgm_paths: [], execution_method: method, launcher_path: launcherPath || null,
+                launch_args: launchArgs.trim() || null,
+            };
+            await call("add_game", { game });
+            await useGameStore.getState().awaitGame(game.id);
+            toast.success("Game added", { description: game.title });
+            close();
+        } catch (e) { toast.error("Couldn't add game", { description: errMsg(e) }); setBusy(""); }
     };
 
-    const handleConfirmImport = async () => {
-        if (!window.__TAURI_INTERNALS__) return;
-
-        setIsImporting(true);
-        try {
-            const processUrl = async (url: string | null, type: string) => {
-                if (!url || !url.startsWith("http")) return url;
-                try {
-                    return await invoke<string>("download_url_to_cache", { url, imageType: type });
-                } catch {
-                    return url;
-                }
-            };
-
-            const finalCover = applySteamData ? await processUrl(coverPath, "cover") : null;
-            const finalBg = applySteamData ? await processUrl(backgroundPath, "background") : null;
-            const finalLogo = applySteamData ? await processUrl(logoPath, "logo") : null;
-
-            const newGame: NewGame = {
-                id: crypto.randomUUID(),
-                title: title,
-                executable_path: exePath,
-                cover_path: finalCover,
-                background_path: finalBg,
-                logo_path: finalLogo,
-                description: applySteamData ? description : null,
-                developer: applySteamData ? developer : null,
-                publisher: applySteamData ? publisher : null,
-                release_date: applySteamData ? releaseDate : null,
-                genre: applySteamData ? genre : null,
-                source: "manual",
-                added_at: new Date().toISOString(),
-                installed_size: null,
-                install_dir: installDir,
-                steam_app_id: detectedAppId ? parseInt(detectedAppId) : null,
-                crack_type: detectedCrackType,
-                app_id: detectedAppId,
-                manual_achievement_path: manualAchievementPath,
-                is_favorite: false,
-                run_as_admin: false,
-                genres: null,
-                tags: null,
-                metacritic_score: null,
-                platforms: null,
-                repack_info: null,
-                detected_metadata_path: null,
-                detected_earned_state_path: null,
-                custom_ach_sound_path: null,
-                custom_bgm_path: null,
-                custom_bgm_paths: [],
-                execution_method: executionMethod,
-                launcher_path: launcherPath || null,
-            };
-
-            // Add launch_args if present
-            if (launchArgs.trim() !== "") {
-                (newGame as any).launch_args = launchArgs.trim();
-            }
-
-            await invoke("add_game", { game: newGame });
-
-
-            await new Promise((resolve) => setTimeout(resolve, 500));
-            await fetchGames();
-            reset();
-            toast.success("Game added successfully");
-        } catch (e: any) {
-            console.error(e);
-            toast.error("Failed to add game", { description: String(e) });
-        } finally {
-            setIsImporting(false);
-        }
-    };
-
-    const stepLabel = {
-        PICK_FILE: "Phase 1: Selection",
-        DETAILS: "Phase 2: Game Analysis",
-        EXECUTION: "Phase 3: Launch Routine",
-        METADATA: "Phase 4: Deep Sync",
-        CONFIRM: "Phase 5: Finalize",
-    }[step];
+    const idx = STEPS.indexOf(step);
+    const showMetaStep = !!appId.trim();
 
     return (
-        <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-xl flex items-center justify-center pointer-events-auto p-6 font-outfit">
-            <motion.div
-                initial={{ opacity: 0, scale: 0.9, y: 30 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.9, y: 30 }}
-                className="bg-[#12141c] w-full max-w-[800px] max-h-[90vh] rounded-[2.5rem] shadow-[0_50px_100px_rgba(0,0,0,0.8)] border border-white/5 flex flex-col overflow-hidden relative"
-            >
-                <div className="absolute top-0 left-1/4 w-1/2 h-1 bg-accent/40 blur-2xl" />
+        <Modal
+            open onClose={() => busy !== "import" && close()} size="lg" icon={<Gamepad2 size={19} />}
+            title="Add a game" subtitle={`Step ${idx + 1} of ${STEPS.length} · ${STEP_LABEL[step]}`}
+            footer={step === "pick" ? <><span /><Button variant="secondary" onClick={close}>Cancel</Button></> : (
+                <>
+                    <Button variant="ghost" icon={<ChevronLeft size={15} />} onClick={back} disabled={busy !== ""}>Back</Button>
+                    {step === "confirm" ? (
+                        <Button variant="primary" loading={busy === "import"} onClick={() => void importGame()}>Add to library</Button>
+                    ) : (
+                        <Button variant="primary" loading={busy === "steam"} disabled={busy === "scan"} onClick={() => void next()}>
+                            {step === "details" && !showMetaStep ? "Review" : "Continue"}
+                        </Button>
+                    )}
+                </>
+            )}
+        >
+            <ProgressBar value={((idx + 1) / STEPS.length) * 100} height={3} className="mb-6" />
 
-                <div className="px-10 py-8 flex items-center justify-between">
+            {step === "pick" && (
+                <div className="flex flex-col items-center gap-5 py-10 text-center">
+                    <div className="grid h-16 w-16 place-items-center rounded-2xl bg-accent/12 text-accent"><FolderOpen size={28} /></div>
+                    <div className="max-w-sm">
+                        <h3 className="text-lg font-semibold">Pick the game's .exe</h3>
+                        <p className="mt-1.5 text-sm leading-relaxed text-fg-mute">We'll detect the title, Steam App ID, emulator and achievements automatically. To add many games at once, use <span className="text-fg-soft">Scan folder</span> instead.</p>
+                    </div>
+                    <Button variant="primary" size="lg" icon={<FolderOpen size={17} />} onClick={() => void pick()}>Choose executable</Button>
+                </div>
+            )}
+
+            {step === "details" && (busy === "scan" ? (
+                <div className="grid place-items-center gap-4 py-16 text-center">
+                    <Spinner size={30} className="text-accent" />
+                    <div><p className="font-medium">Analysing game files…</p><p className="mt-1 text-xs text-fg-mute">Detecting emulator, App ID and achievement files</p></div>
+                </div>
+            ) : (
+                <div className="space-y-5">
+                    <div className="truncate rounded-ctl border border-line bg-black/20 px-3 py-2 font-mono text-xs text-fg-mute" title={exePath}>{exePath}</div>
+                    <Field label="Title"><TextInput data-autofocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Game title" icon={<Gamepad2 size={15} />} /></Field>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                        <Field label="Steam App ID" hint="Used for artwork, descriptions and achievements.">
+                            <TextInput mono icon={<Hash size={14} />} value={appId} onChange={(e) => { setAppId(e.target.value.replace(/\D/g, "")); setSteam(null); setMeta(null); }} placeholder="e.g. 1245620" />
+                        </Field>
+                        <Field label="Launch arguments"><TextInput mono value={launchArgs} onChange={(e) => setLaunchArgs(e.target.value)} placeholder="-windowed -novid" /></Field>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                        <Badge tone={crack && crack !== "unknown" ? "ok" : "neutral"} icon={crack && crack !== "unknown" ? <CheckCircle2 size={11} /> : <Activity size={11} />}>Emulator: {crack ?? "unknown"}</Badge>
+                        {achPath && <Badge tone="warn">Achievements file found</Badge>}
+                    </div>
                     <div>
-                        <h2 className="text-2xl font-black tracking-tight text-white uppercase ">Add Native Game</h2>
-                        <div className="flex items-center gap-2 mt-1">
-                            <span className="w-2 h-2 rounded-full bg-accent animate-pulse" />
-                            <p className="text-white/30 text-[10px] font-black tracking-normal uppercase">{stepLabel}</p>
+                        <button onClick={() => setShowAdvanced(!showAdvanced)} className="text-[13px] font-medium text-accent hover:underline">{showAdvanced ? "Hide" : "Show"} launch options</button>
+                        {showAdvanced && <div className="mt-3"><ExecutionMethodSettings executionMethod={method} setExecutionMethod={setMethod} launcherPath={launcherPath} setLauncherPath={setLauncherPath} /></div>}
+                    </div>
+                </div>
+            ))}
+
+            {step === "metadata" && (busy === "steam" ? (
+                <div className="grid place-items-center gap-4 py-16"><Spinner size={30} className="text-accent" /><p className="font-medium">Contacting Steam…</p></div>
+            ) : !meta ? (
+                <div className="py-12 text-center text-sm text-fg-mute">
+                    <Globe size={26} className="mx-auto mb-3" />Couldn't load Steam data for App ID {appId}. You can still add the game without it.
+                    <div className="mt-4"><Button variant="secondary" onClick={() => void loadSteam(appId)}>Try again</Button></div>
+                </div>
+            ) : (
+                <div className="space-y-5">
+                    <div className="flex items-center gap-3 rounded-xl border border-accent/25 bg-accent/[0.07] p-3.5">
+                        <Sparkles size={18} className="shrink-0 text-accent" />
+                        <div className="min-w-0 flex-1 text-[13px]"><div className="font-medium">Steam data found for {steam?.name}</div><div className="text-fg-mute">Artwork, description, developer and genres.</div></div>
+                        <Button size="sm" variant={applyMeta ? "primary" : "secondary"} onClick={() => setApplyMeta(!applyMeta)}>{applyMeta ? "Applying" : "Skipped"}</Button>
+                    </div>
+                    <div className={cn("grid grid-cols-[130px_1fr] gap-5 transition-opacity", !applyMeta && "pointer-events-none opacity-35")}>
+                        <img src={meta.cover} alt="Cover" className="aspect-[2/3] w-full rounded-lg border border-line object-cover" onError={(e) => (e.currentTarget.style.visibility = "hidden")} />
+                        <div className="min-w-0 space-y-3">
+                            <img src={meta.background} alt="Background" className="h-28 w-full rounded-lg border border-line object-cover" onError={(e) => (e.currentTarget.style.visibility = "hidden")} />
+                            <dl className="space-y-1.5 text-[13px]">
+                                <div className="flex gap-3"><dt className="w-20 shrink-0 text-fg-mute">Developer</dt><dd className="truncate">{meta.developer || "-"}</dd></div>
+                                <div className="flex gap-3"><dt className="w-20 shrink-0 text-fg-mute">Genre</dt><dd className="truncate">{meta.genre || "-"}</dd></div>
+                                <div className="flex gap-3"><dt className="w-20 shrink-0 text-fg-mute">Released</dt><dd>{meta.releaseDate || "-"}</dd></div>
+                            </dl>
                         </div>
                     </div>
-                    <button
-                        onClick={reset}
-                        className="text-white/20 hover:text-white transition-all w-12 h-12 flex items-center justify-center rounded-2xl hover:bg-white/5 border border-transparent hover:border-white/10"
-                    >
-                        <X size={24} strokeWidth={2.5} />
-                    </button>
                 </div>
+            ))}
 
-                <div className="px-10 mb-4">
-                    <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
-                        <motion.div
-                            className="h-full bg-accent shadow-[0_0_15px_rgba(192,38,211,0.5)]"
-                            initial={{ width: "0%" }}
-                            animate={{
-                                width: step === "PICK_FILE" ? "20%" : step === "DETAILS" ? "40%" : step === "EXECUTION" ? "60%" : step === "METADATA" ? "80%" : "100%"
-                            }}
-                            transition={{ duration: 0.5, ease: "circOut" }}
-                        />
+            {step === "confirm" && (
+                <div className="space-y-5 py-2 text-center">
+                    <div className="relative mx-auto h-56 w-[150px] overflow-hidden rounded-xl border border-line-strong bg-raised shadow-pop">
+                        {applyMeta && meta?.cover ? <img src={meta.cover} alt="" className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-fg-mute"><Gamepad2 size={34} /></div>}
                     </div>
+                    <div><h3 className="text-xl font-semibold">{title}</h3><p className="mx-auto mt-1 max-w-md truncate font-mono text-xs text-fg-mute" title={exePath}>{exePath}</p></div>
+                    <p className="text-[13px] text-fg-mute">Desktop and Start Menu shortcuts will be created for you.</p>
                 </div>
-
-                <div className="p-10 flex-1 flex flex-col min-h-0 overflow-y-auto custom-scrollbar">
-                    <AnimatePresence mode="wait">
-                        {step === "PICK_FILE" && (
-                            <motion.div key="step1" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="flex flex-col items-center justify-center py-12 gap-10">
-                                <div className="relative">
-                                    <div className="w-24 h-24 rounded-[2rem] bg-accent/10 flex items-center justify-center text-accent relative z-10 border border-accent/20">
-                                        <FolderOpen size={40} strokeWidth={2} />
-                                    </div>
-                                    <div className="absolute inset-0 bg-accent blur-[60px] opacity-20" />
-                                </div>
-                                <div className="text-center max-w-md">
-                                    <h3 className="text-white font-black text-2xl mb-2 ">Select Executable</h3>
-                                    <p className="text-white/40 text-sm leading-relaxed">
-                                        Choose the main <span className="text-accent font-bold">.exe</span> file for the game you want to add.
-                                        We will automatically scan for patches and achievements.
-                                    </p>
-                                </div>
-                                <button onClick={handlePickFile} className="group relative bg-white text-black px-12 py-5 rounded-2xl font-black text-xs tracking-normal uppercase transition-all shadow-xl hover:scale-[1.02] active:scale-95 overflow-hidden">
-                                    <div className="absolute inset-0 bg-accent/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
-                                    <span className="relative z-10">Select Executable</span>
-                                </button>
-                            </motion.div>
-                        )}
-
-                        {step === "DETAILS" && (
-                            <motion.div key="step2" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="flex flex-col flex-1 gap-8">
-                                {isScanning ? (
-                                    <div className="flex-1 flex flex-col items-center justify-center py-20 gap-8">
-                                        <div className="relative">
-                                            <div className="w-20 h-20 border-4 border-accent/10 border-t-accent rounded-full animate-spin" />
-                                            <div className="absolute inset-0 flex items-center justify-center">
-                                                <Activity className="text-accent/40 animate-pulse" size={24} />
-                                            </div>
-                                        </div>
-                                        <div className="text-center">
-                                            <p className="text-white font-black text-xl uppercase tracking-widest">Analyzing Game Files</p>
-                                            <p className="text-white/30 text-xs mt-2 font-bold tracking-widest uppercase">Detecting crack engines & achievement paths...</p>
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <div className="space-y-8">
-                                        <div className="space-y-3">
-                                            <label className="text-white/30 text-[10px] font-black tracking-normal uppercase ml-1">Installation Directory</label>
-                                            <div className="bg-white/[0.03] p-4 rounded-2xl border border-white/5 flex items-center gap-4">
-                                                <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center text-white/40 shrink-0">
-                                                    <FolderOpen size={18} />
-                                                </div>
-                                                <div className="min-w-0">
-                                                    <p className="text-white/60 text-xs font-mono truncate">{exePath}</p>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        <div className="grid grid-cols-1 gap-8">
-                                            <div className="space-y-3">
-                                                <label className="text-white/30 text-[10px] font-black tracking-normal uppercase ml-1">Game Title</label>
-                                                <div className="relative group">
-                                                    <div className="absolute inset-y-0 left-0 pl-5 flex items-center pointer-events-none text-accent/50">
-                                                        <Gamepad2 size={20} />
-                                                    </div>
-                                                    <input
-                                                        type="text"
-                                                        value={title}
-                                                        onChange={(e) => setTitle(e.target.value)}
-                                                        className={cn("w-full bg-white/[0.03] border-2 border-white/5 focus:border-accent/40 rounded-2xl pl-14 pr-6 py-5 text-white font-black text-lg outline-none transition-all placeholder:text-white/10")}
-                                                        placeholder="Enter game title..."
-                                                        autoFocus
-                                                    />
-                                                </div>
-                                            </div>
-
-                                            <div className="space-y-3">
-                                                <label className="text-white/30 text-[10px] font-black tracking-normal uppercase ml-1">Custom Launch Arguments</label>
-                                                <input
-                                                    type="text"
-                                                    value={launchArgs}
-                                                    onChange={(e) => setLaunchArgs(e.target.value)}
-                                                    className="w-full bg-white/[0.03] border border-white/10 focus:border-accent/40 rounded-xl px-4 py-3 text-white text-sm font-mono outline-none transition-all placeholder:text-white/20"
-                                                    placeholder="-novid -high -fullscreen"
-                                                />
-                                            </div>
-
-                                            <div className="grid grid-cols-2 gap-4">
-                                                <div className="bg-white/[0.03] border border-white/5 p-5 rounded-3xl relative overflow-hidden group">
-                                                    <div className="absolute top-0 right-0 p-4 text-accent/10 group-hover:text-accent/20 transition-colors"><Activity size={40} /></div>
-                                                    <p className="text-white/25 text-[9px] font-black tracking-normal uppercase mb-2">Engine / Crack</p>
-                                                    <div className="flex items-center gap-2">
-                                                        <span className="text-white font-black text-base uppercase ">{detectedCrackType || "UNKNOWN"}</span>
-                                                        {detectedCrackType && detectedCrackType !== "unknown" && <CheckCircle2 size={14} className="text-green-500" />}
-                                                    </div>
-                                                </div>
-                                                <div className="bg-white/[0.03] border border-white/5 p-5 rounded-3xl relative overflow-hidden group">
-                                                    <div className="absolute top-0 right-0 p-4 text-accent/10 group-hover:text-accent/20 transition-colors"><Hash size={40} /></div>
-                                                    <p className="text-white/25 text-[9px] font-black tracking-normal uppercase mb-2">APP ID</p>
-                                                    <p className="text-white font-black text-base tabular-nums">{detectedAppId || "NOT DETECTED"}</p>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        <div className="flex items-center justify-between pt-4 border-t border-white/5 mt-auto">
-                                            <button onClick={() => setStep("PICK_FILE")} className="flex items-center gap-2 px-6 py-2 rounded-xl text-white/40 hover:text-white font-black transition-all text-xs tracking-widest uppercase">
-                                                <ChevronLeft size={16} /> Reselect
-                                            </button>
-                                            <button onClick={() => setStep("EXECUTION")} className="bg-accent hover:brightness-110 text-white px-10 py-4 rounded-2xl font-black tracking-normal uppercase text-[10px] transition-all shadow-lg shadow-accent/20 active:scale-95 flex items-center gap-2">
-                                                Next Step
-                                            </button>
-                                        </div>
-                                    </div>
-                                )}
-                            </motion.div>
-                        )}
-
-                        {step === "EXECUTION" && (
-                            <motion.div key="step-exec" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="flex flex-col flex-1 gap-8">
-
-                                <div className="flex-1">
-                                    <ExecutionMethodSettings
-                                        executionMethod={executionMethod}
-                                        setExecutionMethod={setExecutionMethod as any}
-                                        launcherPath={launcherPath}
-                                        setLauncherPath={setLauncherPath}
-                                    />
-                                </div>
-
-                                <div className="flex items-center justify-between pt-4 border-t border-white/5 mt-auto">
-                                    <button onClick={() => setStep("DETAILS")} className="flex items-center gap-2 px-6 py-2 rounded-xl text-white/40 hover:text-white font-black transition-all text-xs tracking-widest uppercase">
-                                        <ChevronLeft size={16} /> Back
-                                    </button>
-                                    <button onClick={fetchMetadata} className="bg-accent hover:brightness-110 text-white px-10 py-4 rounded-2xl font-black tracking-normal uppercase text-[10px] transition-all shadow-lg shadow-accent/20 active:scale-95 flex items-center gap-2">
-                                        <Globe size={16} /> Next Step
-                                    </button>
-                                </div>
-                            </motion.div>
-                        )}
-
-                        {step === "METADATA" && (
-                            <motion.div key="step4" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="flex flex-col flex-1 gap-8">
-                                {isFetchingSteam ? (
-                                    <div className="flex-1 flex flex-col items-center justify-center py-20 gap-8">
-                                        <div className="w-20 h-20 border-4 border-accent/10 border-t-accent rounded-full animate-spin" />
-                                        <p className="text-white font-black text-xl uppercase tracking-widest">Contacting Steam API...</p>
-                                    </div>
-                                ) : (
-                                    <div className="space-y-6">
-                                        <div className="bg-gradient-to-r from-accent/20 to-transparent border border-accent/20 p-5 rounded-2xl flex items-start gap-4">
-                                            <div className="w-10 h-10 bg-accent/20 rounded-xl flex items-center justify-center text-accent shrink-0"><Sparkles size={20} /></div>
-                                            <div>
-                                                <h3 className="text-white font-bold mb-1">Steam Data Located</h3>
-                                                <p className="text-white/60 text-xs">We pulled official artwork, descriptions, and metadata for {title}. You can choose to apply this data now.</p>
-                                            </div>
-                                            <button
-                                                onClick={() => setApplySteamData(!applySteamData)}
-                                                className={cn("ml-auto mt-2 px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all", applySteamData ? "bg-accent text-white shadow-lg" : "bg-white/10 text-white/50 hover:bg-white/20")}
-                                            >
-                                                {applySteamData ? "Will Apply" : "Ignored"}
-                                            </button>
-                                        </div>
-
-                                        {steamData && (
-                                            <div className={cn("grid grid-cols-3 gap-6 transition-opacity", !applySteamData && "opacity-30 pointer-events-none")}>
-                                                <div className="col-span-1 space-y-4">
-                                                    <div className="w-full aspect-[2/3] rounded-xl overflow-hidden border border-white/10 relative">
-                                                        <img src={coverPath!} className="w-full h-full object-cover" />
-                                                        <div className="absolute top-2 left-2 bg-black/80 px-2 py-1 rounded text-[9px] font-bold text-white/50 uppercase border border-white/10">Cover Preview</div>
-                                                    </div>
-                                                </div>
-                                                <div className="col-span-2 space-y-4">
-                                                    <div className="w-full h-32 rounded-xl overflow-hidden border border-white/10 relative">
-                                                        <img src={backgroundPath!} className="w-full h-full object-cover" />
-                                                        <div className="absolute top-2 left-2 bg-black/80 px-2 py-1 rounded text-[9px] font-bold text-white/50 uppercase border border-white/10">Hero Preview</div>
-                                                    </div>
-                                                    <div className="w-full h-16 rounded-xl overflow-hidden border border-white/10 relative bg-black/40 flex items-center justify-center p-2">
-                                                        <img src={logoPath!} className="w-auto h-full object-contain" />
-                                                        <div className="absolute top-2 left-2 bg-black/80 px-2 py-1 rounded text-[9px] font-bold text-white/50 uppercase border border-white/10">Logo Preview</div>
-                                                    </div>
-                                                    <div className="bg-black/40 p-4 rounded-xl border border-white/5 space-y-2 text-xs text-white/70">
-
-                                                        <p><strong className="text-white/40">Title:</strong> {title}</p>
-                                                        <p><strong className="text-white/40">Dev:</strong> {developer}</p>
-                                                        <p><strong className="text-white/40">Genre:</strong> {genre}</p>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        )}
-
-                                        <div className="flex items-center justify-between pt-4 border-t border-white/5 mt-auto">
-                                            <button onClick={() => setStep("EXECUTION")} className="px-6 py-2 rounded-xl text-white/40 hover:text-white font-black text-xs uppercase tracking-widest transition-all">Back</button>
-                                            <button onClick={() => setStep("CONFIRM")} className="bg-accent hover:brightness-110 text-white px-10 py-4 rounded-2xl font-black text-[10px] tracking-widest uppercase transition-all shadow-lg shadow-accent/20 active:scale-95">
-                                                Review & Finalize
-                                            </button>
-                                        </div>
-                                    </div>
-                                )}
-                            </motion.div>
-                        )}
-
-                        {step === "CONFIRM" && (
-                            <motion.div key="step5" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="flex flex-col flex-1 items-center justify-center py-10 gap-10">
-                                <div className="relative group">
-                                    <div className="w-40 h-56 rounded-[2.5rem] bg-gradient-to-br from-white/[0.08] to-transparent border border-white/10 flex flex-col items-center justify-center p-8 text-center shadow-2xl relative z-10 group-hover:scale-105 transition-transform duration-500 overflow-hidden">
-                                        {applySteamData && coverPath ? (
-                                            <img src={coverPath} className="absolute inset-0 w-full h-full object-cover brightness-75" />
-                                        ) : (
-                                            <div className="w-16 h-16 rounded-3xl bg-accent/10 flex items-center justify-center text-accent mb-4 shadow-inner">
-                                                <Gamepad2 size={32} />
-                                            </div>
-                                        )}
-                                        {applySteamData && logoPath ? (
-                                            <img src={logoPath} className="relative z-10 w-full object-contain" />
-                                        ) : (
-                                            <span className="font-black text-white text-sm leading-tight uppercase tracking-tighter relative z-10 drop-shadow-md">{title}</span>
-                                        )}
-                                    </div>
-                                    <div className="absolute inset-0 bg-accent/20 blur-[80px] opacity-0 group-hover:opacity-40 transition-opacity duration-700" />
-                                </div>
-
-                                <div className="text-center space-y-4">
-                                    <h3 className="text-3xl font-black text-white uppercase tracking-tight ">Ready to Import</h3>
-                                    <div className="flex flex-col gap-2">
-                                        <p className="text-white/40 text-[11px] font-black uppercase tracking-normal">Full path verified</p>
-                                        <div className="px-4 py-2 bg-white/5 rounded-full text-white/30 font-mono text-[10px] max-w-[400px] truncate">
-                                            {exePath}
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="flex gap-4 w-full justify-center">
-                                    <button onClick={() => setStep(detectedAppId ? "METADATA" : "EXECUTION")} className="px-10 py-4 rounded-2xl text-white/40 font-black tracking-widest uppercase text-[10px] hover:bg-white/5 transition-all">Back</button>
-                                    <button onClick={handleConfirmImport} disabled={isImporting} className="relative bg-white text-black px-12 py-4 rounded-2xl font-black tracking-normal uppercase text-[10px] transition-all shadow-xl hover:scale-105 active:scale-95 disabled:opacity-50 flex items-center gap-3">
-                                        {isImporting ? <><div className="w-3 h-3 border-2 border-black border-t-transparent rounded-full animate-spin" /> Finalizing...</> : <>Import to Library</>}
-                                    </button>
-                                </div>
-                            </motion.div>
-                        )}
-                    </AnimatePresence>
-                </div>
-            </motion.div>
-        </div>
+            )}
+        </Modal>
     );
 }

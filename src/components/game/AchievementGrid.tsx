@@ -1,262 +1,136 @@
-import { useState, useMemo } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { memo, useMemo, useState, useDeferredValue } from "react";
+import { Lock, Search, Trophy, EyeOff } from "lucide-react";
 import type { Achievement } from "../../services/achievementService";
+import { useLocalImage } from "../../hooks/useLocalImage";
+import { Segmented, ProgressBar, EmptyState } from "../ui/controls";
+import { cn } from "../../lib/utils";
 
-type FilterKey = "all" | "unlocked" | "locked";
+type Filter = "all" | "unlocked" | "locked";
+type Sort = "rarity" | "recent" | "name";
 
-function formatDate(ts: number | null): string {
-    if (!ts) return "";
-    const d = new Date(ts * 1000);
-    return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+interface Tier { name: string; color: string; bg: string; border: string }
+
+/** Rarity tiers from Steam's global unlock percentage. */
+function tierOf(percent: number | null): Tier {
+    if (percent === null) return { name: "Unknown", color: "text-fg-mute", bg: "bg-white/[0.04]", border: "border-line" };
+    if (percent > 50) return { name: "Common", color: "text-emerald-400", bg: "bg-emerald-400/10", border: "border-emerald-400/30" };
+    if (percent > 25) return { name: "Uncommon", color: "text-sky-400", bg: "bg-sky-400/10", border: "border-sky-400/30" };
+    if (percent > 10) return { name: "Rare", color: "text-violet-400", bg: "bg-violet-400/10", border: "border-violet-400/30" };
+    if (percent > 5) return { name: "Very rare", color: "text-amber-400", bg: "bg-amber-400/10", border: "border-amber-400/35" };
+    return { name: "Ultra rare", color: "text-rose-400", bg: "bg-rose-400/10", border: "border-rose-400/40" };
 }
 
-// ── Rarity Color Logic (Updated to exact user specs) ──
-function getRarityColors(percent: number | null) {
-    if (percent === null) return { name: "COMMON", border: "border-white/10", shadow: "shadow-none", text: "text-white/40" };
-    // 🟢 Common > 50%
-    if (percent > 50) return { name: "COMMON", border: "border-[#22c55e]/50", shadow: "shadow-[0_0_15px_rgba(34,197,94,0.15)]", text: "text-[#22c55e]" };
-    // 🔵 Uncommon 25% – 50%
-    if (percent > 25) return { name: "UNCOMMON", border: "border-[#3b82f6]/50", shadow: "shadow-[0_0_15px_rgba(59,130,246,0.15)]", text: "text-[#3b82f6]" };
-    // 🟣 Rare 10% – 25%
-    if (percent > 10) return { name: "RARE", border: "border-[#a855f7]/50", shadow: "shadow-[0_0_15px_rgba(168,85,247,0.15)]", text: "text-[#a855f7]" };
-    // 🟡 Very Rare 5% – 10%
-    if (percent > 5) return { name: "VERY RARE", border: "border-[#eab308]/50", shadow: "shadow-[0_0_15px_rgba(234,179,8,0.15)]", text: "text-[#eab308]" };
-    // 🔴 Ultra Rare < 5%
-    return { name: "ULTRA RARE", border: "border-[#ef4444]/60", shadow: "shadow-[0_0_15px_rgba(239,68,68,0.25)]", text: "text-[#ef4444]" };
-}
+const fmtDate = (ts: number | null) =>
+    ts ? new Date(ts * 1000).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "";
 
-interface Props {
-    achievements: Achievement[];
-    gameName?: string;
-}
+const AchievementCard = memo(function AchievementCard({ a }: { a: Achievement }) {
+    const hiddenLocked = a.hidden && !a.earned;
+    const { src } = useLocalImage(a.earned ? a.icon_path : a.icon_gray_path ?? a.icon_path);
+    const tier = tierOf(a.global_percent);
 
-export function AchievementGrid({ achievements, gameName }: Props) {
-    const [filter, setFilter] = useState<FilterKey>("all");
-    const [selected, setSelected] = useState<Achievement | null>(null);
-    const [imgErrors, setImgErrors] = useState<Set<string>>(new Set());
+    return (
+        <div className={cn("cv-auto flex gap-3.5 rounded-xl border p-3.5 transition-colors", a.earned ? cn(tier.border, tier.bg) : "border-line bg-white/[0.02] opacity-70 hover:opacity-100")}>
+            <div className="relative grid h-14 w-14 shrink-0 place-items-center overflow-hidden rounded-lg bg-black/30">
+                {src && !hiddenLocked ? (
+                    <img src={src} alt="" loading="lazy" decoding="async" className={cn("h-full w-full object-cover", !a.earned && "grayscale")} />
+                ) : (
+                    hiddenLocked ? <EyeOff size={20} className="text-fg-mute" /> : <Trophy size={20} className="text-fg-mute" />
+                )}
+                {!a.earned && !hiddenLocked && <Lock size={12} className="absolute bottom-1 right-1 text-white/70" />}
+            </div>
+            <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-medium text-fg">{hiddenLocked ? "Hidden achievement" : a.display_name}</div>
+                <p className="mt-0.5 line-clamp-2 text-xs leading-snug text-fg-mute">{hiddenLocked ? "Keep playing to discover this one." : a.description}</p>
+                <div className="mt-2 flex items-center justify-between gap-2 text-[11px]">
+                    <span className={cn("font-medium", tier.color)}>
+                        {tier.name}{a.global_percent !== null && ` · ${a.global_percent.toFixed(1)}%`}
+                    </span>
+                    {a.earned && <span className="text-fg-mute">{fmtDate(a.earned_time)}</span>}
+                </div>
+            </div>
+        </div>
+    );
+});
 
-    const unlocked = useMemo(() => achievements.filter(a => a.earned).length, [achievements]);
-    const progress = achievements.length ? Math.round((unlocked / achievements.length) * 100) : 0;
+export function AchievementGrid({ achievements }: { achievements: Achievement[]; gameName?: string }) {
+    const [filter, setFilter] = useState<Filter>("all");
+    const [sort, setSort] = useState<Sort>("rarity");
+    const [query, setQuery] = useState("");
+    const q = useDeferredValue(query.trim().toLowerCase());
 
-    const filtered = useMemo(() => {
-        switch (filter) {
-            case "unlocked": return achievements.filter(a => a.earned);
-            case "locked": return achievements.filter(a => !a.earned);
-            default: return achievements;
-        }
-    }, [achievements, filter]);
+    const unlocked = useMemo(() => achievements.filter((a) => a.earned).length, [achievements]);
+    const pct = achievements.length ? (unlocked / achievements.length) * 100 : 0;
 
-    const grouped = useMemo(() => {
-        const groups = {
-            "ULTRA RARE (< 5%)": [] as Achievement[],
-            "VERY RARE (5% - 10%)": [] as Achievement[],
-            "RARE (10% - 25%)": [] as Achievement[],
-            "UNCOMMON (25% - 50%)": [] as Achievement[],
-            "COMMON (> 50%)": [] as Achievement[]
-        };
-
-        filtered.forEach(ach => {
-            const p = ach.global_percent ?? 100;
-            if (p <= 5) groups["ULTRA RARE (< 5%)"].push(ach);
-            else if (p <= 10) groups["VERY RARE (5% - 10%)"].push(ach);
-            else if (p <= 25) groups["RARE (10% - 25%)"].push(ach);
-            else if (p <= 50) groups["UNCOMMON (25% - 50%)"].push(ach);
-            else groups["COMMON (> 50%)"].push(ach);
-        });
-
-        for (const key of Object.keys(groups)) {
-            const k = key as keyof typeof groups;
-            groups[k].sort((a, b) => {
-                if (a.earned !== b.earned) return a.earned ? -1 : 1;
-                if (a.earned && b.earned) return (b.earned_time ?? 0) - (a.earned_time ?? 0);
-                return 0;
-            });
-        }
-
-        return groups;
-    }, [filtered]);
+    const list = useMemo(() => {
+        let l = achievements;
+        if (filter === "unlocked") l = l.filter((a) => a.earned);
+        else if (filter === "locked") l = l.filter((a) => !a.earned);
+        if (q) l = l.filter((a) => !(a.hidden && !a.earned) && (a.display_name.toLowerCase().includes(q) || a.description.toLowerCase().includes(q)));
+        const arr = [...l];
+        if (sort === "name") arr.sort((a, b) => a.display_name.localeCompare(b.display_name));
+        else if (sort === "recent") arr.sort((a, b) => (b.earned_time ?? 0) - (a.earned_time ?? 0) || Number(b.earned) - Number(a.earned));
+        else arr.sort((a, b) => Number(b.earned) - Number(a.earned) || (a.global_percent ?? 101) - (b.global_percent ?? 101));
+        return arr;
+    }, [achievements, filter, sort, q]);
 
     if (achievements.length === 0) {
         return (
-            <div className="flex flex-col items-center justify-center py-32 gap-4 opacity-30">
-                <div className="text-5xl">🏆</div>
-                <p className="font-black tracking-widest text-xs uppercase text-white">No achievements found</p>
-                <p className="text-white/40 text-sm text-center max-w-xs">This game has no local achievements.json in its steam_settings folder. Run the metadata sync to pull from Steam.</p>
-            </div>
+            <EmptyState
+                icon={<Trophy size={26} />}
+                title="No achievements yet"
+                description="This game has no achievements file. Open Edit details → Achievements to point at one, or generate it from Steam."
+            />
         );
     }
 
     return (
-        <div className="space-y-10">
-            <div className="flex items-end justify-between gap-4 flex-wrap">
+        <div className="space-y-5">
+            <div className="surface flex flex-wrap items-center gap-x-8 gap-y-3 p-4">
                 <div>
-                    <h2 className="text-white font-black text-sm tracking-widest uppercase mb-1">
-                        {gameName ? `${gameName} Achievements` : "Achievements"}
-                    </h2>
-                    <p className="text-white/40 text-xs">{unlocked} / {achievements.length} Unlocked</p>
+                    <div className="text-2xl font-semibold tabular-nums">{unlocked}<span className="text-base text-fg-mute"> / {achievements.length}</span></div>
+                    <div className="text-xs text-fg-mute">achievements unlocked</div>
                 </div>
-                <div className="flex items-center gap-3 min-w-[180px]">
-                    <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden">
-                        <motion.div
-                            className="h-full bg-gradient-to-r from-accent via-accent/70 to-accent/40 rounded-full"
-                            initial={{ width: 0 }}
-                            animate={{ width: `${progress}%` }}
-                            transition={{ duration: 1, ease: "easeOut" }}
-                        />
-                    </div>
-                    <span className="text-xs font-black text-white/60 tabular-nums">{progress}%</span>
+                <div className="min-w-[200px] flex-1">
+                    <div className="mb-1.5 flex justify-between text-xs"><span className="text-fg-mute">Completion</span><span className="font-medium tabular-nums text-fg-soft">{Math.round(pct)}%</span></div>
+                    <ProgressBar value={pct} tone={pct === 100 ? "ok" : "accent"} height={8} />
                 </div>
             </div>
 
-            <div className="flex gap-1.5 flex-wrap">
-                {([
-                    { key: "all", label: `All (${achievements.length})`, cls: "text-white/60" },
-                    { key: "unlocked", label: `✓ Unlocked (${unlocked})`, cls: "text-emerald-400" },
-                    { key: "locked", label: `Locked (${achievements.length - unlocked})`, cls: "text-white/30" },
-                ] as { key: FilterKey; label: string; cls: string }[]).map(tab => (
-                    <button
-                        key={tab.key}
-                        onClick={() => setFilter(tab.key)}
-                        className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border ${filter === tab.key
-                            ? `bg-white/10 border-white/20 shadow-md ${tab.cls}`
-                            : "border-transparent text-white/20 hover:text-white/40 hover:bg-white/5"
-                            }`}
-                    >
-                        {tab.label}
-                    </button>
-                ))}
+            <div className="flex flex-wrap items-center gap-3">
+                <Segmented
+                    value={filter}
+                    onChange={setFilter}
+                    size="sm"
+                    options={[
+                        { value: "all", label: `All ${achievements.length}` },
+                        { value: "unlocked", label: `Unlocked ${unlocked}` },
+                        { value: "locked", label: `Locked ${achievements.length - unlocked}` },
+                    ]}
+                />
+                <div className="relative">
+                    <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-mute" />
+                    <input
+                        value={query}
+                        onChange={(e) => setQuery(e.target.value)}
+                        placeholder="Search achievements"
+                        aria-label="Search achievements"
+                        className="h-8 w-52 rounded-ctl border border-line-strong bg-raised pl-8 pr-2 text-[13px] outline-none placeholder:text-fg-mute focus:border-accent/60"
+                    />
+                </div>
+                <select value={sort} onChange={(e) => setSort(e.target.value as Sort)} aria-label="Sort achievements" className="h-8 !py-0 text-[13px]">
+                    <option value="rarity">Rarest first</option>
+                    <option value="recent">Recently unlocked</option>
+                    <option value="name">Name</option>
+                </select>
             </div>
 
-            <div className="space-y-12">
-                {Object.entries(grouped).map(([groupName, groupAch]) => {
-                    if (groupAch.length === 0) return null;
-                    return (
-                        <div key={groupName} className="space-y-4">
-                            <div className="flex items-center gap-3 opacity-60">
-                                <h3 className="text-xs font-black text-white tracking-widest uppercase">{groupName}</h3>
-                                <div className="h-px flex-1 bg-white/10" />
-                            </div>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                                <AnimatePresence mode="popLayout">
-                                    {groupAch.map(ach => {
-                                        const isHiddenLocked = ach.hidden && !ach.earned;
-                                        const iconSrc = ach.earned && !imgErrors.has(ach.api_name + ".icon") && ach.icon_path
-                                            ? ach.icon_path
-                                            : !ach.earned && !imgErrors.has(ach.api_name + ".gray") && ach.icon_gray_path
-                                                ? ach.icon_gray_path
-                                                : null;
-
-                                        const rarityInfo = getRarityColors(ach.global_percent);
-                                        const rarityCss = ach.earned ? `${rarityInfo.border} ${rarityInfo.shadow}` : "border-white/5 opacity-55 hover:opacity-80 hover:border-white/10";
-
-                                        return (
-                                            <motion.div
-                                                key={ach.api_name}
-                                                layout
-                                                initial={{ opacity: 0, scale: 0.9 }}
-                                                animate={{ opacity: 1, scale: 1 }}
-                                                exit={{ opacity: 0, scale: 0.85 }}
-                                                transition={{ duration: 0.18 }}
-                                                onClick={() => setSelected(ach)}
-                                                className={`relative group cursor-pointer rounded-2xl border p-4 flex items-center gap-5 transition-all hover:scale-[1.02] ${rarityCss} bg-white/[0.03] hover:bg-white/[0.06]`}
-                                            >
-                                                <div className={`relative flex-shrink-0 w-14 h-14 rounded-xl overflow-hidden border ${ach.earned ? "border-transparent" : "border-white/10"} bg-black/30`}>
-                                                    {iconSrc ? (
-                                                        <img
-                                                            src={iconSrc}
-                                                            alt={ach.display_name}
-                                                            className={`w-full h-full object-cover ${!ach.earned ? "grayscale brightness-50" : ""}`}
-                                                            loading="lazy"
-                                                            onError={() => setImgErrors(prev => new Set(prev).add(ach.api_name + (ach.earned ? ".icon" : ".gray")))}
-                                                        />
-                                                    ) : (
-                                                        <div className="w-full h-full flex items-center justify-center text-2xl">
-                                                            {isHiddenLocked ? "🔒" : "🏅"}
-                                                        </div>
-                                                    )}
-                                                </div>
-                                                <div className="flex-1 min-w-0">
-                                                    <div className="flex items-center gap-2 mb-1">
-                                                        {ach.earned ? (
-                                                            <span className="text-[8px] font-black tracking-widest text-emerald-400">✓ UNLOCKED</span>
-                                                        ) : (
-                                                            <span className={`text-[8px] font-black tracking-widest ${rarityInfo.text}`}>{rarityInfo.name}</span>
-                                                        )}
-                                                    </div>
-                                                    <h4 className="text-white font-bold text-xs leading-snug truncate">
-                                                        {isHiddenLocked ? "???" : ach.display_name}
-                                                    </h4>
-                                                    {!isHiddenLocked && ach.description && (
-                                                        <p className="text-white/35 text-[10px] mt-1 line-clamp-2 leading-snug">
-                                                            {ach.description}
-                                                        </p>
-                                                    )}
-                                                </div>
-                                            </motion.div>
-                                        );
-                                    })}
-                                </AnimatePresence>
-                            </div>
-                        </div>
-                    );
-                })}
-            </div>
-
-            <AnimatePresence>
-                {selected && (
-                    <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        className="fixed inset-0 z-[100] flex items-center justify-center p-6"
-                        onClick={() => setSelected(null)}
-                    >
-                        <div className="absolute inset-0 bg-black/80 backdrop-blur-md" />
-                        <motion.div
-                            initial={{ scale: 0.92, opacity: 0, y: 16 }}
-                            animate={{ scale: 1, y: 0, opacity: 1 }}
-                            exit={{ scale: 0.92, opacity: 0, y: 16 }}
-                            onClick={e => e.stopPropagation()}
-                            className="relative z-10 w-full max-w-sm bg-[#161a26] border border-white/10 rounded-[2rem] overflow-hidden shadow-2xl"
-                        >
-                            <div className="p-8 pb-6 bg-black/40 flex flex-col items-center text-center">
-                                <div className={`w-28 h-28 rounded-3xl overflow-hidden border-4 mb-6 ${selected.earned ? getRarityColors(selected.global_percent).border.split(' ')[0] : "border-white/10"} shadow-xl`}>
-                                    {(selected.earned && selected.icon_path) || (!selected.earned && selected.icon_gray_path) ? (
-                                        <img src={selected.earned ? selected.icon_path! : selected.icon_gray_path!} className={`w-full h-full object-cover ${!selected.earned ? "grayscale" : ""}`} />
-                                    ) : (
-                                        <div className="w-full h-full flex items-center justify-center text-4xl">
-                                            {selected.hidden && !selected.earned ? "🔒" : "🏆"}
-                                        </div>
-                                    )}
-                                </div>
-                                <h3 className="text-xl font-black text-white">{selected.hidden && !selected.earned ? "Secret Achievement" : selected.display_name}</h3>
-                                <p className="text-white/50 text-sm mt-3 leading-relaxed">
-                                    {selected.hidden && !selected.earned ? "Keep playing to reveal this achievement." : selected.description}
-                                </p>
-                            </div>
-
-                            <div className="bg-[#12141c] p-6 border-t border-white/5 flex flex-col gap-4">
-                                <div className="flex justify-between items-center text-xs font-bold uppercase tracking-widest text-white/40">
-                                    <span>Status</span>
-                                    {selected.earned ? <span className="text-emerald-400">Unlocked</span> : <span>Locked</span>}
-                                </div>
-                                {selected.earned && selected.earned_time && (
-                                    <div className="flex justify-between items-center text-xs font-bold uppercase tracking-widest text-white/40">
-                                        <span>Date</span>
-                                        <span className="text-white/80">{formatDate(selected.earned_time)}</span>
-                                    </div>
-                                )}
-                                {selected.global_percent !== null && (
-                                    <div className="flex justify-between items-center text-xs font-bold uppercase tracking-widest text-white/40">
-                                        <span>Rarity ({getRarityColors(selected.global_percent).name})</span>
-                                        <span className="text-white/80 text-right">{selected.global_percent.toFixed(1)}% of players have unlocked this achievement</span>
-                                    </div>
-                                )}
-                            </div>
-                        </motion.div>
-                    </motion.div>
-                )}
-            </AnimatePresence>
+            {list.length === 0 ? (
+                <p className="py-10 text-center text-sm text-fg-mute">No achievements match.</p>
+            ) : (
+                <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))" }}>
+                    {list.map((a) => <AchievementCard key={a.api_name} a={a} />)}
+                </div>
+            )}
         </div>
     );
 }

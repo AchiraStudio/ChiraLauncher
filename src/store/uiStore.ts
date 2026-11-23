@@ -1,51 +1,50 @@
 import { create } from "zustand";
-import type { Folder } from "./folderStore";
 import type { Game } from "../types/game";
 
 interface UiState {
-    isAddGameModalOpen: boolean;
-    isEditGameModalOpen: boolean;
+    addGameOpen: boolean;
+    scannerOpen: boolean;
+    resetOpen: boolean;
+    paletteOpen: boolean;
+    updateDialogOpen: boolean;
     gameToEdit: Game | null;
-    isScannerModalOpen: boolean;
-    isFolderModalOpen: boolean;
-    folderToEdit: Folder | null;
-    isLibrarySettingsModalOpen: boolean;
-    isAppIdModalOpen: boolean;
-    isResetModalOpen: boolean;
     isFirstLaunch: boolean;
-    currentBg: string | null;
+    sidebarCollapsed: boolean;
 
-    setAddGameModalOpen: (open: boolean) => void;
-    setEditGameModalOpen: (open: boolean, game?: Game | null) => void;
-    setScannerModalOpen: (open: boolean) => void;
-    setFolderModalOpen: (open: boolean, folder?: Folder | null) => void;
-    setLibrarySettingsModalOpen: (open: boolean) => void;
-    setAppIdModalOpen: (open: boolean) => void;
-    setResetModalOpen: (open: boolean) => void;
-    setFirstLaunch: (first: boolean) => void;
-    setCurrentBg: (bg: string | null) => void;
+    setAddGameOpen: (v: boolean) => void;
+    setScannerOpen: (v: boolean) => void;
+    setResetOpen: (v: boolean) => void;
+    setPaletteOpen: (v: boolean) => void;
+    setUpdateDialogOpen: (v: boolean) => void;
+    editGame: (game: Game | null) => void;
+    setFirstLaunch: (v: boolean) => void;
+    toggleSidebar: () => void;
 }
 
-export const useUiStore = create<UiState>((set) => ({
-    isAddGameModalOpen: false,
-    isEditGameModalOpen: false,
-    gameToEdit: null,
-    isScannerModalOpen: false,
-    isFolderModalOpen: false,
-    folderToEdit: null,
-    isLibrarySettingsModalOpen: false,
-    isAppIdModalOpen: false,
-    isResetModalOpen: false,
-    isFirstLaunch: false,
-    currentBg: null,
+const readCollapsed = () => {
+    try { return localStorage.getItem("ui.sidebarCollapsed") === "1"; } catch { return false; }
+};
 
-    setAddGameModalOpen: (open) => set({ isAddGameModalOpen: open }),
-    setEditGameModalOpen: (open, game = null) => set({ isEditGameModalOpen: open, gameToEdit: game ?? null }),
-    setScannerModalOpen: (open) => set({ isScannerModalOpen: open }),
-    setFolderModalOpen: (open, folder = null) => set({ isFolderModalOpen: open, folderToEdit: folder ?? null }),
-    setLibrarySettingsModalOpen: (open) => set({ isLibrarySettingsModalOpen: open }),
-    setAppIdModalOpen: (open) => set({ isAppIdModalOpen: open }),
-    setResetModalOpen: (open) => set({ isResetModalOpen: open }),
-    setFirstLaunch: (first) => set({ isFirstLaunch: first }),
-    setCurrentBg: (bg) => set({ currentBg: bg }),
+export const useUiStore = create<UiState>((set, get) => ({
+    addGameOpen: false,
+    scannerOpen: false,
+    resetOpen: false,
+    paletteOpen: false,
+    updateDialogOpen: false,
+    gameToEdit: null,
+    isFirstLaunch: false,
+    sidebarCollapsed: readCollapsed(),
+
+    setAddGameOpen: (v) => set({ addGameOpen: v }),
+    setScannerOpen: (v) => set({ scannerOpen: v }),
+    setResetOpen: (v) => set({ resetOpen: v }),
+    setPaletteOpen: (v) => set({ paletteOpen: v }),
+    setUpdateDialogOpen: (v) => set({ updateDialogOpen: v }),
+    editGame: (game) => set({ gameToEdit: game }),
+    setFirstLaunch: (v) => set({ isFirstLaunch: v }),
+    toggleSidebar: () => {
+        const next = !get().sidebarCollapsed;
+        try { localStorage.setItem("ui.sidebarCollapsed", next ? "1" : "0"); } catch { /* storage unavailable */ }
+        set({ sidebarCollapsed: next });
+    },
 }));

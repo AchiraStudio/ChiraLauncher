@@ -1,558 +1,323 @@
-import { useState, useEffect, useCallback } from "react";
-import { useUiStore } from "../../store/uiStore";
-import { useSettingsStore } from "../../store/settingsStore";
-import { invoke } from "@tauri-apps/api/core";
+import { useEffect, useMemo, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { motion, AnimatePresence } from "framer-motion";
-import { useGameStore } from "../../store/gameStore";
-import { fetchSteamMetadata, parseSteamDate, fetchSteamAchievementPercentages } from "../../services/steamService";
 import { toast } from "sonner";
 import {
-    X, Image, Save, Gamepad2, FileText, Pencil, Globe, Link2, Trophy, Activity, Zap
+    Pencil, Gamepad2, Zap, Image as ImageIcon, FileText, Trophy, Activity, Globe, FolderOpen, X, Play, Link2, Unlink, RefreshCcw, Save, Hash,
 } from "lucide-react";
-import { cn } from "../../lib/utils";
+import { useUiStore } from "../../store/uiStore";
+import { useGameStore } from "../../store/gameStore";
+import { useSettingsStore } from "../../store/settingsStore";
+import { useGameActions } from "../../hooks/useGameActions";
+import { confirm as askConfirm } from "../../store/confirmStore";
+import { call, errMsg } from "../../lib/tauri";
+import { dirname } from "../../lib/utils";
+import { fetchSteamAchievementPercentages, fetchSteamMetadata, steamArtwork, steamToFields, type SteamAppDetails } from "../../services/steamService";
+import { smartAudio } from "../../services/SmartAudio";
+import { useLocalImage } from "../../hooks/useLocalImage";
+import type { Game } from "../../types/game";
 import { ExecutionMethodSettings } from "../game/ExecutionMethodSettings";
-import { EditGameGeneralTab } from "./edit/EditGameGeneralTab";
-import { EditGameMediaTab } from "./edit/EditGameMediaTab";
-import { EditGameAchievementsTab } from "./edit/EditGameAchievementsTab";
-import { EditGameExtraTab } from "./edit/EditGameExtraTab";
-import { EditGameDiagnosticsTab } from "./edit/EditGameDiagnosticsTab";
+import { TrackList } from "../settings/TrackList";
+import { Modal } from "../ui/Modal";
+import { Button, IconButton } from "../ui/Button";
+import { Field, TextArea, TextInput } from "../ui/controls";
+import { cn } from "../../lib/utils";
 
-type Tab = "general" | "execution" | "media" | "extra" | "achievements" | "diagnostics";
+type Tab = "general" | "launch" | "media" | "details" | "achievements" | "diagnostics";
 
-interface AchievementDiagnostics {
-    emulator: string;
-    app_id: string | null;
-    metadata_path: string | null;
-    metadata_valid: boolean;
-    metadata_count: number;
-    earned_state_path: string | null;
-    earned_state_format: string | null;
-    earned_count: number;
-    probe_log: string[];
+interface Form {
+    title: string; exePath: string; launchArgs: string; appId: string;
+    method: string; launcherPath: string;
+    cover: string; background: string; logo: string; focal: string; achSound: string; bgm: string[];
+    developer: string; publisher: string; releaseDate: string; genre: string; description: string;
+    manualAch: string; manualSave: string;
+}
+
+const FOCALS = ["center", "top", "bottom", "left", "right", "left-top", "right-top", "left-bottom", "right-bottom"];
+const AUDIO = [{ name: "Audio", extensions: ["mp3", "wav", "ogg", "flac", "m4a"] }];
+const IMAGES = [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "gif"] }];
+
+function toForm(g: Game): Form {
+    const [bg, focal] = (g.background_path ?? "").split("?pos=");
+    return {
+        title: g.title, exePath: g.executable_path, launchArgs: g.launch_args ?? "", appId: g.steam_app_id?.toString() ?? "",
+        method: g.execution_method || "direct", launcherPath: g.launcher_path ?? "",
+        cover: g.cover_path ?? "", background: bg ?? "", logo: g.logo_path ?? "", focal: focal || "center",
+        achSound: g.custom_ach_sound_path ?? "",
+        bgm: g.custom_bgm_paths?.length ? g.custom_bgm_paths : g.custom_bgm_path ? [g.custom_bgm_path] : [],
+        developer: g.developer ?? "", publisher: g.publisher ?? "", releaseDate: g.release_date ?? "", genre: g.genre ?? "", description: g.description ?? "",
+        manualAch: g.manual_achievement_path ?? "", manualSave: g.manual_save_path ?? "",
+    };
+}
+
+function ImageField({ label, value, onChange, aspect, hint, children }: { label: string; value: string; onChange: (v: string) => void; aspect: string; hint?: string; children?: React.ReactNode }) {
+    const { src } = useLocalImage(value || null);
+    const browse = async () => { const r = await openDialog({ multiple: false, filters: IMAGES }).catch(() => null); if (typeof r === "string") onChange(r); };
+    return (
+        <div className="flex gap-4">
+            <div className={cn("grid shrink-0 place-items-center overflow-hidden rounded-lg border border-line bg-black/30 text-fg-mute", aspect)}>
+                {src ? <img src={src} alt="" className="h-full w-full object-cover" onError={(e) => (e.currentTarget.style.display = "none")} /> : <ImageIcon size={20} />}
+            </div>
+            <div className="min-w-0 flex-1 space-y-2">
+                <div className="flex items-center justify-between"><span className="text-[13px] font-medium text-fg-soft">{label}</span>{children}</div>
+                <div className="flex gap-2">
+                    <TextInput mono value={value} onChange={(e) => onChange(e.target.value)} placeholder="File path or https:// URL" />
+                    <Button variant="secondary" icon={<FolderOpen size={15} />} onClick={() => void browse()} aria-label={`Browse ${label}`} />
+                    {value && <Button variant="ghost" icon={<X size={15} />} onClick={() => onChange("")} aria-label={`Clear ${label}`} />}
+                </div>
+                {hint && <p className="text-xs text-fg-mute">{hint}</p>}
+            </div>
+        </div>
+    );
+}
+
+function PathRow({ label, value, onChange, onBrowse, placeholder }: { label: string; value: string; onChange: (v: string) => void; onBrowse: () => void; placeholder?: string }) {
+    return (
+        <Field label={label}>
+            <div className="flex gap-2">
+                <TextInput mono value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />
+                <Button variant="secondary" icon={<FolderOpen size={15} />} onClick={onBrowse} aria-label={`Browse ${label}`} />
+            </div>
+        </Field>
+    );
 }
 
 export function EditGameModal() {
-    const isOpen = useUiStore((s: any) => s.isEditGameModalOpen);
-    const gameToEdit = useUiStore((s: any) => s.gameToEdit);
-    const setEditGameModalOpen = useUiStore((s: any) => s.setEditGameModalOpen);
-    const fetchGames = useGameStore((s: any) => s.fetchGames);
-
+    const game = useUiStore((s) => s.gameToEdit)!;
+    const editGame = useUiStore((s) => s.editGame);
+    const { createShortcuts, removeShortcuts } = useGameActions();
     const [tab, setTab] = useState<Tab>("general");
-    const [title, setTitle] = useState("");
-    const [exePath, setExePath] = useState("");
-    const [launchArgs, setLaunchArgs] = useState("");
+    const [f, setF] = useState<Form>(() => toForm(game));
+    const [saving, setSaving] = useState(false);
+    const [steam, setSteam] = useState<{ data: SteamAppDetails } | null>(null);
+    const [steamBusy, setSteamBusy] = useState(false);
+    const [importOpts, setImportOpts] = useState({ title: true, details: true, description: true, images: true, achievements: true });
+    const [achBusy, setAchBusy] = useState<"" | "gen" | "sam">("");
+    const [diag, setDiag] = useState<Record<string, any> | null>(null);
+    const [diagBusy, setDiagBusy] = useState(false);
 
-    const [executionMethod, setExecutionMethod] = useState<"direct" | "auto_launcher" | "manual_launcher" | "unreal_engine" | "official_steam">("direct");
-    const [launcherPath, setLauncherPath] = useState("");
+    useEffect(() => { setF(toForm(game)); setTab("general"); setDiag(null); setSteam(null); }, [game.id]); // eslint-disable-line react-hooks/exhaustive-deps
+    const up = <K extends keyof Form>(k: K, v: Form[K]) => setF((p) => ({ ...p, [k]: v }));
+    const close = () => editGame(null);
+    const dirty = useMemo(() => JSON.stringify(f) !== JSON.stringify(toForm(game)), [f, game]);
 
-    const [coverPath, setCoverPath] = useState("");
-    const [backgroundPath, setBackgroundPath] = useState("");
-    const [logoPath, setLogoPath] = useState("");
-    const [focalPoint, setFocalPoint] = useState("center");
-    const [customAchSoundPath, setCustomAchSoundPath] = useState("");
-
-    const [customBgmPaths, setCustomBgmPaths] = useState<string[]>([]);
-
-    const [developer, setDeveloper] = useState("");
-    const [publisher, setPublisher] = useState("");
-    const [releaseDate, setReleaseDate] = useState("");
-    const [description, setDescription] = useState("");
-    const [notes, setNotes] = useState("");
-    const [genre, setGenre] = useState("");
-    const [appIdInput, setAppIdInput] = useState("");
-
-    const [manualAchPath, setManualAchPath] = useState("");
-    const [manualSavePath, setManualSavePath] = useState("");
-    const [diagnostics, setDiagnostics] = useState<AchievementDiagnostics | null>(null);
-    const [isRefreshingDiag, setIsRefreshingDiag] = useState(false);
-
-    const [isSaving, setIsSaving] = useState(false);
-    const [isFetching, setIsFetching] = useState(false);
-    const [isGeneratingAch, setIsGeneratingAch] = useState(false);
-    const [isSyncingSteam, setIsSyncingSteam] = useState(false);
-
-    useEffect(() => {
-        if (gameToEdit) {
-            setTab("general");
-            setTitle(gameToEdit.title || "");
-            setExePath(gameToEdit.executable_path || "");
-            setLaunchArgs(gameToEdit.launch_args || "");
-
-            setExecutionMethod((gameToEdit.execution_method as any) || "direct");
-            setLauncherPath(gameToEdit.launcher_path || "");
-
-            setCoverPath(gameToEdit.cover_image_path || (gameToEdit as any).cover_path || "");
-            setLogoPath(gameToEdit.logo_path || "");
-
-            const rawBg = gameToEdit.background_image_path || (gameToEdit as any).background_path || "";
-            const [urlPart, posPart] = rawBg.split("?pos=");
-            setBackgroundPath(urlPart);
-            setFocalPoint(posPart || "center");
-
-            setCustomAchSoundPath(gameToEdit.custom_ach_sound_path || "");
-
-            const paths = gameToEdit.custom_bgm_paths?.length > 0
-                ? gameToEdit.custom_bgm_paths
-                : (gameToEdit.custom_bgm_path ? [gameToEdit.custom_bgm_path] : []);
-            setCustomBgmPaths(paths);
-
-            setDeveloper(gameToEdit.developer || "");
-            setPublisher(gameToEdit.publisher || "");
-            setReleaseDate(gameToEdit.release_date || "");
-            setDescription(gameToEdit.description || "");
-            setNotes(gameToEdit.notes || "");
-            setGenre(gameToEdit.genre || "");
-            setAppIdInput(gameToEdit.steam_app_id?.toString() || "");
-            setManualAchPath(gameToEdit.manual_achievement_path || "");
-            setManualSavePath(gameToEdit.manual_save_path || "");
-            setDiagnostics(null);
-        }
-    }, [gameToEdit?.id]);
-
-    const refreshDiagnostics = async () => {
-        if (!gameToEdit) return;
-        setIsRefreshingDiag(true);
-        try {
-            const result = await invoke<AchievementDiagnostics>("get_achievement_diagnostics", { gameId: gameToEdit.id });
-            setDiagnostics(result);
-        } catch (e) {
-            console.error("Failed to fetch diagnostics", e);
-        } finally {
-            setIsRefreshingDiag(false);
-        }
+    const requestClose = async () => {
+        if (!dirty || await askConfirm({ title: "Discard your changes?", description: "Anything you edited will be lost.", confirmLabel: "Discard", danger: true })) close();
     };
 
-    const close = useCallback(() => setEditGameModalOpen(false), [setEditGameModalOpen]);
-
-    const [steamDataToImport, setSteamDataToImport] = useState<any>(null);
-    const [importOptions, setImportOptions] = useState({
-        title: true,
-        details: true,
-        description: true,
-        images: true,
-        achievements: true
-    });
-
-    if (!isOpen || !gameToEdit) return null;
-
-    const handleSave = async () => {
-        setIsSaving(true);
+    const save = async () => {
+        if (!f.title.trim()) return toast.error("Title can't be empty");
+        setSaving(true);
         try {
-            const originalCover = gameToEdit.cover_image_path || (gameToEdit as any).cover_path || "";
-            const originalBg = (gameToEdit.background_image_path || (gameToEdit as any).background_path || "").split("?pos=")[0];
-            const originalLogo = gameToEdit.logo_path || "";
-
-            const processImage = async (current: string, original: string, type: string) => {
-                if (!current || current === original || current.startsWith("data:")) return current;
+            const orig = toForm(game);
+            const process = async (cur: string, was: string, type: "cover" | "background" | "logo") => {
+                if (!cur || cur === was || cur.startsWith("data:")) return cur;
                 try {
-                    if (current.startsWith("http")) {
-                        return await invoke<string>("download_url_to_cache", { url: current, imageType: type });
-                    } else {
-                        return await invoke<string>(`upload_custom_${type}`, { gameId: gameToEdit.id, filePath: current });
-                    }
-                } catch (e) {
-                    console.error(`Failed to process ${type}:`, e);
-                    return current;
-                }
+                    return cur.startsWith("http")
+                        ? await call<string>("download_url_to_cache", { url: cur, imageType: type })
+                        : await call<string>(`upload_custom_${type}`, { gameId: game.id, filePath: cur });
+                } catch (e) { console.error(`Failed to process ${type}:`, e); return cur; }
             };
-
-            const finalCover = await processImage(coverPath, originalCover, "cover");
-            const finalBgRaw = await processImage(backgroundPath, originalBg, "background");
-            const finalLogo = await processImage(logoPath, originalLogo, "logo");
-            const finalBg = finalBgRaw ? `${finalBgRaw}?pos=${focalPoint}` : null;
-
-            const exeChanged = exePath !== gameToEdit.executable_path;
-            const newInstallDir = exeChanged
-                ? exePath.substring(0, Math.max(exePath.lastIndexOf("\\"), exePath.lastIndexOf("/")))
-                : gameToEdit.install_dir;
-
-            const updatedGame = {
-                ...gameToEdit,
-                title,
-                executable_path: exePath,
-                install_dir: newInstallDir,
-                launch_args: launchArgs || null,
-                cover_image_path: finalCover || null,
-                background_image_path: finalBg || null,
-                logo_path: finalLogo || null,
-                cover_path: finalCover || null,
-                background_path: finalBg || null,
-                custom_ach_sound_path: customAchSoundPath || null,
-                custom_bgm_paths: customBgmPaths,
-                developer: developer || null,
-                publisher: publisher || null,
-                release_date: releaseDate || null,
-                description: description || null,
-                notes: notes || null,
-                genre: genre || null,
-                steam_app_id: appIdInput ? parseInt(appIdInput) : null,
-                manual_achievement_path: manualAchPath.trim() || null,
-                manual_save_path: manualSavePath.trim() || null,
-                execution_method: executionMethod,
-                launcher_path: launcherPath || null,
+            const [cover, bgRaw, logo] = await Promise.all([process(f.cover, orig.cover, "cover"), process(f.background, orig.background, "background"), process(f.logo, orig.logo, "logo")]);
+            const exeChanged = f.exePath !== game.executable_path;
+            const updated: Game = {
+                ...game,
+                title: f.title.trim(), executable_path: f.exePath, install_dir: exeChanged ? dirname(f.exePath) : game.install_dir,
+                launch_args: f.launchArgs.trim() || null,
+                cover_path: cover || null, background_path: bgRaw ? `${bgRaw}?pos=${f.focal}` : null, logo_path: logo || null,
+                custom_cover: game.custom_cover || (!!cover && cover !== orig.cover),
+                custom_ach_sound_path: f.achSound || null, custom_bgm_paths: f.bgm,
+                developer: f.developer || null, publisher: f.publisher || null, release_date: f.releaseDate || null,
+                description: f.description || null, genre: f.genre || null,
+                steam_app_id: f.appId ? parseInt(f.appId, 10) || null : null,
+                manual_achievement_path: f.manualAch.trim() || null, manual_save_path: f.manualSave.trim() || null,
+                execution_method: f.method, launcher_path: f.launcherPath || null,
             };
+            await call("update_game", { game: updated });
+            if ((updated.manual_achievement_path ?? "") !== (game.manual_achievement_path ?? ""))
+                await call("set_manual_achievement_path", { gameId: game.id, path: updated.manual_achievement_path });
+            if ((updated.manual_save_path ?? "") !== (game.manual_save_path ?? ""))
+                await call("set_manual_save_path", { gameId: game.id, path: updated.manual_save_path });
 
-            await invoke("update_game", { game: updatedGame });
-
-            if (manualAchPath !== gameToEdit.manual_achievement_path) {
-                await invoke("set_manual_achievement_path", { gameId: gameToEdit.id, path: manualAchPath.trim() || null });
-            }
-            if (manualSavePath !== gameToEdit.manual_save_path) {
-                await invoke("set_manual_save_path", { gameId: gameToEdit.id, path: manualSavePath.trim() || null });
-            }
-
-            await fetchGames();
+            // Show the change immediately; the backend persists through a queue, so reconcile shortly after
+            useGameStore.getState().patchGame(game.id, updated);
+            setTimeout(() => void useGameStore.getState().fetchGames(), 500);
+            toast.success("Changes saved");
             close();
-        } catch (e) {
-            console.error(e);
-            toast.error("Failed to update game metadata");
-        } finally {
-            setIsSaving(false);
-        }
+        } catch (e) { toast.error("Couldn't save changes", { description: errMsg(e) }); }
+        finally { setSaving(false); }
     };
 
-    const handleFetchSteam = async () => {
-        if (!appIdInput) {
-            toast.error("No Steam App ID found", { description: "Please enter an App ID in the General tab." });
-            return;
-        }
-
-        setIsFetching(true);
-        try {
-            const data = await fetchSteamMetadata(appIdInput);
-            setSteamDataToImport(data);
-        } catch (error) {
-            toast.error("Failed to pull from Steam", { description: "Please ensure the App ID is correct." });
-        } finally {
-            setIsFetching(false);
-        }
+    const pullSteam = async () => {
+        if (!f.appId) return toast.error("Enter a Steam App ID first");
+        setSteamBusy(true);
+        try { setSteam({ data: await fetchSteamMetadata(f.appId) }); }
+        catch { toast.error("Couldn't pull from Steam", { description: "Check that the App ID is correct." }); }
+        finally { setSteamBusy(false); }
     };
 
-    const applySteamData = async () => {
-        if (!steamDataToImport) return;
-        const data = steamDataToImport;
-
-        if (importOptions.title && data.name) setTitle(data.name);
-        if (importOptions.description) setDescription(data.detailed_description || data.short_description || description);
-        if (importOptions.details) {
-            setDeveloper(data.developers?.[0] || developer);
-            setPublisher(data.publishers?.[0] || publisher);
-            setReleaseDate(parseSteamDate(data.release_date?.date) || releaseDate);
-            setGenre(data.genres?.map((g: any) => g.description).join(", ") || genre);
-        }
-        if (importOptions.images) {
-            const bgPref = localStorage.getItem("steam_bg_pref") || "hero";
-            setCoverPath(`https://cdn.cloudflare.steamstatic.com/steam/apps/${appIdInput}/library_600x900.jpg`);
-            setBackgroundPath(bgPref === "hero" ? `https://cdn.cloudflare.steamstatic.com/steam/apps/${appIdInput}/library_hero.jpg` : data.header_image);
-            setLogoPath(`https://cdn.cloudflare.steamstatic.com/steam/apps/${appIdInput}/logo_2x.png`);
-            setFocalPoint("center");
-        }
-
-        try {
-            const pcts = await fetchSteamAchievementPercentages(appIdInput);
-            if (Object.keys(pcts).length > 0 && gameToEdit) {
-                await invoke("patch_achievement_percentages", {
-                    gameId: gameToEdit.id,
-                    percentages: pcts
-                });
-            }
-        } catch (e) {
-            console.error("Failed to patch achievement rarity:", e);
-        }
-
-        if (importOptions.achievements && appIdInput) {
+    const applySteam = async () => {
+        if (!steam) return;
+        const d = steam.data, fields = steamToFields(d);
+        setF((p) => ({
+            ...p,
+            title: importOpts.title && fields.title ? fields.title : p.title,
+            description: importOpts.description ? fields.description || p.description : p.description,
+            developer: importOpts.details ? fields.developer || p.developer : p.developer,
+            publisher: importOpts.details ? fields.publisher || p.publisher : p.publisher,
+            releaseDate: importOpts.details ? fields.releaseDate || p.releaseDate : p.releaseDate,
+            genre: importOpts.details ? fields.genre || p.genre : p.genre,
+            ...(importOpts.images ? { cover: steamArtwork(f.appId, d.header_image).cover, background: steamArtwork(f.appId, d.header_image).background, logo: steamArtwork(f.appId, d.header_image).logo, focal: "center" } : {}),
+        }));
+        fetchSteamAchievementPercentages(f.appId).then((pcts) => { if (Object.keys(pcts).length) return call("patch_achievement_percentages", { gameId: game.id, percentages: pcts }); }).catch(console.error);
+        if (importOpts.achievements) {
             const apiKey = useSettingsStore.getState().settings?.steam_api_key;
-            if (apiKey) {
-                invoke("fetch_and_write_achievements", {
-                    appId: appIdInput,
-                    gameDir: gameToEdit.install_dir || "",
-                    apiKey
-                }).then(() => toast.success("Achievements generated in steam_settings"))
-                    .catch(e => toast.error("Failed to generate achievements", { description: String(e) }));
-            } else {
-                toast.warning("Cannot generate achievements: No Steam API Key configured.");
-            }
+            if (!apiKey) toast.warning("Add a Steam API key in Settings to generate achievements");
+            else call("fetch_and_write_achievements", { appId: f.appId, gameDir: game.install_dir || "", apiKey })
+                .then(() => toast.success("Achievements generated")).catch((e) => toast.error("Couldn't generate achievements", { description: errMsg(e) }));
         }
-
-        setSteamDataToImport(null);
-        toast.success("Metadata Placed", { description: "Review and save your changes." });
+        setSteam(null);
+        toast.success("Steam data applied", { description: "Review it, then save your changes." });
     };
 
-    const handleCreateShortcuts = async () => {
-        try {
-            await invoke("create_all_shortcuts", {
-                gameId: gameToEdit.id,
-                title: gameToEdit.title,
-                exePath: exePath || gameToEdit.executable_path,
-                installDir: gameToEdit.install_dir || ""
-            });
-            toast.success("Shortcuts Created", { description: "Added to Desktop and Start Menu." });
-        } catch (e) {
-            toast.error("Failed to create shortcuts", { description: String(e) });
-        }
-    };
-
-    const handleRemoveShortcuts = async () => {
-        try {
-            await invoke("remove_all_shortcuts", { gameId: gameToEdit.id });
-            toast.success("Shortcuts Removed", { description: "Removed from Desktop and Start Menu." });
-        } catch (e) {
-            toast.error("Failed to remove shortcuts", { description: String(e) });
-        }
-    };
-
-    const handlePickExe = async () => {
-        const selected = await openDialog({ multiple: false, filters: [{ name: "Executables", extensions: ["exe"] }] });
-        if (selected && typeof selected === "string") setExePath(selected);
-    };
-
-    const handlePickImage = async (type: "cover" | "bg" | "logo") => {
-        const selected = await openDialog({ multiple: false, filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "gif"] }] });
-        if (selected && typeof selected === "string") {
-            if (type === "cover") setCoverPath(selected);
-            else if (type === "bg") setBackgroundPath(selected);
-            else setLogoPath(selected);
-        }
-    };
-
-    const handlePickAudio = async (type: "bgm" | "achievement") => {
-        if (type === "bgm") {
-            const selected = await openDialog({ multiple: true, filters: [{ name: "Audio", extensions: ["mp3", "wav", "ogg", "flac", "m4a"] }] });
-            if (selected && Array.isArray(selected)) {
-                setCustomBgmPaths(prev => [...prev, ...selected]);
-            } else if (selected && typeof selected === "string") {
-                setCustomBgmPaths(prev => [...prev, selected]);
-            }
-        } else {
-            const selected = await openDialog({ multiple: false, filters: [{ name: "Audio", extensions: ["mp3", "wav", "ogg", "flac", "m4a"] }] });
-            if (selected && typeof selected === "string") {
-                setCustomAchSoundPath(selected);
-            }
-        }
-    };
-
-    const handlePickAchMeta = async () => {
-        const selected = await openDialog({ multiple: false, filters: [{ name: "JSON", extensions: ["json"] }] });
-        if (selected && typeof selected === "string") setManualAchPath(selected);
-    };
-
-    const handlePickAchSave = async () => {
-        const selected = await openDialog({ multiple: false, filters: [{ name: "Achievement Progress", extensions: ["ini", "json", "xml"] }] });
-        if (selected && typeof selected === "string") setManualSavePath(selected);
-    };
-
-    const moveTrack = (index: number, direction: -1 | 1) => {
-        setCustomBgmPaths(prev => {
-            const newPaths = [...prev];
-            if (index + direction < 0 || index + direction >= newPaths.length) return prev;
-            const temp = newPaths[index];
-            newPaths[index] = newPaths[index + direction];
-            newPaths[index + direction] = temp;
-            return newPaths;
-        });
-    };
-
-    const removeTrack = (index: number) => {
-        setCustomBgmPaths(prev => {
-            const newPaths = [...prev];
-            newPaths.splice(index, 1);
-            return newPaths;
-        });
-    };
+    const pickFile = async (opts: Parameters<typeof openDialog>[0]) => { const r = await openDialog(opts).catch(() => null); return r ?? null; };
 
     const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
-        { id: "general", label: "General", icon: <Gamepad2 size={14} /> },
-        { id: "execution", label: "Execution", icon: <Zap size={14} /> },
-        { id: "media", label: "Media & Assets", icon: <Image size={14} /> },
-        { id: "extra", label: "Details", icon: <FileText size={14} /> },
-        { id: "achievements", label: "Achievements", icon: <Trophy size={14} /> },
-        { id: "diagnostics", label: "Diagnostics", icon: <Activity size={14} /> },
+        { id: "general", label: "General", icon: <Gamepad2 size={14} /> }, { id: "launch", label: "Launch", icon: <Zap size={14} /> },
+        { id: "media", label: "Media", icon: <ImageIcon size={14} /> }, { id: "details", label: "Details", icon: <FileText size={14} /> },
+        { id: "achievements", label: "Achievements", icon: <Trophy size={14} /> }, { id: "diagnostics", label: "Diagnostics", icon: <Activity size={14} /> },
     ];
 
     return (
-        <AnimatePresence>
-            {isOpen && (
-                <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center pointer-events-auto p-6"
-                    onClick={(e) => { if (e.target === e.currentTarget) close(); }}
-                >
-                    <motion.div
-                        initial={{ opacity: 0, scale: 0.95, y: 16 }}
-                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                        exit={{ opacity: 0, scale: 0.95, y: 16 }}
-                        transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
-                        className="bg-[#161a26] w-full max-w-[620px] max-h-[88vh] rounded-2xl shadow-2xl border border-white/8 flex flex-col overflow-hidden"
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        <div className="px-7 pt-6 pb-5 border-b border-white/5 flex items-center justify-between shrink-0">
-                            <div className="flex items-center gap-3">
-                                <div className="w-9 h-9 rounded-xl bg-accent/10 border border-accent/20 flex items-center justify-center text-accent shrink-0">
-                                    <Pencil size={16} />
-                                </div>
-                                <div>
-                                    <h2 className="text-base font-black tracking-wide text-white">Edit Game</h2>
-                                    <p className="text-white/30 text-xs font-semibold mt-0.5 truncate max-w-[300px]">{gameToEdit.title}</p>
-                                </div>
-                            </div>
-                            <div className="flex gap-2">
-                                <button onClick={handleRemoveShortcuts} className="flex items-center gap-1.5 px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-lg text-[10px] font-bold uppercase transition-colors shadow-lg border border-red-500/10">
-                                    <X size={12} /> Remove Shortcuts
-                                </button>
-                                <button onClick={handleCreateShortcuts} className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 text-white rounded-lg text-[10px] font-bold uppercase transition-colors shadow-lg border border-white/10">
-                                    <Link2 size={12} /> Shortcuts
-                                </button>
-                                {appIdInput && (
-                                    <button onClick={handleFetchSteam} disabled={isFetching} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 rounded-lg text-[10px] font-bold uppercase transition-colors shadow-lg">
-                                        <Globe size={12} /> {isFetching ? "Syncing..." : "Steam Sync"}
-                                    </button>
-                                )}
-                                <button onClick={close} className="text-white/20 hover:text-white transition-colors w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/5">
-                                    <X size={18} strokeWidth={2.5} />
-                                </button>
-                            </div>
-                        </div>
+        <Modal
+            open onClose={() => void requestClose()} size="lg" icon={<Pencil size={18} />} title="Edit game" subtitle={game.title}
+            bodyClassName="!p-0"
+            actions={<>
+                <IconButton label="Create shortcuts" size="sm" onClick={() => void createShortcuts({ ...game, executable_path: f.exePath || game.executable_path })}><Link2 size={15} /></IconButton>
+                <IconButton label="Remove shortcuts" size="sm" onClick={() => void removeShortcuts(game)}><Unlink size={15} /></IconButton>
+                {f.appId && <Button size="sm" variant="secondary" icon={<Globe size={14} />} loading={steamBusy} onClick={() => void pullSteam()}>Steam sync</Button>}
+            </>}
+            footer={<>
+                <span className="text-xs text-fg-mute">{dirty ? "Unsaved changes" : ""}</span>
+                <div className="flex gap-2">
+                    <Button variant="secondary" onClick={() => void requestClose()}>Cancel</Button>
+                    <Button variant="primary" icon={<Save size={15} />} loading={saving} disabled={!dirty} onClick={() => void save()}>Save changes</Button>
+                </div>
+            </>}
+        >
+            <div className="no-scrollbar flex gap-1 overflow-x-auto border-b border-line px-5 py-2.5">
+                {TABS.map((t) => (
+                    <button key={t.id} onClick={() => setTab(t.id)} className={cn("inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-3 text-[13px] font-medium transition-colors", tab === t.id ? "bg-accent/15 text-accent" : "text-fg-mute hover:bg-white/[0.05] hover:text-fg-soft")}>{t.icon}{t.label}</button>
+                ))}
+            </div>
 
-                        <div className="px-7 pt-4 flex gap-1 shrink-0 border-b border-white/5 overflow-x-auto custom-scrollbar pb-1">
-                            {TABS.map((t) => (
-                                <button
-                                    key={t.id}
-                                    onClick={() => setTab(t.id)}
-                                    className={cn(
-                                        "flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap",
-                                        tab === t.id ? "bg-accent/15 text-accent border border-accent/25" : "text-white/30 hover:text-white/60 hover:bg-white/5 border border-transparent"
-                                    )}
-                                >
-                                    {t.icon} {t.label}
-                                </button>
+            <div className="space-y-5 p-5">
+                {steam ? (
+                    <div className="space-y-4">
+                        <div><h3 className="text-sm font-semibold">Import from Steam</h3><p className="text-[13px] text-fg-mute">Choose what to copy from “{steam.data.name}”. Nothing is saved until you press Save.</p></div>
+                        <div className="grid gap-2">
+                            {([["title", "Title"], ["details", "Developer, publisher, date and genre"], ["description", "Description"], ["images", "Cover, background and logo"], ["achievements", "Generate achievements file"]] as const).map(([k, label]) => (
+                                <label key={k} className="flex cursor-pointer items-center gap-3 rounded-xl border border-line p-3 text-sm transition-colors hover:bg-white/[0.04]">
+                                    <input type="checkbox" checked={importOpts[k]} onChange={(e) => setImportOpts((o) => ({ ...o, [k]: e.target.checked }))} className="h-4 w-4 accent-[var(--color-accent)]" />{label}
+                                </label>
                             ))}
                         </div>
-
-                        <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-white/10 p-7 space-y-5">
-                            {steamDataToImport ? (
-                                <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="space-y-6">
-                                    <div className="p-5 bg-black/40 border border-white/10 rounded-2xl">
-                                        <h3 className="text-sm font-black text-white uppercase tracking-widest mb-4">Import Metadata from Steam</h3>
-                                        <div className="space-y-4">
-                                            <label className="flex items-center gap-3 p-3 bg-white/5 rounded-xl border border-transparent hover:border-white/10 cursor-pointer transition-colors">
-                                                <input type="checkbox" checked={importOptions.title} onChange={(e) => setImportOptions(o => ({ ...o, title: e.target.checked }))} className="w-4 h-4 accent-accent" />
-                                                <span className="text-sm font-bold text-white">Title</span>
-                                            </label>
-                                            <label className="flex items-center gap-3 p-3 bg-white/5 rounded-xl border border-transparent hover:border-white/10 cursor-pointer transition-colors">
-                                                <input type="checkbox" checked={importOptions.details} onChange={(e) => setImportOptions(o => ({ ...o, details: e.target.checked }))} className="w-4 h-4 accent-accent" />
-                                                <span className="text-sm font-bold text-white">Details (Developer, Date, Genre)</span>
-                                            </label>
-                                            <label className="flex items-center gap-3 p-3 bg-white/5 rounded-xl border border-transparent hover:border-white/10 cursor-pointer transition-colors">
-                                                <input type="checkbox" checked={importOptions.description} onChange={(e) => setImportOptions(o => ({ ...o, description: e.target.checked }))} className="w-4 h-4 accent-accent" />
-                                                <span className="text-sm font-bold text-white">Rich Description</span>
-                                            </label>
-                                            <label className="flex items-center gap-3 p-3 bg-white/5 rounded-xl border border-transparent hover:border-white/10 cursor-pointer transition-colors">
-                                                <input type="checkbox" checked={importOptions.images} onChange={(e) => setImportOptions(o => ({ ...o, images: e.target.checked }))} className="w-4 h-4 accent-accent" />
-                                                <span className="text-sm font-bold text-white">Assets (Cover, Hero, & Logo)</span>
-                                            </label>
-                                            <label className="flex items-center gap-3 p-3 bg-white/5 rounded-xl border border-transparent hover:border-white/10 cursor-pointer transition-colors">
-                                                <input type="checkbox" checked={importOptions.achievements} onChange={(e) => setImportOptions(o => ({ ...o, achievements: e.target.checked }))} className="w-4 h-4 accent-accent" />
-                                                <span className="text-sm font-bold text-white">Generate steam_settings achievements</span>
-                                            </label>
-                                        </div>
-                                    </div>
-                                    <div className="flex gap-3 mt-6">
-                                        <button onClick={() => setSteamDataToImport(null)} className="flex-1 py-3 rounded-xl bg-white/5 hover:bg-white/10 text-white font-bold text-sm transition-colors border border-white/10">Discard</button>
-                                        <button onClick={applySteamData} className="flex-[2] py-3 rounded-xl bg-accent hover:brightness-110 text-white font-black uppercase tracking-widest text-sm shadow-xl shadow-accent/20 transition-transform active:scale-95">Apply Selected</button>
-                                    </div>
-                                </motion.div>
-                            ) : (
-                                <AnimatePresence mode="wait">
-                                    {tab === "general" && (
-                                        <motion.div key="general" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }} className="space-y-5">
-                                            <EditGameGeneralTab
-                                                title={title} setTitle={setTitle}
-                                                exePath={exePath} setExePath={setExePath}
-                                                launchArgs={launchArgs} setLaunchArgs={setLaunchArgs}
-                                                appIdInput={appIdInput} setAppIdInput={setAppIdInput}
-                                                developer={developer} setDeveloper={setDeveloper}
-                                                releaseDate={releaseDate} setReleaseDate={setReleaseDate}
-                                                genre={genre} setGenre={setGenre}
-                                                handlePickExe={handlePickExe}
-                                            />
-                                        </motion.div>
-                                    )}
-
-                                    {tab === "execution" && (
-                                        <motion.div key="execution" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }} className="space-y-6">
-                                            <ExecutionMethodSettings
-                                                executionMethod={executionMethod}
-                                                setExecutionMethod={setExecutionMethod as any}
-                                                launcherPath={launcherPath}
-                                                setLauncherPath={setLauncherPath}
-                                            />
-                                        </motion.div>
-                                    )}
-
-                                    {tab === "media" && (
-                                        <motion.div key="media" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }} className="space-y-6">
-                                            <EditGameMediaTab
-                                                coverPath={coverPath} setCoverPath={setCoverPath}
-                                                backgroundPath={backgroundPath} setBackgroundPath={setBackgroundPath}
-                                                logoPath={logoPath} setLogoPath={setLogoPath}
-                                                focalPoint={focalPoint} setFocalPoint={setFocalPoint}
-                                                customAchSoundPath={customAchSoundPath} setCustomAchSoundPath={setCustomAchSoundPath}
-                                                customBgmPaths={customBgmPaths} setCustomBgmPaths={setCustomBgmPaths}
-                                                handlePickImage={handlePickImage} handlePickAudio={handlePickAudio}
-                                                moveTrack={moveTrack} removeTrack={removeTrack}
-                                                gameId={gameToEdit.id}
-                                            />
-                                        </motion.div>
-                                    )}
-
-                                    {tab === "extra" && (
-                                        <motion.div key="extra" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }} className="space-y-5">
-                                            <EditGameExtraTab
-                                                description={description} setDescription={setDescription}
-                                                notes={notes} setNotes={setNotes}
-                                            />
-                                        </motion.div>
-                                    )}
-
-                                    {tab === "achievements" && (
-                                        <motion.div key="achievements" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }} className="space-y-6">
-                                            <EditGameAchievementsTab
-                                                gameToEdit={gameToEdit}
-                                                appIdInput={appIdInput}
-                                                isGeneratingAch={isGeneratingAch} setIsGeneratingAch={setIsGeneratingAch}
-                                                isSyncingSteam={isSyncingSteam} setIsSyncingSteam={setIsSyncingSteam}
-                                                manualAchPath={manualAchPath} setManualAchPath={setManualAchPath}
-                                                manualSavePath={manualSavePath} setManualSavePath={setManualSavePath}
-                                                handlePickAchMeta={handlePickAchMeta} handlePickAchSave={handlePickAchSave}
-                                            />
-                                        </motion.div>
-                                    )}
-
-                                    {tab === "diagnostics" && (
-                                        <motion.div key="diagnostics" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }} className="space-y-6">
-                                            <EditGameDiagnosticsTab
-                                                diagnostics={diagnostics}
-                                                refreshDiagnostics={refreshDiagnostics}
-                                                isRefreshingDiag={isRefreshingDiag}
-                                            />
-                                        </motion.div>
-                                    )}
-                                </AnimatePresence>
-                            )}
+                        <div className="flex gap-2"><Button variant="secondary" onClick={() => setSteam(null)}>Discard</Button><Button variant="primary" className="flex-1" onClick={() => void applySteam()}>Apply selected</Button></div>
+                    </div>
+                ) : <>
+                    {tab === "general" && <>
+                        <Field label="Title"><TextInput value={f.title} onChange={(e) => up("title", e.target.value)} /></Field>
+                        <PathRow label="Executable" value={f.exePath} onChange={(v) => up("exePath", v)} placeholder="C:\Games\Game\game.exe"
+                            onBrowse={async () => { const r = await pickFile({ multiple: false, filters: [{ name: "Executables", extensions: ["exe"] }] }); if (typeof r === "string") up("exePath", r); }} />
+                        <div className="grid gap-4 sm:grid-cols-2">
+                            <Field label="Steam App ID" hint="Enables artwork, descriptions and achievements."><TextInput mono icon={<Hash size={14} />} value={f.appId} onChange={(e) => up("appId", e.target.value.replace(/\D/g, ""))} /></Field>
+                            <Field label="Launch arguments"><TextInput mono value={f.launchArgs} onChange={(e) => up("launchArgs", e.target.value)} placeholder="-windowed" /></Field>
                         </div>
+                    </>}
 
-                        <div className="px-7 py-5 bg-black/20 border-t border-white/5 flex items-center justify-between shrink-0 gap-3">
-                            <button onClick={close} className="px-5 py-2.5 rounded-xl text-white/40 hover:text-white font-bold text-sm transition-colors hover:bg-white/5">Cancel</button>
-                            <button onClick={handleSave} disabled={isSaving} className="bg-accent hover:brightness-110 disabled:opacity-50 text-white px-7 py-2.5 rounded-xl font-black text-sm tracking-wide transition-all shadow-lg shadow-accent/20 active:scale-95 flex items-center gap-2">
-                                {isSaving ? <><div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" /> Saving…</> : <><Save size={15} /> Save Changes</>}
-                            </button>
+                    {tab === "launch" && <ExecutionMethodSettings executionMethod={f.method} setExecutionMethod={(v) => up("method", v)} launcherPath={f.launcherPath} setLauncherPath={(v) => up("launcherPath", v)} />}
+
+                    {tab === "media" && <>
+                        <ImageField label="Cover (2:3)" aspect="h-28 w-[75px]" value={f.cover} onChange={(v) => up("cover", v)} />
+                        <ImageField label="Background" aspect="h-20 w-36" value={f.background} onChange={(v) => up("background", v)} hint="Wide artwork shown behind the game page.">
+                            <select value={f.focal} onChange={(e) => up("focal", e.target.value)} aria-label="Focal point" className="!h-7 !py-0 !text-xs">{FOCALS.map((x) => <option key={x} value={x}>Focus: {x.replace("-", " ")}</option>)}</select>
+                        </ImageField>
+                        <ImageField label="Logo" aspect="h-16 w-36" value={f.logo} onChange={(v) => up("logo", v)} hint="Transparent PNG shown over the background." />
+                        <div className="space-y-2 border-t border-line pt-5">
+                            <div className="flex items-center justify-between"><span className="text-[13px] font-medium text-fg-soft">Game music</span>
+                                {f.bgm.length > 0 && <Button size="sm" variant="ghost" icon={<Play size={13} fill="currentColor" />} onClick={() => void smartAudio.playGameBGM(game.id, f.bgm)}>Preview</Button>}</div>
+                            <TrackList paths={f.bgm} onChange={(p) => up("bgm", p)} emptyHint="Plays while you view this game"
+                                onAdd={async () => { const r = await pickFile({ multiple: true, filters: AUDIO }); if (r) up("bgm", [...f.bgm, ...(Array.isArray(r) ? r : [r])]); }} />
                         </div>
-                    </motion.div>
-                </motion.div>
-            )}
-        </AnimatePresence>
+                        <div className="space-y-2 border-t border-line pt-5">
+                            <span className="text-[13px] font-medium text-fg-soft">Achievement sound</span>
+                            <div className="flex gap-2">
+                                <TextInput mono value={f.achSound} onChange={(e) => up("achSound", e.target.value)} placeholder="Overrides the default unlock sound" />
+                                {f.achSound && <Button variant="secondary" icon={<Play size={14} fill="currentColor" />} onClick={() => void smartAudio.playAchievement(f.achSound)} aria-label="Preview" />}
+                                <Button variant="secondary" icon={<FolderOpen size={15} />} aria-label="Browse" onClick={async () => { const r = await pickFile({ multiple: false, filters: AUDIO }); if (typeof r === "string") up("achSound", r); }} />
+                                {f.achSound && <Button variant="ghost" icon={<X size={15} />} onClick={() => up("achSound", "")} aria-label="Clear" />}
+                            </div>
+                        </div>
+                    </>}
+
+                    {tab === "details" && <>
+                        <div className="grid gap-4 sm:grid-cols-2">
+                            <Field label="Developer"><TextInput value={f.developer} onChange={(e) => up("developer", e.target.value)} /></Field>
+                            <Field label="Publisher"><TextInput value={f.publisher} onChange={(e) => up("publisher", e.target.value)} /></Field>
+                            <Field label="Release date"><TextInput type="date" value={f.releaseDate} onChange={(e) => up("releaseDate", e.target.value)} /></Field>
+                            <Field label="Genres" hint="Comma separated."><TextInput value={f.genre} onChange={(e) => up("genre", e.target.value)} placeholder="Action, RPG" /></Field>
+                        </div>
+                        <Field label="Description" hint="Basic HTML from Steam is supported."><TextArea rows={9} value={f.description} onChange={(e) => up("description", e.target.value)} /></Field>
+                    </>}
+
+                    {tab === "achievements" && <>
+                        <div className="space-y-3 rounded-xl border border-warn/25 bg-warn/[0.05] p-4">
+                            <div className="flex items-start gap-3"><Trophy size={17} className="mt-0.5 shrink-0 text-warn" /><div className="text-[13px] leading-relaxed text-fg-mute"><span className="font-medium text-warn">Generate achievement data.</span> Fetches the schema from Steam and writes <code className="font-mono text-fg-soft">steam_settings/achievements.json</code> into the game folder. Needs an App ID, an install folder and a Steam API key.</div></div>
+                            <div className="flex flex-wrap gap-2">
+                                <Button variant="secondary" icon={<Trophy size={14} />} loading={achBusy === "gen"} disabled={!f.appId || achBusy !== ""} onClick={async () => {
+                                    const apiKey = useSettingsStore.getState().settings?.steam_api_key;
+                                    if (!apiKey) return toast.warning("Add a Steam API key in Settings first");
+                                    if (!game.install_dir) return toast.error("This game has no install folder");
+                                    setAchBusy("gen");
+                                    try { const r = await call<{ count: number; has_global_pcts: boolean }>("fetch_and_write_achievements", { appId: f.appId, gameDir: game.install_dir, apiKey }); toast.success(`Generated ${r.count} achievements`, { description: r.has_global_pcts ? "Includes global rarity data." : undefined }); }
+                                    catch (e) { toast.error("Generation failed", { description: errMsg(e) }); } finally { setAchBusy(""); }
+                                }}>Generate achievements.json</Button>
+                                <Button variant="secondary" icon={<RefreshCcw size={14} />} loading={achBusy === "sam"} disabled={!f.appId || achBusy !== ""} onClick={async () => {
+                                    if (!game.install_dir) return toast.error("This game has no install folder");
+                                    setAchBusy("sam");
+                                    try { await call("sync_steam_achievements", { id: game.id, steamAppId: f.appId, installDir: game.install_dir }); toast.success("Synced from the Steam client"); }
+                                    catch (e) { toast.error("Sync failed", { description: errMsg(e) }); } finally { setAchBusy(""); }
+                                }}>Sync from Steam client</Button>
+                            </div>
+                        </div>
+                        <p className="text-[13px] text-fg-mute">If auto-detection misses your files, point the launcher at them directly.</p>
+                        <PathRow label="Definitions (achievements.json)" value={f.manualAch} onChange={(v) => up("manualAch", v)} placeholder="C:\Games\…\achievements.json"
+                            onBrowse={async () => { const r = await pickFile({ multiple: false, filters: [{ name: "JSON", extensions: ["json"] }] }); if (typeof r === "string") up("manualAch", r); }} />
+                        <PathRow label="Progress (achievements.ini / .json / .xml)" value={f.manualSave} onChange={(v) => up("manualSave", v)} placeholder="C:\…\achievements.ini"
+                            onBrowse={async () => { const r = await pickFile({ multiple: false, filters: [{ name: "Progress", extensions: ["ini", "json", "xml"] }] }); if (typeof r === "string") up("manualSave", r); }} />
+                        {(f.manualAch || f.manualSave) && <Button size="sm" variant="ghost" icon={<RefreshCcw size={13} />} onClick={() => { up("manualAch", ""); up("manualSave", ""); }}>Reset to auto-detect</Button>}
+                    </>}
+
+                    {tab === "diagnostics" && <>
+                        <div className="flex items-center justify-between"><p className="text-[13px] text-fg-mute">Shows how ChiraLauncher found (or failed to find) this game's achievement files.</p>
+                            <Button variant="secondary" size="sm" icon={<RefreshCcw size={13} className={diagBusy ? "animate-spin" : ""} />} disabled={diagBusy} onClick={async () => {
+                                setDiagBusy(true);
+                                try { setDiag(await call("get_achievement_diagnostics", { gameId: game.id })); } catch (e) { toast.error("Diagnostics failed", { description: errMsg(e) }); } finally { setDiagBusy(false); }
+                            }}>Run diagnostics</Button></div>
+                        {diag && <div className="space-y-4">
+                            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                                {[["Emulator", diag.emulator], ["App ID", diag.app_id ?? "None"], ["Definitions", `${diag.metadata_count} ${diag.metadata_valid ? "(valid)" : "(none)"}`], ["Earned", `${diag.earned_count} ${(diag.earned_state_format ?? "").toUpperCase()}`]].map(([k, v]) => (
+                                    <div key={k as string} className="rounded-xl border border-line bg-black/20 p-3"><div className="text-xs text-fg-mute">{k}</div><div className="mt-1 truncate text-sm font-medium">{String(v)}</div></div>
+                                ))}
+                            </div>
+                            {[["Metadata path", diag.metadata_path], ["Save path", diag.earned_state_path]].map(([k, v]) => (
+                                <div key={k as string}><div className="mb-1 text-xs text-fg-mute">{k}</div><div className="break-all rounded-lg border border-line bg-black/20 px-3 py-2 font-mono text-xs text-fg-soft">{(v as string) || "Not found"}</div></div>
+                            ))}
+                            <div><div className="mb-1 text-xs text-fg-mute">Probe log</div>
+                                <pre className="max-h-48 overflow-auto rounded-lg border border-line bg-black/30 p-3 font-mono text-[11px] leading-relaxed text-fg-soft">{(diag.probe_log as string[]).join("\n") || "No log lines."}</pre></div>
+                        </div>}
+                    </>}
+                </>}
+            </div>
+        </Modal>
     );
 }

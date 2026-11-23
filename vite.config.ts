@@ -28,26 +28,33 @@ export default defineConfig(async () => ({
     },
   },
   build: {
-    sourcemap: false,
-    chunkSizeWarningLimit: 1000, 
+    // Tauri's webviews are modern (WebView2/Chromium on Windows), so ship modern JS: smaller and faster.
+    target: process.env.TAURI_ENV_PLATFORM === "windows" ? "chrome105" : "safari13",
+    sourcemap: !!process.env.TAURI_ENV_DEBUG,
+    chunkSizeWarningLimit: 600,
     rollupOptions: {
       input: {
         main: "index.html",
         overlay: "overlay.html",
       },
       output: {
-        manualChunks: {
-          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
-          'vendor-framer': ['framer-motion'],
-          'vendor-ui': ['lucide-react', 'sonner']
-        }
+        // Function form so every transitive dependency lands in the right vendor chunk
+        // (the object form left react-dom inside an arbitrary app chunk).
+        manualChunks(id: string) {
+          if (!id.includes("node_modules")) return undefined;
+          if (/[\\/]node_modules[\\/](react|react-dom|react-router|react-router-dom|scheduler|@remix-run)[\\/]/.test(id)) return "vendor-react";
+          if (/[\\/]node_modules[\\/](framer-motion|motion-dom|motion-utils)[\\/]/.test(id)) return "vendor-framer";
+          if (id.includes("lucide-react")) return "vendor-icons";
+          if (id.includes("@tauri-apps")) return "vendor-tauri";
+          return undefined;
+        },
       },
-      onwarn(warning: any, warn: any) {
+      onwarn(warning: { code?: string; message: string }, warn: (w: never) => void) {
         if (warning.code === "CIRCULAR_DEPENDENCY") {
-          console.error("⚠️ CIRCULAR_DEPENDENCY:", warning.message);
+          console.error("CIRCULAR_DEPENDENCY:", warning.message);
         }
-        warn(warning);
-      }
+        warn(warning as never);
+      },
     },
   },
 }));

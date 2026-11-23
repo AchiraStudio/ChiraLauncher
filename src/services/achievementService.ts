@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../lib/tauri";
 
 export interface Achievement {
     api_name: string;
@@ -12,14 +12,11 @@ export interface Achievement {
     global_percent: number | null;
 }
 
-
-
 export async function getAchievements(gameId: string): Promise<Achievement[]> {
     try {
-        return await invoke<Achievement[]>("get_achievements", { gameId });
+        return await call<Achievement[]>("get_achievements", { gameId });
     } catch (e) {
         console.error(`Failed to fetch achievements for game ${gameId}:`, e);
         return [];
     }
 }
-

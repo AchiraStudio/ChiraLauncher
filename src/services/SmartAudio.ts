@@ -153,9 +153,17 @@ class SmartAudioEngine {
         }
     }
 
+    // Settings are pushed in by the settings store, so hot paths (every UI click
+    // sound, every BGM change) no longer cost an IPC round-trip + SQLite read.
+    private cachedSettings: Record<string, any> | null = null;
+
+    applySettings(settings: Record<string, any> | null) {
+        this.cachedSettings = settings;
+    }
+
     async getVolumeSettings() {
         try {
-            const settings = await invoke<any>("get_app_settings");
+            const settings = this.cachedSettings ?? await invoke<any>("get_app_settings");
             return {
                 sfx: (settings.volume_sfx ?? 80) / 100,
                 bgm: (settings.volume_bgm ?? 50) / 100,

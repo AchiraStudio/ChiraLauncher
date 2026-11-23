@@ -1,301 +1,164 @@
-import { useState, useEffect } from "react";
-import { useUiStore } from "../../store/uiStore";
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { useEffect, useMemo, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { motion, AnimatePresence } from "framer-motion";
-import { useGameStore } from "../../store/gameStore";
-import type { NewGame } from "../../types/game";
-import { fetchSteamMetadata, parseSteamDate } from "../../services/steamService";
 import { toast } from "sonner";
+import { FolderSearch, FolderOpen, Check, Search } from "lucide-react";
+import { useUiStore } from "../../store/uiStore";
+import { useGameStore } from "../../store/gameStore";
+import { call, errMsg, on } from "../../lib/tauri";
+import { fetchSteamMetadata, steamArtwork, steamToFields } from "../../services/steamService";
+import { dirname } from "../../lib/utils";
+import type { NewGame } from "../../types/game";
+import { Modal } from "../ui/Modal";
+import { Button } from "../ui/Button";
+import { Badge, ProgressBar } from "../ui/controls";
+import { Spinner } from "../ui/Spinner";
+import { cn } from "../../lib/utils";
 
-type ScannerStep = "PICK_DIR" | "SCANNING" | "RESULTS";
+interface ScanProgress { files_scanned: number; candidates_found: number; percentage: number }
+interface Scanned { executable_path: string; guessed_title: string; install_dir: string; crack_type: string; app_id: string }
 
-interface ScanProgress {
-    files_scanned: number;
-    candidates_found: number;
-    percentage: number;
-}
+const IMPORT_CONCURRENCY = 3; // modest: each import hits Steam + downloads 3 images
 
-interface ScannedGame {
-    executable_path: string;
-    guessed_title: string;
-    install_dir: string;
-    crack_type: "codex" | "goldberg" | "anadius" | "voices38" | "unknown";
-    app_id: string;
+async function toNewGame(g: Scanned): Promise<NewGame> {
+    const dir = g.install_dir || dirname(g.executable_path);
+    const base: NewGame = {
+        id: crypto.randomUUID(), title: g.guessed_title, executable_path: g.executable_path, source: "scanner",
+        added_at: new Date().toISOString(), is_favorite: false, run_as_admin: false, install_dir: dir,
+        crack_type: g.crack_type, app_id: g.app_id || null, steam_app_id: g.app_id ? parseInt(g.app_id, 10) || null : null,
+        custom_bgm_paths: [],
+    };
+    if (!g.app_id) return base;
+    try {
+        const data = await fetchSteamMetadata(g.app_id);
+        const f = steamToFields(data), art = steamArtwork(g.app_id, data.header_image);
+        const dl = (url: string, type: string) => call<string>("download_url_to_cache", { url, imageType: type }).catch(() => null);
+        const [cover, bg, logo] = await Promise.all([dl(art.cover, "cover"), dl(art.background, "background"), dl(art.logo, "logo")]);
+        return {
+            ...base, title: f.title || base.title, developer: f.developer || null, publisher: f.publisher || null,
+            description: f.description || null, release_date: f.releaseDate || null, genres: f.genre || null, genre: f.genre ? f.genre.split(",")[0].trim() : null,
+            cover_path: cover, background_path: bg ? `${bg}?pos=center` : null, logo_path: logo,
+        };
+    } catch { return base; } // metadata is a bonus; never block the import on it
 }
 
 export function DirectoryScannerModal() {
-    const isScannerModalOpen = useUiStore((s: any) => s.isScannerModalOpen);
-    const setScannerModalOpen = useUiStore((s: any) => s.setScannerModalOpen);
-    const fetchGames = useGameStore((s: any) => s.fetchGames);
-
-    const [step, setStep] = useState<ScannerStep>("PICK_DIR");
-    const [scanPath, setScanPath] = useState("");
+    const setOpen = useUiStore((s) => s.setScannerOpen);
+    const existing = useGameStore((s) => s.gamesById);
+    const [step, setStep] = useState<"pick" | "scanning" | "results" | "importing">("pick");
+    const [dir, setDir] = useState("");
     const [progress, setProgress] = useState<ScanProgress>({ files_scanned: 0, candidates_found: 0, percentage: 0 });
-    const [results, setResults] = useState<ScannedGame[]>([]);
-    const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
-    const [isImporting, setIsImporting] = useState(false);
-    const [importStatus, setImportStatus] = useState("");
+    const [results, setResults] = useState<Scanned[]>([]);
+    const [selected, setSelected] = useState<Set<string>>(new Set());
+    const [done, setDone] = useState(0);
+    const [filter, setFilter] = useState("");
 
-    useEffect(() => {
-        let unlisten: (() => void) | undefined;
-        if (step === "SCANNING") {
-            listen<ScanProgress>("scan_progress", (event) => {
-                setProgress(event.payload);
-            }).then((f) => {
-                unlisten = f;
-            });
-        }
-        return () => {
-            if (unlisten) unlisten();
-        };
-    }, [step]);
+    useEffect(() => (step === "scanning" ? on<ScanProgress>("scan_progress", setProgress) : undefined), [step]);
 
-    if (!isScannerModalOpen) return null;
+    const known = useMemo(() => new Set(Object.values(existing).map((g) => g.executable_path.toLowerCase())), [existing]);
+    const shown = useMemo(() => results.filter((r) => r.guessed_title.toLowerCase().includes(filter.toLowerCase())), [results, filter]);
+    const close = () => step !== "importing" && setOpen(false);
 
-    const reset = () => {
-        setStep("PICK_DIR");
-        setScanPath("");
-        setProgress({ files_scanned: 0, candidates_found: 0, percentage: 0 });
-        setResults([]);
-        setSelectedPaths(new Set());
-        setImportStatus("");
-        setScannerModalOpen(false);
-    };
-
-    const handlePickDir = async () => {
+    const scan = async () => {
+        const sel = await openDialog({ directory: true, multiple: false }).catch(() => null);
+        if (typeof sel !== "string") return;
+        setDir(sel); setStep("scanning"); setProgress({ files_scanned: 0, candidates_found: 0, percentage: 0 });
         try {
-            const selected = await openDialog({
-                directory: true,
-                multiple: false,
-            });
-            if (selected && typeof selected === "string") {
-                setScanPath(selected);
-                setStep("SCANNING");
-                setProgress({ files_scanned: 0, candidates_found: 0, percentage: 0 });
-
-                const found: ScannedGame[] = await invoke("scan_directory", { path: selected });
-                setResults(found);
-                setSelectedPaths(new Set(found.map((g) => g.executable_path)));
-                setStep("RESULTS");
-            }
-        } catch (e) {
-            console.error(e);
-            reset();
-        }
+            const found = await call<Scanned[]>("scan_directory", { path: sel });
+            setResults(found);
+            // Pre-select everything that isn't already in the library
+            setSelected(new Set(found.filter((g) => !known.has(g.executable_path.toLowerCase())).map((g) => g.executable_path)));
+            setStep("results");
+        } catch (e) { toast.error("Scan failed", { description: errMsg(e) }); setStep("pick"); }
     };
 
-    const toggleSelection = (path: string) => {
-        const next = new Set(selectedPaths);
-        if (next.has(path)) next.delete(path);
-        else next.add(path);
-        setSelectedPaths(next);
-    };
+    const toggle = (p: string) => setSelected((s) => { const n = new Set(s); n.has(p) ? n.delete(p) : n.add(p); return n; });
 
-    const handleImport = async () => {
-        setIsImporting(true);
-        try {
-            const selectedGames = results.filter((g) => selectedPaths.has(g.executable_path));
-
-            let i = 1;
-            for (const g of selectedGames) {
-                setImportStatus(`Fetching metadata for ${g.guessed_title} (${i}/${selectedGames.length})...`);
-                const dir = g.install_dir || g.executable_path.substring(0, g.executable_path.lastIndexOf("\\"));
-
-                let finalTitle = g.guessed_title;
-                let coverPath = null;
-                let bgPath = null;
-                let logoPath = null;
-                let dev = null;
-                let pub = null;
-                let desc = null;
-                let release = null;
-                let genresStr = null;
-
-                if (g.app_id) {
-                    try {
-                        const data = await fetchSteamMetadata(g.app_id);
-                        if (data.name) finalTitle = data.name;
-                        dev = data.developers?.[0] || null;
-                        pub = data.publishers?.[0] || null;
-                        desc = data.detailed_description || data.short_description || null;
-                        release = parseSteamDate(data.release_date?.date) || null;
-                        genresStr = data.genres?.map((g: any) => g.description).join(", ") || null;
-
-                        const bgPref = localStorage.getItem("steam_bg_pref") || "hero";
-                        const rawCover = `https://cdn.cloudflare.steamstatic.com/steam/apps/${g.app_id}/library_600x900.jpg`;
-                        const rawBg = bgPref === "hero" ? `https://cdn.cloudflare.steamstatic.com/steam/apps/${g.app_id}/library_hero.jpg` : data.header_image;
-                        const rawLogo = `https://cdn.cloudflare.steamstatic.com/steam/apps/${g.app_id}/logo_2x.png`;
-
-                        coverPath = await invoke<string>("download_url_to_cache", { url: rawCover, imageType: "cover" }).catch(() => null);
-                        const downloadedBg = await invoke<string>("download_url_to_cache", { url: rawBg, imageType: "background" }).catch(() => null);
-                        bgPath = downloadedBg ? `${downloadedBg}?pos=center` : null;
-                        logoPath = await invoke<string>("download_url_to_cache", { url: rawLogo, imageType: "logo" }).catch(() => null);
-
-                    } catch (e) {
-                        console.error("Failed to fetch metadata for", g.app_id);
-                    }
-                }
-
-                const newGame: NewGame = {
-                    id: crypto.randomUUID(),
-                    title: finalTitle,
-                    executable_path: g.executable_path,
-                    cover_path: coverPath,
-                    background_path: bgPath,
-                    logo_path: logoPath,
-                    description: desc,
-                    developer: dev,
-                    publisher: pub,
-                    release_date: release,
-                    genres: genresStr,
-                    genre: genresStr ? genresStr.split(",")[0] : null,
-                    source: "scanner",
-                    added_at: new Date().toISOString(),
-                    installed_size: null,
-                    install_dir: dir,
-                    crack_type: g.crack_type,
-                    app_id: g.app_id || null,
-                    steam_app_id: g.app_id ? parseInt(g.app_id) : null,
-                    is_favorite: false,
-                    run_as_admin: false,
-                    tags: null,
-                    metacritic_score: null,
-                    platforms: null,
-                    repack_info: null,
-                    manual_achievement_path: null,
-                    detected_metadata_path: null,
-                    detected_earned_state_path: null,
-                    custom_ach_sound_path: null,
-                    custom_bgm_path: null,
-                };
-
-                await invoke("add_game", { game: newGame });
-                i++;
+    const importSelected = async () => {
+        const picks = results.filter((g) => selected.has(g.executable_path));
+        setStep("importing"); setDone(0);
+        let next = 0, added = 0;
+        const failed: string[] = [];
+        await Promise.all(Array.from({ length: Math.min(IMPORT_CONCURRENCY, picks.length) }, async () => {
+            while (next < picks.length) {
+                const g = picks[next++];
+                try { await call("add_game", { game: await toNewGame(g) }); added++; }
+                catch (e) { failed.push(g.guessed_title); console.error("Import failed:", g.guessed_title, e); }
+                setDone((d) => d + 1);
             }
-            await fetchGames();
-            reset();
-            toast.success(`${selectedGames.length} games imported successfully!`);
-        } catch (e) {
-            console.error(e);
-            toast.error("Error during import", { description: String(e) });
-        } finally {
-            setIsImporting(false);
-            setImportStatus("");
-        }
+        }));
+        await new Promise((r) => setTimeout(r, 400)); // let the queued DB writes land
+        await useGameStore.getState().fetchGames();
+        if (added) toast.success(`Imported ${added} game${added > 1 ? "s" : ""}`);
+        if (failed.length) toast.error(`${failed.length} couldn't be imported`, { description: failed.slice(0, 3).join(", ") });
+        setOpen(false);
     };
 
     return (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center pointer-events-auto">
-            <motion.div
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                className="bg-[#232833] w-[700px] min-h-[400px] rounded-xl shadow-2xl border border-white/10 flex flex-col overflow-hidden"
-            >
-                <div className="px-8 py-6 border-b border-white/5 flex items-center justify-between bg-surface-elevated">
-                    <h2 className="text-xl font-bold tracking-wide text-white">Bulk Directory Scanner</h2>
-                    <button onClick={reset} className="text-muted hover:text-white transition-colors">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="w-6 h-6">
-                            <line x1="18" y1="6" x2="6" y2="18" />
-                            <line x1="6" y1="6" x2="18" y2="18" />
-                        </svg>
-                    </button>
+        <Modal
+            open onClose={close} dismissable={step !== "importing" && step !== "scanning"} size="lg" icon={<FolderSearch size={19} />}
+            title="Scan a folder" subtitle={dir || "Find installed games automatically"}
+            footer={step === "results" ? (
+                <>
+                    <span className="text-xs text-fg-mute">{selected.size} of {results.length} selected</span>
+                    <div className="flex gap-2">
+                        <Button variant="secondary" onClick={() => setStep("pick")}>Scan another</Button>
+                        <Button variant="primary" disabled={selected.size === 0} onClick={() => void importSelected()}>Import {selected.size || ""} game{selected.size === 1 ? "" : "s"}</Button>
+                    </div>
+                </>
+            ) : step === "pick" ? <><span /><Button variant="secondary" onClick={close}>Cancel</Button></> : undefined}
+        >
+            {step === "pick" && (
+                <div className="flex flex-col items-center gap-5 py-10 text-center">
+                    <div className="grid h-16 w-16 place-items-center rounded-2xl bg-accent/12 text-accent"><FolderSearch size={28} /></div>
+                    <div className="max-w-sm"><h3 className="text-lg font-semibold">Choose a games folder</h3><p className="mt-1.5 text-sm leading-relaxed text-fg-mute">ChiraLauncher searches inside it for game executables and detects titles, Steam App IDs and emulators.</p></div>
+                    <Button variant="primary" size="lg" icon={<FolderOpen size={17} />} onClick={() => void scan()}>Choose folder</Button>
                 </div>
+            )}
 
-                <div className="p-8 flex-1 flex flex-col">
-                    <AnimatePresence mode="wait">
-                        {step === "PICK_DIR" && (
-                            <motion.div key="step1" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="flex flex-col items-center justify-center flex-1 py-12">
-                                <button onClick={handlePickDir} className="bg-surface hover:bg-surface-elevated border border-white/20 hover:border-accent text-white px-8 py-6 rounded-xl flex flex-col items-center gap-4 transition-all group w-[400px]">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-12 h-12 text-muted group-hover:text-accent transition-colors">
-                                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-                                    </svg>
-                                    <span className="font-bold tracking-widest text-lg text-center">SELECT FOLDER TO SCAN</span>
-                                    <p className="text-muted text-xs font-medium max-w-[300px] text-center">Hybrid Python scanner will search all subdirectories safely avoiding windows and system folders.</p>
-                                </button>
-                            </motion.div>
-                        )}
+            {step === "scanning" && (
+                <div className="space-y-5 py-10">
+                    <div className="flex items-center justify-center gap-3"><Spinner size={22} className="text-accent" /><span className="font-medium">Scanning…</span></div>
+                    <ProgressBar value={progress.percentage} height={8} />
+                    <div className="flex justify-between text-xs tabular-nums text-fg-mute"><span>{progress.files_scanned.toLocaleString()} files checked</span><span>{progress.candidates_found} games found</span></div>
+                </div>
+            )}
 
-                        {step === "SCANNING" && (
-                            <motion.div key="step2" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="flex flex-col flex-1 items-center justify-center py-6">
-                                <h3 className="text-2xl font-bold text-white mb-2">Scanning Directory...</h3>
-                                <p className="text-muted font-mono text-sm max-w-[500px] truncate text-center mb-10">{scanPath}</p>
-
-                                <div className="w-full max-w-[400px] mb-6">
-                                    <div className="flex justify-between text-xs font-bold text-muted tracking-widest mb-2">
-                                        <span>{progress.percentage}%</span>
-                                        <span className="text-accent">{progress.candidates_found} CANDIDATES</span>
-                                    </div>
-                                    <div className="h-3 bg-black/50 rounded-full overflow-hidden border border-white/10 relative">
-                                        <div
-                                            className="absolute top-0 left-0 bottom-0 bg-accent transition-all duration-300"
-                                            style={{ width: `${progress.percentage}%` }}
-                                        />
-                                    </div>
-                                </div>
-
-                                <p className="text-muted font-bold text-sm tracking-widest">{progress.files_scanned.toLocaleString()} FILES PROCESSED</p>
-                            </motion.div>
-                        )}
-
-                        {step === "RESULTS" && (
-                            <motion.div key="step3" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="flex flex-col flex-1 h-[400px]">
-                                <div className="flex justify-between items-end mb-4">
-                                    <label className="text-white font-bold tracking-widest text-lg">SCAN RESULTS</label>
-                                    <span className="text-accent font-bold">{selectedPaths.size} / {results.length} SELECTED</span>
-                                </div>
-
-                                <div className="flex-1 overflow-y-auto pr-2 space-y-2 custom-scrollbar">
-                                    {results.map((res, i) => {
-                                        const isSelected = selectedPaths.has(res.executable_path);
-                                        return (
-                                            <div
-                                                key={i}
-                                                onClick={() => toggleSelection(res.executable_path)}
-                                                className={`flex items-center gap-4 p-4 rounded-lg border-2 cursor-pointer transition-all ${isSelected ? "border-accent bg-accent/10" : "border-transparent bg-black/20 hover:bg-black/40"}`}
-                                            >
-                                                <div className={`w-6 h-6 rounded flex items-center justify-center border-2 ${isSelected ? "bg-accent border-accent text-black" : "border-muted"}`}>
-                                                    {isSelected && (
-                                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4" className="w-4 h-4">
-                                                            <polyline points="20 6 9 17 4 12" />
-                                                        </svg>
-                                                    )}
-                                                </div>
-                                                <div className="flex flex-col">
-                                                    <span className="font-bold text-white text-[15px]">{res.guessed_title}</span>
-                                                    <span className="text-muted text-xs font-mono mt-0.5 truncate max-w-[450px]">{res.executable_path}</span>
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
-                                    {results.length === 0 && (
-                                        <div className="flex flex-col items-center justify-center py-10 text-muted col-span-full">
-                                            No games detected. Try a different folder.
-                                        </div>
-                                    )}
-                                </div>
-
-                                <div className="mt-auto flex justify-between gap-4 pt-6 border-t border-white/5 mt-4">
-                                    <button onClick={() => setStep("PICK_DIR")} className="px-6 py-2.5 rounded text-white font-bold hover:bg-white/5 transition-colors">CANCEL</button>
-                                    <button
-                                        onClick={handleImport}
-                                        disabled={selectedPaths.size === 0 || isImporting}
-                                        className="px-8 py-2.5 bg-green-500 disabled:opacity-50 hover:bg-green-400 rounded text-black font-black tracking-widest shadow-lg flex items-center gap-2 transition-all"
-                                    >
-                                        {isImporting ? (
-                                            <span className="truncate max-w-[200px]">{importStatus}</span>
-                                        ) : (
-                                            `IMPORT ${selectedPaths.size} GAMES`
-                                        )}
+            {step === "results" && (results.length === 0 ? (
+                <div className="py-14 text-center text-sm text-fg-mute">No games were found in this folder.<div className="mt-4"><Button variant="secondary" onClick={() => setStep("pick")}>Try another folder</Button></div></div>
+            ) : (
+                <div className="space-y-3">
+                    <div className="flex items-center gap-2">
+                        <div className="relative flex-1"><Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-fg-mute" />
+                            <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter results" aria-label="Filter results" className="h-8 w-full rounded-ctl border border-line-strong bg-raised pl-8 pr-3 text-[13px] outline-none focus:border-accent/60" /></div>
+                        <Button size="sm" variant="ghost" onClick={() => setSelected(new Set(shown.filter((g) => !known.has(g.executable_path.toLowerCase())).map((g) => g.executable_path)))}>Select new</Button>
+                        <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>None</Button>
+                    </div>
+                    <ul className="max-h-[46vh] space-y-1.5 overflow-y-auto pr-1">
+                        {shown.map((g) => {
+                            const on = selected.has(g.executable_path), have = known.has(g.executable_path.toLowerCase());
+                            return (
+                                <li key={g.executable_path}>
+                                    <button onClick={() => toggle(g.executable_path)} aria-pressed={on} className={cn("flex w-full items-center gap-3 rounded-xl border p-3 text-left transition-colors", on ? "border-accent/40 bg-accent/[0.07]" : "border-line hover:bg-white/[0.04]")}>
+                                        <span className={cn("grid h-5 w-5 shrink-0 place-items-center rounded-md border", on ? "border-accent bg-accent text-accent-fg" : "border-line-strong")}>{on && <Check size={13} strokeWidth={3} />}</span>
+                                        <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{g.guessed_title}</span><span className="block truncate font-mono text-[11px] text-fg-mute">{g.executable_path}</span></span>
+                                        {have && <Badge tone="ok">In library</Badge>}
+                                        {g.app_id && <Badge tone="accent">#{g.app_id}</Badge>}
+                                        {g.crack_type && g.crack_type !== "unknown" && <Badge>{g.crack_type}</Badge>}
                                     </button>
-                                </div>
-                            </motion.div>
-                        )}
-                    </AnimatePresence>
+                                </li>
+                            );
+                        })}
+                    </ul>
                 </div>
-            </motion.div>
-        </div>
+            ))}
+
+            {step === "importing" && (
+                <div className="space-y-5 py-10">
+                    <div className="flex items-center justify-center gap-3"><Spinner size={22} className="text-accent" /><span className="font-medium">Importing and fetching artwork…</span></div>
+                    <ProgressBar value={selected.size ? (done / selected.size) * 100 : 0} height={8} />
+                    <p className="text-center text-xs tabular-nums text-fg-mute">{done} of {selected.size}</p>
+                </div>
+            )}
+        </Modal>
     );
 }

@@ -1,194 +1,158 @@
-import { useRef } from "react";
-import { AnimatePresence, motion, useInView } from "framer-motion";
-import { useProcessStore } from "../../store/processStore";
-import { useGameStore } from "../../store/gameStore";
-import { useUiStore } from "../../store/uiStore";
-import { Flame, CheckCircle, Play, Square, Settings, KeyRound } from "lucide-react";
+import { memo } from "react";
+import { Heart, Play, Square, Trophy } from "lucide-react";
 import type { Game } from "../../types/game";
-import { PlaceholderCover } from "../ui/PlaceholderCover";
-import { cn, formatElapsedSeconds } from "../../lib/utils";
-import { formatPlaytime } from "../../lib/format";
-import { launchGame, forceStopGame } from "../../services/gameService";
-import { useLocalImage } from "../../hooks/useLocalImage";
+import { useProcessStore } from "../../store/processStore";
+import { useElapsed } from "../../hooks/useElapsed";
+import { formatElapsed, formatPlaytime } from "../../lib/format";
+import { cn } from "../../lib/utils";
+import { Cover } from "./Cover";
 
-interface GameCardProps {
+export interface GameItemProps {
     game: Game;
-    index: number;
-    onClick: () => void;
-    onHoverStart?: () => void;
-    onHoverEnd?: () => void;
-    isFocused?: boolean;
-    badge?: "new" | "trending" | "installed";
+    onOpen: (game: Game) => void;
+    onPlay: (game: Game) => void;
+    onContext?: (e: React.MouseEvent, game: Game) => void;
+    draggable?: boolean;
+    onDragStart?: (e: React.DragEvent, game: Game) => void;
+    onDragOver?: (e: React.DragEvent, game: Game) => void;
+    onDrop?: (e: React.DragEvent, game: Game) => void;
+    dragging?: boolean;
 }
 
-export function GameCard({ game, onClick, onHoverStart, onHoverEnd, badge }: GameCardProps) {
-    const runningInfo = useProcessStore((s) => s.running[game.id]);
-    const isRunning = !!runningInfo;
-    const elapsed = useProcessStore((s) => isRunning ? s.elapsedTimeMap[game.id] : undefined);
-    const isRefreshing = useGameStore((s) => s.isRefreshing[game.id] || false);
-    const setEditGameModalOpen = useUiStore((s) => s.setEditGameModalOpen);
+function RunningPill({ startTime }: { startTime: number }) {
+    const elapsed = useElapsed(startTime);
+    return (
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-black/70 px-2 py-1 text-[11px] font-medium text-ok">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-ok" />
+            {formatElapsed(elapsed)}
+        </span>
+    );
+}
 
-    const cardRef = useRef<HTMLDivElement>(null);
-    const isInView = useInView(cardRef, { once: true, margin: "200px" });
-
-    const targetPath = game.cover_image_path || (game as any).cover_path;
-    const { src: coverUrl, error: coverError } = useLocalImage(isInView ? targetPath : null);
-
-    const badgeConfig = {
-        new: { label: "NEW", bg: "bg-green-500/80", text: "text-white", icon: null },
-        trending: { label: "TRENDING", bg: "bg-orange-500/80", text: "text-white", icon: <Flame size={10} /> },
-        installed: { label: "INSTALLED", bg: "bg-accent/80", text: "text-white", icon: <CheckCircle size={10} /> },
-    };
+/** Poster card for grid views. Memoised: only re-renders when its own game (or running state) changes. */
+export const GameCard = memo(function GameCard({
+    game, onOpen, onPlay, onContext, draggable, onDragStart, onDragOver, onDrop, dragging,
+}: GameItemProps) {
+    const running = useProcessStore((s) => s.running[game.id]);
+    const busy = useProcessStore((s) => s.launching[game.id] || s.stopping[game.id]);
+    const pct = game.achievements_total ? Math.round(((game.achievements_unlocked ?? 0) / game.achievements_total) * 100) : null;
 
     return (
-        <motion.div
-            ref={cardRef}
-            layoutId={`card-${game.id}`}
-            whileHover="hover"
-            initial={{ opacity: 0, y: 30, scale: 0.95 }}
-            animate="idle"
-            exit={{ opacity: 0, scale: 0.9 }}
-            onClick={onClick}
-            onHoverStart={onHoverStart}
-            onHoverEnd={onHoverEnd}
-            variants={{
-                idle: { scale: 1, y: 0, zIndex: 0, opacity: 1 },
-                hover: { scale: 1.04, y: -4, zIndex: 10, opacity: 1 }
-            }}
-            transition={{ type: "spring", stiffness: 350, damping: 30, mass: 0.8 }}
-            className={cn(
-                "relative w-full overflow-hidden cursor-pointer group",
-                "aspect-[2/3] tech-card-sm",
-                "shadow-[0_4px_16px_rgba(0,0,0,0.5)] hover:shadow-[0_20px_50px_rgba(0,0,0,0.7),0_0_30px_rgba(var(--color-accent),0.3)]",
-                "transition-shadow duration-300"
-            )}
+        <div
+            className={cn("group select-none transition-opacity", dragging && "opacity-40")}
+            draggable={draggable}
+            onDragStart={onDragStart ? (e) => onDragStart(e, game) : undefined}
+            onDragOver={onDragOver ? (e) => onDragOver(e, game) : undefined}
+            onDrop={onDrop ? (e) => onDrop(e, game) : undefined}
+            onContextMenu={onContext ? (e) => onContext(e, game) : undefined}
         >
-            {coverUrl && !coverError ? (
-                <img
-                    src={coverUrl}
-                    alt={game.title}
-                    loading="lazy"
-                    className={cn(
-                        "w-full h-full object-cover transition-all duration-500 ease-out",
-                        "brightness-[0.80] group-hover:brightness-110 group-hover:scale-105"
+            <div
+                role="button"
+                tabIndex={0}
+                aria-label={`Open ${game.title}`}
+                onClick={() => onOpen(game)}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(game); } }}
+                className={cn(
+                    "relative aspect-[2/3] cursor-pointer overflow-hidden rounded-xl border bg-raised transition-all duration-200",
+                    "group-hover:-translate-y-0.5 group-hover:shadow-[0_14px_30px_-14px_rgb(0_0_0/0.8)]",
+                    running ? "border-ok/50" : "border-line group-hover:border-white/25",
+                )}
+            >
+                <Cover title={game.title} path={game.cover_path} className="transition-transform duration-500 group-hover:scale-[1.04]" />
+                <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
+
+                <div className="absolute left-2 top-2 flex items-center gap-1.5">
+                    {running && <RunningPill startTime={running.startTime} />}
+                    {game.is_favorite && !running && (
+                        <span className="grid h-6 w-6 place-items-center rounded-full bg-black/60 text-rose-400">
+                            <Heart size={12} fill="currentColor" />
+                        </span>
                     )}
-                />
-            ) : (
-                <PlaceholderCover title={game.title} />
-            )}
-
-            <div className={cn(
-                "absolute inset-0 bg-gradient-to-t from-black/90 via-black/10 to-transparent",
-                "transition-opacity duration-300 opacity-60 group-hover:opacity-100"
-            )} />
-
-            {/* Running badge */}
-            {isRunning && elapsed !== undefined && (
-                <div className="absolute top-2 right-2 flex items-center gap-1.5 bg-black/70 backdrop-blur rounded-sm px-2 py-0.5 z-10 pointer-events-none">
-                    <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-                    <span className="text-xs text-green-400 font-bold">{formatElapsedSeconds(elapsed)}</span>
                 </div>
-            )}
 
-            {/* Edit Button overlay on hover (top right) */}
-            {!isRunning && (
-                <div className="absolute top-2 right-2 flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-all duration-300 pointer-events-none z-20 translate-y-[-10px] group-hover:translate-y-0">
-                    <button
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            setEditGameModalOpen(true, game);
-                        }}
-                        className="w-8 h-8 rounded-lg bg-black/60 text-white/50 hover:text-white hover:bg-black flex items-center justify-center pointer-events-auto backdrop-blur-md transition-all shadow-lg border border-white/10 hover:border-white/30 hover:scale-110 active:scale-95"
-                        title="Edit Metadata"
-                    >
-                        <Settings size={15} />
-                    </button>
-                </div>
-            )}
-
-            {/* AutoAttach indicator */}
-            {isRunning && runningInfo.source === "AutoAttach" && (
-                <div className="absolute top-2 left-2 text-[10px] bg-black/70 backdrop-blur rounded-sm px-1.5 py-0.5 text-white/60 font-bold tracking-wide uppercase">
-                    Detected
-                </div>
-            )}
-
-            {/* Custom badge (NEW/TRENDING/etc.) */}
-            {badge && !isRunning && (
-                <div className={cn(
-                    "absolute top-2 left-2 text-[9px] font-black tracking-widest rounded-sm px-2 py-1 flex items-center gap-1",
-                    badgeConfig[badge].bg,
-                    badgeConfig[badge].text
-                )}>
-                    {badgeConfig[badge].icon}
-                    {badgeConfig[badge].label}
-                </div>
-            )}
-
-            {/* Play button overlay on hover */}
-            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-300 pointer-events-none">
                 <button
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        if (isRunning) {
-                            forceStopGame(game.id);
-                        } else {
-                            launchGame(game.id);
-                        }
-                    }}
+                    type="button"
+                    aria-label={running ? `Stop ${game.title}` : `Play ${game.title}`}
+                    data-no-press-sound
+                    disabled={!!busy}
+                    onClick={(e) => { e.stopPropagation(); onPlay(game); }}
                     className={cn(
-                        "w-16 h-16 rounded-full flex items-center justify-center pointer-events-auto transition-all duration-300 scale-75 group-hover:scale-100 shadow-2xl backdrop-blur-md border border-white/20",
-                        isRunning
-                            ? "bg-red-500/90 hover:bg-red-600 hover:scale-110 shadow-[0_0_30px_rgba(239,68,68,0.5)]"
-                            : "bg-accent/90 hover:bg-accent hover:scale-110 shadow-[0_0_30_rgba(var(--color-accent),0.5)]"
+                        "absolute bottom-2.5 right-2.5 grid h-10 w-10 translate-y-1 place-items-center rounded-full opacity-0 shadow-lg transition-all duration-200",
+                        "group-hover:translate-y-0 group-hover:opacity-100 focus-visible:translate-y-0 focus-visible:opacity-100 disabled:opacity-60",
+                        running ? "bg-danger text-white" : "bg-accent text-accent-fg hover:brightness-110",
                     )}
                 >
-                    {isRunning ? (
-                        <Square size={24} fill="currentColor" />
-                    ) : (
-                        <Play size={32} className="translate-x-1" fill="currentColor" />
-                    )}
+                    {running ? <Square size={15} fill="currentColor" /> : <Play size={17} fill="currentColor" className="translate-x-px" />}
                 </button>
             </div>
 
-            {/* Refreshing Overlay */}
-            <AnimatePresence>
-                {isRefreshing && (
-                    <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        className="absolute inset-x-0 bottom-0 top-1/2 bg-gradient-to-t from-black via-black/80 to-transparent flex items-end justify-center pb-8 z-20 pointer-events-none"
-                    >
-                        <div className="flex flex-col items-center gap-2">
-                            <div className="w-5 h-5 border-2 border-accent/20 border-t-accent rounded-full animate-spin" />
-                            <span className="text-white/80 text-[10px] font-bold tracking-wide drop-shadow-md">Refreshing</span>
-                        </div>
-                    </motion.div>
-                )}
-            </AnimatePresence>
-
-            {/* Bottom overlay — title, playtime, and Crack Type on hover */}
-            <div className={cn(
-                "absolute bottom-0 inset-x-0 p-5 flex flex-col gap-1",
-                "transform transition-all duration-300 ease-out",
-                "opacity-0 translate-y-4 group-hover:opacity-100 group-hover:translate-y-0"
-            )}>
-                <div className="text-[14px] font-bold text-white drop-shadow-md leading-tight line-clamp-2">{game.title}</div>
-                <div className="flex items-center justify-between mt-1">
-                    {game.playtime_seconds > 0 ? (
-                        <div className="text-[10px] text-white/50 font-semibold tracking-wide">
-                            {formatPlaytime(game.playtime_seconds)}
-                        </div>
-                    ) : <div />}
-
-                    {game.crack_type && game.crack_type !== "unknown" && (
-                        <div className="flex items-center gap-1 bg-white/10 px-1.5 py-0.5 rounded-sm text-[8px] font-black uppercase tracking-widest text-white/60 border border-white/10">
-                            <KeyRound size={8} /> {game.crack_type}
-                        </div>
+            <div className="mt-2.5 px-0.5">
+                <div className="truncate text-[13.5px] font-medium text-fg" title={game.title}>{game.title}</div>
+                <div className="mt-0.5 flex items-center gap-2 text-xs text-fg-mute">
+                    <span className="truncate">{formatPlaytime(game.playtime_seconds)}</span>
+                    {pct !== null && (
+                        <span className="inline-flex shrink-0 items-center gap-1 text-warn/90">
+                            <Trophy size={11} /> {pct}%
+                        </span>
                     )}
                 </div>
             </div>
-        </motion.div>
+        </div>
     );
-}
+});
+
+/** Dense row for list views. */
+export const GameRow = memo(function GameRow({
+    game, onOpen, onPlay, onContext, draggable, onDragStart, onDragOver, onDrop, dragging,
+}: GameItemProps) {
+    const running = useProcessStore((s) => s.running[game.id]);
+    const busy = useProcessStore((s) => s.launching[game.id] || s.stopping[game.id]);
+    const pct = game.achievements_total ? Math.round(((game.achievements_unlocked ?? 0) / game.achievements_total) * 100) : null;
+
+    return (
+        <div
+            role="button"
+            tabIndex={0}
+            draggable={draggable}
+            onDragStart={onDragStart ? (e) => onDragStart(e, game) : undefined}
+            onDragOver={onDragOver ? (e) => onDragOver(e, game) : undefined}
+            onDrop={onDrop ? (e) => onDrop(e, game) : undefined}
+            onClick={() => onOpen(game)}
+            onKeyDown={(e) => { if (e.key === "Enter") onOpen(game); }}
+            onContextMenu={onContext ? (e) => onContext(e, game) : undefined}
+            className={cn(
+                "group flex cursor-pointer items-center gap-4 rounded-xl border border-transparent px-3 py-2 transition-colors hover:border-line hover:bg-white/[0.04]",
+                dragging && "opacity-40",
+            )}
+        >
+            <div className="h-[60px] w-10 shrink-0 overflow-hidden rounded-md border border-line">
+                <Cover title={game.title} path={game.cover_path} />
+            </div>
+            <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                    <span className="truncate text-sm font-medium text-fg">{game.title}</span>
+                    {game.is_favorite && <Heart size={12} className="shrink-0 text-rose-400" fill="currentColor" />}
+                    {running && <RunningPill startTime={running.startTime} />}
+                </div>
+                <div className="mt-0.5 truncate text-xs text-fg-mute">{game.developer || game.genre || "-"}</div>
+            </div>
+            <div className="hidden w-28 shrink-0 text-right text-xs text-fg-soft sm:block">{formatPlaytime(game.playtime_seconds)}</div>
+            <div className="hidden w-16 shrink-0 text-right text-xs text-warn/90 md:block">
+                {pct !== null ? <span className="inline-flex items-center justify-end gap-1"><Trophy size={11} />{pct}%</span> : ""}
+            </div>
+            <button
+                type="button"
+                data-no-press-sound
+                disabled={!!busy}
+                aria-label={running ? `Stop ${game.title}` : `Play ${game.title}`}
+                onClick={(e) => { e.stopPropagation(); onPlay(game); }}
+                className={cn(
+                    "grid h-8 w-8 shrink-0 place-items-center rounded-full transition-all disabled:opacity-60",
+                    running ? "bg-danger text-white" : "bg-white/[0.07] text-fg-soft group-hover:bg-accent group-hover:text-accent-fg",
+                )}
+            >
+                {running ? <Square size={13} fill="currentColor" /> : <Play size={14} fill="currentColor" className="translate-x-px" />}
+            </button>
+        </div>
+    );
+});

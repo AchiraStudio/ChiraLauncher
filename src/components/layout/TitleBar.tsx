@@ -1,175 +1,65 @@
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Minus, Square, X, Terminal } from "lucide-react";
-import { motion } from "framer-motion";
+import { Minus, Search, Square, X, Copy, Terminal } from "lucide-react";
+import { isTauri } from "../../lib/tauri";
+import { useUiStore } from "../../store/uiStore";
 import { useDevConsoleStore } from "../../store/devConsoleStore";
+import { Kbd } from "../ui/controls";
+import { cn } from "../../lib/utils";
+
+const winBtn = "grid h-full w-11 place-items-center text-fg-mute transition-colors focus-visible:outline-offset-[-2px]";
 
 export function TitleBar() {
-    const [isMaximized, setIsMaximized] = useState(false);
-    const toggleDevConsole = useDevConsoleStore(s => s.toggle);
-    const showDevButtons = useDevConsoleStore(s => s.showDevButtons);
-    const appWindow = getCurrentWindow();
-
-    // Used to detect double-click vs single-click on the drag region
-    const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const DBLCLICK_THRESHOLD = 250; // ms
+    const [maximized, setMaximized] = useState(false);
+    const setPaletteOpen = useUiStore((s) => s.setPaletteOpen);
+    const showDev = useDevConsoleStore((s) => s.showDevButtons);
+    const toggleDev = useDevConsoleStore((s) => s.toggle);
 
     useEffect(() => {
-        // Sync maximized state on mount
-        appWindow.isMaximized().then(setIsMaximized).catch(() => {});
-
-        // Always keep state in sync with OS window events
-        const unlisten = appWindow.onResized(() => {
-            appWindow.isMaximized().then(setIsMaximized).catch(() => {});
-        });
-
-        return () => { unlisten.then(fn => fn()); };
+        if (!isTauri()) return;
+        const w = getCurrentWindow();
+        let t: ReturnType<typeof setTimeout>;
+        const sync = () => w.isMaximized().then(setMaximized).catch(() => { });
+        sync();
+        // onResized fires continuously while dragging an edge: debounce the IPC round-trip
+        const un = w.onResized(() => { clearTimeout(t); t = setTimeout(sync, 120); });
+        return () => { clearTimeout(t); un.then((f) => f()); };
     }, []);
 
-    const handleMinimize = async () => {
-        try { await appWindow.minimize(); } catch (e) { console.error(e); }
-    };
-
-    const handleToggleMaximize = async () => {
-        try {
-            // Always read the real state from the OS before toggling
-            const maximized = await appWindow.isMaximized();
-            if (maximized) {
-                await appWindow.unmaximize();
-                setIsMaximized(false);
-            } else {
-                await appWindow.maximize();
-                setIsMaximized(true);
-            }
-        } catch (e) { console.error(e); }
-    };
-
-    const handleClose = async () => {
-        try { await appWindow.close(); } catch (e) { console.error(e); }
-    };
-
-    // On mousedown: wait DBLCLICK_THRESHOLD ms. If no second click comes,
-    // start dragging. If a second click fires within that window, cancel
-    // dragging and toggle maximize instead.
-    const handleDragRegionMouseDown = (e: React.MouseEvent) => {
-        if (e.button !== 0) return; // left button only
-
-        if (clickTimer.current !== null) {
-            // Second click within threshold → it's a double-click → toggle maximize
-            clearTimeout(clickTimer.current);
-            clickTimer.current = null;
-            handleToggleMaximize();
-        } else {
-            // First click — wait to see if a second comes
-            clickTimer.current = setTimeout(() => {
-                clickTimer.current = null;
-                // No second click came → start dragging
-                appWindow.startDragging().catch(console.error);
-            }, DBLCLICK_THRESHOLD);
-        }
-    };
+    const win = () => (isTauri() ? getCurrentWindow() : null);
 
     return (
-        <div className="flex-shrink-0 w-full h-9 flex items-center relative select-none z-[200] bg-transparent">
-            {/* Drag region — full bar except the control buttons */}
-            <div
-                className="flex-1 h-full flex items-center pl-4 gap-3 overflow-hidden cursor-default"
-                onMouseDown={handleDragRegionMouseDown}
-            >
-                {/* App logo + name */}
-                <div className="flex items-center gap-2.5 pointer-events-none select-none">
-                    <img
-                        src="/cl_logo.png"
-                        alt="Chira"
-                        className="w-4 h-4 object-contain opacity-80"
-                    />
-                    <span className="text-white/40 text-[11px] font-bold tracking-[0.15em] uppercase">
-                        ChiraLauncher
-                    </span>
-                </div>
+        <div className="relative z-[200] flex h-10 shrink-0 select-none items-center border-b border-line bg-bg/90">
+            {/* Native drag region: instant drag + OS-handled double-click maximise */}
+            <div data-tauri-drag-region className="flex h-full min-w-0 flex-1 items-center gap-2.5 pl-4">
+                <img data-tauri-drag-region src="/cl_logo.png" alt="" className="pointer-events-none h-[18px] w-[18px] object-contain" />
+                <span data-tauri-drag-region className="pointer-events-none text-[13px] font-semibold tracking-tight text-fg-soft">ChiraLauncher</span>
             </div>
 
-            {/* Animated accent underline */}
-            <motion.div
-                className="absolute bottom-0 left-0 h-px"
-                style={{
-                    background: "linear-gradient(90deg, transparent 0%, var(--color-accent, #22d3ee) 40%, var(--color-accent, #22d3ee) 60%, transparent 100%)",
-                    opacity: 0.25,
-                    width: "100%"
-                }}
-            />
+            <button
+                onClick={() => setPaletteOpen(true)}
+                className="absolute left-1/2 top-1/2 flex h-7 w-[min(360px,36vw)] -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-lg border border-line bg-white/[0.04] px-3 text-[13px] text-fg-mute transition-colors hover:border-line-strong hover:bg-white/[0.07] hover:text-fg-soft"
+                aria-label="Search games and actions"
+            >
+                <Search size={14} />
+                <span className="flex-1 truncate text-left">Search games & actions</span>
+                <Kbd>Ctrl</Kbd><Kbd>K</Kbd>
+            </button>
 
-            {/* Windows Control Buttons */}
-            <div className="flex items-stretch h-full shrink-0">
-                {/* DevConsole Toggle (Hidden by default until shortcut Alt+Shift+F2 is pressed) */}
-                {showDevButtons && (
-                    <button
-                        onClick={toggleDevConsole}
-                        className="group w-10 h-full flex items-center justify-center text-white/40 hover:text-accent hover:bg-white/[0.07] transition-all duration-150 focus:outline-none"
-                        aria-label="Developer Console"
-                        title="Developer Console (Ctrl+Shift+D or `)"
-                    >
-                        <Terminal
-                            size={13}
-                            strokeWidth={2}
-                            className="group-hover:scale-110 transition-transform"
-                        />
+            <div className="flex h-full items-stretch">
+                {showDev && (
+                    <button onClick={toggleDev} aria-label="Developer console" title="Developer console" className={cn(winBtn, "hover:bg-white/[0.07] hover:text-accent")}>
+                        <Terminal size={14} />
                     </button>
                 )}
-
-                {/* Minimize */}
-                <button
-                    onClick={handleMinimize}
-                    className="group w-11 h-full flex items-center justify-center text-white/30 hover:text-white hover:bg-white/[0.07] transition-all duration-150 focus:outline-none"
-                    aria-label="Minimize"
-                    title="Minimize"
-                >
-                    <Minus
-                        size={11}
-                        strokeWidth={2.5}
-                        className="group-hover:scale-110 transition-transform"
-                    />
+                <button onClick={() => win()?.minimize()} aria-label="Minimize" className={cn(winBtn, "hover:bg-white/[0.07] hover:text-fg")}>
+                    <Minus size={15} />
                 </button>
-
-                {/* Maximize / Restore */}
-                <button
-                    onClick={handleToggleMaximize}
-                    className="group w-11 h-full flex items-center justify-center text-white/30 hover:text-white hover:bg-white/[0.07] transition-all duration-150 focus:outline-none"
-                    aria-label={isMaximized ? "Restore" : "Maximize"}
-                    title={isMaximized ? "Restore" : "Maximize"}
-                >
-                    {isMaximized ? (
-                        /* Restore icon — two overlapping squares */
-                        <svg
-                            width="11" height="11"
-                            viewBox="0 0 10 10"
-                            fill="none"
-                            className="group-hover:scale-110 transition-transform"
-                        >
-                            <rect x="2.5" y="0" width="7.5" height="7.5" rx="0.5" stroke="currentColor" strokeWidth="1.2" fill="none"/>
-                            <rect x="0" y="2.5" width="7.5" height="7.5" rx="0.5" stroke="currentColor" strokeWidth="1.2" fill="none" style={{ background: "var(--bg)" }}/>
-                        </svg>
-                    ) : (
-                        <Square
-                            size={11}
-                            strokeWidth={1.8}
-                            className="group-hover:scale-110 transition-transform"
-                        />
-                    )}
+                <button onClick={() => win()?.toggleMaximize()} aria-label={maximized ? "Restore" : "Maximize"} className={cn(winBtn, "hover:bg-white/[0.07] hover:text-fg")}>
+                    {maximized ? <Copy size={12} className="-scale-x-100" /> : <Square size={12} />}
                 </button>
-
-                {/* Close */}
-                <button
-                    onClick={handleClose}
-                    className="group w-11 h-full flex items-center justify-center text-white/30 hover:text-white hover:bg-red-500 transition-all duration-150 focus:outline-none"
-                    aria-label="Close"
-                    title="Close"
-                >
-                    <X
-                        size={12}
-                        strokeWidth={2.5}
-                        className="group-hover:scale-110 transition-transform"
-                    />
+                <button onClick={() => win()?.close()} aria-label="Close" className={cn(winBtn, "hover:bg-[#e5484d] hover:text-white")}>
+                    <X size={16} />
                 </button>
             </div>
         </div>

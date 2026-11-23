@@ -3,6 +3,13 @@ import { listen } from "@tauri-apps/api/event";
 
 let isInitialized = false;
 
+/** JSON.stringify that can't throw on circular structures (console.error must never crash). */
+function fmt(a: unknown): string {
+    if (typeof a !== "object" || a === null) return String(a);
+    if (a instanceof Error) return a.stack || a.message;
+    try { return JSON.stringify(a); } catch { return String(a); }
+}
+
 export function initDevConsoleInterceptor() {
     if (isInitialized) return;
     isInitialized = true;
@@ -14,19 +21,19 @@ export function initDevConsoleInterceptor() {
 
     console.error = (...args: any[]) => {
         originalConsoleError(...args);
-        const msg = args.map(a => typeof a === "object" ? JSON.stringify(a) : String(a)).join(" ");
+        const msg = args.map(fmt).join(" ");
         useDevConsoleStore.getState().addLog("error", "Frontend", msg);
     };
 
     console.warn = (...args: any[]) => {
         originalConsoleWarn(...args);
-        const msg = args.map(a => typeof a === "object" ? JSON.stringify(a) : String(a)).join(" ");
+        const msg = args.map(fmt).join(" ");
         useDevConsoleStore.getState().addLog("warn", "Frontend", msg);
     };
 
     console.log = (...args: any[]) => {
         originalConsoleLog(...args);
-        const msg = args.map(a => typeof a === "object" ? JSON.stringify(a) : String(a)).join(" ");
+        const msg = args.map(fmt).join(" ");
         useDevConsoleStore.getState().addLog("info", "Frontend", msg);
     };
 

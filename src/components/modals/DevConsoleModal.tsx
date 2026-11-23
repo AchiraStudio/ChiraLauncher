@@ -1,4 +1,3 @@
-import { useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useDevConsoleStore, LogEntry } from "../../store/devConsoleStore";
 import { Terminal, X, Trash2, Copy, Search, ExternalLink, AlertTriangle, AlertCircle, Info, Cpu } from "lucide-react";
@@ -8,17 +7,6 @@ import { cn } from "../../lib/utils";
 
 export function DevConsoleModal() {
     const { logs, isOpen, filter, search, toggle, clearLogs, setFilter, setSearch } = useDevConsoleStore();
-
-    useEffect(() => {
-        const handleKeyDown = (e: KeyboardEvent) => {
-            if ((e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'd') || e.key === '`') {
-                e.preventDefault();
-                toggle();
-            }
-        };
-        window.addEventListener("keydown", handleKeyDown);
-        return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [toggle]);
 
     if (!isOpen) return null;
 
